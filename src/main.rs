@@ -30,9 +30,11 @@ struct Node {
 
 impl Node {
     pub fn new(id: &String, quorum: usize, heartbeat: std::time::Duration, timeout: std::time::Duration) -> Self {
-        
+
+        // Construct mpsc channels for each of our abstract state machines
         let (raft_tx, raft_rx) = mpsc::channel(10);
 
+        // Construct a peer-to-peer network that can connect to peers, and dispatch messages to the correct state machine
         let network = Network::new(id.clone(), Arc::new(raft_tx));
 
         Node {
@@ -44,16 +46,19 @@ impl Node {
     pub async fn start(self, port: u16, peers: Vec<String>) -> Result<Self, JoinError> {
         let mut set = JoinSet::new();
 
+        // Spawn the abstract raft state machine, which internally uses network to maintain a Raft consensus
         let raft = self.raft.clone();
         set.spawn(async move {
             raft.handle_messages().await;
         });
 
+        // Then spawn the peer to peer network, which will maintain a connection to each peer, and dispatch messages to the correct state machine
         let network = self.network.clone();
         set.spawn(async move {
             network.handle_network(port, peers).await.unwrap();
         });
 
+        // Then wait for all of them to complete (they won't)
         while let Some(res) = set.join_next().await {
             if let Err(e) = res {
                 return Err(e);
@@ -71,17 +76,16 @@ async fn main() {
     let debug = false;
 
     let subscriber = FmtSubscriber::builder()
-        // all spans/events with a level higher than TRACE (e.g, debug, info, warn, etc.)
-        // will be written to stdout.
         .with_max_level(if debug { Level::TRACE } else { Level::INFO })
-        // completes the builder.
         .finish();
-    tracing::subscriber::set_global_default(subscriber)
-        .expect("setting default subscriber failed");
+    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
+    // Let us specify an ID on the command line, for easier debugging, otherwise generate a UUID
     let id = args.id.unwrap_or(uuid::Uuid::new_v4().to_string());
+
     info!(me = id, "Node starting...");
 
+    // Construct a new node; quorum is set to a majority of expected nodes (which includes ourself!)
     let num_nodes = args.peers.len() + 1;
     let node = Node::new(
         &id,
@@ -90,6 +94,6 @@ async fn main() {
         std::time::Duration::from_millis((500 * if debug { 10 } else { 1 }) as u64),
     );
 
-    // Set up the peer-to-peer connections
+    // Start the node, which will spawn a bunch of threads and infinite loop
     node.start(args.port, args.peers).await.unwrap();
 }
