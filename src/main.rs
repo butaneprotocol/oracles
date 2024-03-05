@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use clap::Parser;
 use networking::Network;
@@ -6,6 +6,7 @@ use raft::Raft;
 use tokio::{
     sync::mpsc,
     task::{JoinError, JoinSet},
+    time::sleep,
 };
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
@@ -26,7 +27,9 @@ struct Args {
     peers: Vec<String>,
 }
 
+#[derive(Clone)]
 struct Node {
+    id: String,
     network: Network,
     raft: Raft,
 }
@@ -45,6 +48,7 @@ impl Node {
         let network = Network::new(id.to_string(), Arc::new(raft_tx));
 
         Node {
+            id: id.to_string(),
             network: network.clone(),
             raft: Raft::new(id, quorum, heartbeat, timeout, raft_rx, network),
         }
@@ -72,16 +76,46 @@ impl Node {
 
         Ok(self)
     }
+
+    pub async fn start_debug(
+        self,
+        port: u16,
+        peers: Vec<String>,
+        restart_after: Duration,
+    ) -> Result<Self, JoinError> {
+        loop {
+            let mut set = JoinSet::new();
+
+            let me = self.clone();
+            let peers = peers.clone();
+            set.spawn(async move {
+                // runs forever
+                me.start(port, peers).await.unwrap();
+            });
+
+            set.spawn_blocking(|| {
+                // runs until we get input
+                let mut line = String::new();
+                std::io::stdin().read_line(&mut line).unwrap();
+            });
+
+            set.join_next().await.unwrap()?;
+            set.abort_all();
+            info!(me = self.id, "Node shutting down for {:?}", restart_after);
+            sleep(restart_after).await;
+            info!(me = self.id, "Node restarting...");
+        }
+    }
 }
 
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
 
-    let debug = false;
+    let debug = true;
 
     let subscriber = FmtSubscriber::builder()
-        .with_max_level(if debug { Level::TRACE } else { Level::INFO })
+        .with_max_level(if debug { Level::DEBUG } else { Level::INFO })
         .finish();
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
@@ -90,15 +124,24 @@ async fn main() {
 
     info!(me = id, "Node starting...");
 
+    let timeout = std::time::Duration::from_millis(if debug { 5000 } else { 500 });
+
     // Construct a new node; quorum is set to a majority of expected nodes (which includes ourself!)
     let num_nodes = args.peers.len() + 1;
     let node = Node::new(
         &id,
         (num_nodes / 2) + 1,
         std::time::Duration::from_millis(100 * if debug { 10 } else { 1 }),
-        std::time::Duration::from_millis((500 * if debug { 10 } else { 1 }) as u64),
+        timeout,
     );
 
     // Start the node, which will spawn a bunch of threads and infinite loop
-    node.start(args.port, args.peers).await.unwrap();
+    if debug {
+        let restart_after = timeout + Duration::from_secs(1);
+        node.start_debug(args.port, args.peers, restart_after)
+            .await
+            .unwrap();
+    } else {
+        node.start(args.port, args.peers).await.unwrap();
+    }
 }
