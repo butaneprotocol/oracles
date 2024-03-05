@@ -1,5 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
+use apis::binance::query_binance;
 use clap::Parser;
 use networking::Network;
 use raft::Raft;
@@ -11,6 +12,7 @@ use tokio::{
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
 
+pub mod frost;
 pub mod apis;
 pub mod networking;
 pub mod raft;
@@ -70,6 +72,10 @@ impl Node {
             network.handle_network(port, peers).await.unwrap();
         });
 
+        set.spawn(async move {
+            query_binance().await;
+        });
+
         // Then wait for all of them to complete (they won't)
         while let Some(res) = set.join_next().await {
             res?
@@ -119,6 +125,8 @@ async fn main() {
         .with_max_level(if debug { Level::DEBUG } else { Level::INFO })
         .finish();
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+
+    frost::frost_poc().await;
 
     // Let us specify an ID on the command line, for easier debugging, otherwise generate a UUID
     let id = args.id.unwrap_or(uuid::Uuid::new_v4().to_string());
