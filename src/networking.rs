@@ -78,9 +78,7 @@ impl Network {
 
         // Wait for them all to finish (they won't)
         while let Some(res) = set.join_next().await {
-            if let Err(e) = res {
-                return Err(e);
-            }
+            res?
         }
         Ok(self)
     }

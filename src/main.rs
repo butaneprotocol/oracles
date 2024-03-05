@@ -33,7 +33,7 @@ struct Node {
 
 impl Node {
     pub fn new(
-        id: &String,
+        id: &str,
         quorum: usize,
         heartbeat: std::time::Duration,
         timeout: std::time::Duration,
@@ -42,11 +42,11 @@ impl Node {
         let (raft_tx, raft_rx) = mpsc::channel(10);
 
         // Construct a peer-to-peer network that can connect to peers, and dispatch messages to the correct state machine
-        let network = Network::new(id.clone(), Arc::new(raft_tx));
+        let network = Network::new(id.to_string(), Arc::new(raft_tx));
 
         Node {
             network: network.clone(),
-            raft: Raft::new(&id, quorum, heartbeat, timeout, raft_rx, network),
+            raft: Raft::new(id, quorum, heartbeat, timeout, raft_rx, network),
         }
     }
 
@@ -67,9 +67,7 @@ impl Node {
 
         // Then wait for all of them to complete (they won't)
         while let Some(res) = set.join_next().await {
-            if let Err(e) = res {
-                return Err(e);
-            }
+            res?
         }
 
         Ok(self)

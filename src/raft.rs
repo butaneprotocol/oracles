@@ -72,14 +72,14 @@ pub struct Raft {
 
 impl RaftState {
     pub fn new(
-        id: &String,
+        id: &str,
         quorum: usize,
         heartbeat_freq: std::time::Duration,
         timeout_freq: std::time::Duration,
     ) -> Self {
         RaftState {
-            id: id.clone(),
-            quorum: quorum,
+            id: id.to_string(),
+            quorum,
             warned_about_quorum: false,
             peers: HashSet::new(),
             last_heartbeat: std::time::Instant::now(),
@@ -218,7 +218,7 @@ impl RaftState {
                     term: *requested_term,
                     vote,
                 };
-                return vec![(peer, response)];
+                vec![(peer, response)]
             }
             RaftMessage::RequestVoteResponse { term, vote, .. } => {
                 match self.status {
@@ -344,7 +344,7 @@ impl RaftState {
                 })
                 .collect();
         } else if is_leader && heartbeat_timeout {
-            if self.peers.len() > 0 {
+            if !self.peers.is_empty() {
                 trace!(me = self.id, "Sending heartbeats as leader");
                 // Send heartbeats
                 self.last_heartbeat = timestamp;
@@ -372,7 +372,7 @@ impl RaftState {
 
 impl Raft {
     pub fn new(
-        id: &String,
+        id: &str,
         quorum: usize,
         heartbeat_freq: std::time::Duration,
         timeout_freq: std::time::Duration,
@@ -388,11 +388,11 @@ impl Raft {
             "New raft protocol"
         );
         Raft {
-            id: id.clone(),
+            id: id.to_string(),
             incoming_messages: Arc::new(Mutex::new(incoming_messages)),
             network,
             state: Arc::new(Mutex::new(RaftState::new(
-                &id,
+                id,
                 quorum,
                 heartbeat_freq,
                 timeout_freq,
@@ -421,7 +421,12 @@ impl Raft {
 
             // Send out any responses
             for (peer, response) in responses {
-                if let Err(_) = self.network.send(&peer, Message::Raft(response)).await {
+                if self
+                    .network
+                    .send(&peer, Message::Raft(response))
+                    .await
+                    .is_err()
+                {
                     state.receive(
                         timestamp,
                         RaftMessage::Disconnect {
