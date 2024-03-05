@@ -1,9 +1,12 @@
 use std::sync::Arc;
 
+use clap::Parser;
 use networking::Network;
 use raft::Raft;
-use tokio::{sync::mpsc, task::{JoinError, JoinSet}};
-use clap::Parser;
+use tokio::{
+    sync::mpsc,
+    task::{JoinError, JoinSet},
+};
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
 
@@ -20,7 +23,7 @@ struct Args {
     port: u16,
     // A list of peers to connect to
     #[clap(long)]
-    peers: Vec<String>
+    peers: Vec<String>,
 }
 
 struct Node {
@@ -29,8 +32,12 @@ struct Node {
 }
 
 impl Node {
-    pub fn new(id: &String, quorum: usize, heartbeat: std::time::Duration, timeout: std::time::Duration) -> Self {
-
+    pub fn new(
+        id: &String,
+        quorum: usize,
+        heartbeat: std::time::Duration,
+        timeout: std::time::Duration,
+    ) -> Self {
         // Construct mpsc channels for each of our abstract state machines
         let (raft_tx, raft_rx) = mpsc::channel(10);
 
@@ -66,7 +73,7 @@ impl Node {
         }
 
         Ok(self)
-    } 
+    }
 }
 
 #[tokio::main]
