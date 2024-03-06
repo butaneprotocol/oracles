@@ -22,5 +22,7 @@ tracing = "0.1.40"
 tracing-subscriber = "0.3.18"
 dashmap = "5.5.3"
 rand = "0.8.5"
+reqwest = "0.11.24"
+anyhow = "1.0.80"
 tokio-tungstenite = { version = "0.21.0", features = ["native-tls"] }
 frost-ed25519 = { version = "1.0.0", features = ["serde"] }
