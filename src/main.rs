@@ -76,7 +76,7 @@ impl Node {
 
         let aggregator = Aggregator::new();
         set.spawn(async move {
-            aggregator.aggregate().await;
+            aggregator.run().await;
         });
 
         // Then wait for all of them to complete (they won't)

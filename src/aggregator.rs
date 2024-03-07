@@ -1,20 +1,68 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
+use dashmap::DashMap;
 use futures::{channel::mpsc, StreamExt};
 use num_integer::Integer;
 use rust_decimal::Decimal;
-use tokio::task::JoinSet;
+use tokio::{task::JoinSet, time::sleep};
+use tracing::warn;
 
-use crate::{apis, token::Token};
+use crate::{
+    apis::{
+        self,
+        source::{Origin, PriceInfo},
+    },
+    token::Token,
+};
 
-pub struct Aggregator {}
+#[derive(Clone)]
+pub struct Aggregator {
+    prices: Arc<DashMap<(Token, Origin), PriceInfo>>,
+}
 
 impl Aggregator {
     pub fn new() -> Self {
-        Aggregator {}
+        Aggregator {
+            prices: Arc::new(DashMap::new()),
+        }
     }
 
-    pub async fn aggregate(&self) {
+    pub async fn run(&self) {
+        let mut set = JoinSet::new();
+
+        let me = self.clone();
+        set.spawn(async move {
+            me.aggregate().await;
+        });
+
+        let config = vec![SyntheticConfiguration {
+            token: Token::USDT,
+            collateral: vec![
+                Token::LENFI,
+                Token::IUSD,
+                Token::MIN,
+                Token::SNEK,
+                Token::ENCS,
+                Token::DJED,
+            ],
+        }];
+
+        let me = self.clone();
+        set.spawn(async move {
+            loop {
+                me.report(&config);
+                sleep(Duration::from_secs(1)).await;
+            }
+        });
+
+        while let Some(res) = set.join_next().await {
+            if let Err(error) = res {
+                warn!("{:?}", error);
+            }
+        }
+    }
+
+    async fn aggregate(&self) {
         let mut set = JoinSet::new();
         let (tx, mut rx) = mpsc::unbounded();
 
@@ -31,12 +79,52 @@ impl Aggregator {
         });
 
         while let Some(info) = rx.next().await {
-            // TODO: tie it all together
-            println!("{:?}", info);
+            self.prices.insert((info.token, info.origin), info);
+        }
+    }
+
+    fn report(&self, config: &[SyntheticConfiguration]) {
+        // Normalize to USDT for now.
+        // TODO: this logic is almost certainly wrong.
+        let ada_to_usdt = match self.prices.get(&(Token::ADA, Origin::Binance)) {
+            Some(uh) => uh.value,
+            _ => {
+                // If we haven't found this value yet, just don't report anything
+                return;
+            }
+        };
+        let mut aggregated_prices: HashMap<Token, Vec<Decimal>> = HashMap::new();
+        for price_info in self.prices.iter() {
+            let normalized_price = match price_info.relative_to {
+                Token::ADA => price_info.value * ada_to_usdt,
+                Token::USDT => price_info.value,
+                _ => panic!(
+                    "Can't handle converting from {:?} to USDT",
+                    price_info.relative_to
+                ),
+            };
+            aggregated_prices
+                .entry(price_info.token)
+                .and_modify(|e| e.push(normalized_price))
+                .or_insert(vec![normalized_price]);
+        }
+
+        // Now we've collected a bunch of prices, average results across sources
+        let mut average_prices = HashMap::new();
+        for (token, prices) in aggregated_prices {
+            let average_price = prices.iter().fold(Decimal::ZERO, |a, b| a + b)
+                / Decimal::new(prices.len() as i64, 0);
+            average_prices.insert(token, average_price);
+        }
+
+        for synthetic in config {
+            let payload = compute_payload(synthetic, &average_prices);
+            println!("{:?}", payload);
         }
     }
 }
 
+#[derive(Debug)]
 pub struct PriceFeed {
     pub collateral_prices: Vec<u64>,
     pub synthetic: String,
@@ -65,9 +153,9 @@ fn normalize_collateral_prices(prices: &[Decimal]) -> (Vec<u64>, u64) {
     (collateral_prices, (denominator / gcd) as u64)
 }
 
-pub fn compute_payload(
+fn compute_payload(
     config: &SyntheticConfiguration,
-    all_prices: HashMap<Token, Decimal>,
+    all_prices: &HashMap<Token, Decimal>,
 ) -> PriceFeed {
     // TODO: how to handle missing prices?
     let prices: Vec<_> = config
