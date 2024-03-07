@@ -1,6 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
-use apis::{binance::query_binance, maestro::MaestroSource};
+use aggregator::Aggregator;
 use clap::Parser;
 use networking::Network;
 use raft::Raft;
@@ -12,10 +12,12 @@ use tokio::{
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
 
+pub mod aggregator;
 pub mod apis;
 pub mod frost;
 pub mod networking;
 pub mod raft;
+pub mod token;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -72,13 +74,9 @@ impl Node {
             network.handle_network(port, peers).await.unwrap();
         });
 
+        let aggregator = Aggregator::new();
         set.spawn(async move {
-            query_binance().await;
-        });
-
-        let maestro = MaestroSource::new().unwrap();
-        set.spawn(async move {
-            maestro.query().await;
+            aggregator.aggregate().await;
         });
 
         // Then wait for all of them to complete (they won't)

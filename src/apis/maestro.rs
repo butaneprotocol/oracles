@@ -2,11 +2,16 @@ use anyhow::Result;
 use reqwest::Client;
 use serde::Deserialize;
 use std::{env, sync::Arc, time::Duration};
-use tokio::task::JoinSet;
+use tokio::{task::JoinSet, time::sleep};
 use tracing::warn;
 
-const TOKENS: [&str; 2] = ["LENFI", "iUSD"];
-const ADA_MULTIPLIER: f64 = 0.5235;
+use crate::{
+    apis::source::{Origin, PriceInfo, PriceSink},
+    token::Token,
+};
+
+// TODO: currencies shouldn't be hard-coded
+const TOKENS: [&str; 6] = ["LENFI", "iUSD", "MIN", "SNEK", "ENCS", "DJED"];
 
 #[derive(Clone)]
 pub struct MaestroSource {
@@ -28,27 +33,25 @@ impl MaestroSource {
         Ok(Self { api_key, client })
     }
 
-    pub async fn query(&self) {
+    pub async fn query(&self, sink: PriceSink) {
         loop {
             let mut set = JoinSet::new();
             for token in TOKENS {
                 let other = self.clone();
-                set.spawn(async move { other.query_one(token).await });
+                let sink = sink.clone();
+                set.spawn(async move { other.query_one(token, sink).await });
             }
             while let Some(Ok(result)) = set.join_next().await {
-                match result {
-                    Ok((token, price)) => {
-                        println!("{} is at {}", token, price);
-                    }
-                    Err(error) => {
-                        warn!("Error from maestro: {:?}", error);
-                    }
+                if let Err(error) = result {
+                    warn!("Error from maestro: {:?}", error);
                 }
             }
+
+            sleep(Duration::from_secs(3)).await;
         }
     }
 
-    async fn query_one(&self, token: &str) -> Result<(String, f64)> {
+    async fn query_one(&self, token: &str, sink: PriceSink) -> Result<()> {
         let response = self
             .client
             .get(ohlc_url(token))
@@ -59,10 +62,16 @@ impl MaestroSource {
             .send()
             .await?;
         let contents = response.text().await?;
-        println!("{}", contents);
         let messages: [MaestroOHLCMessage; 1] = serde_json::from_str(&contents)?;
-        let res = ADA_MULTIPLIER * (messages[0].coin_a_open + messages[0].coin_a_close) / 2.;
-        Ok((token.to_string(), res))
+        let res = (messages[0].coin_a_open + messages[0].coin_a_close) / 2.;
+
+        sink.unbounded_send(PriceInfo {
+            origin: Origin::Maestro,
+            token: Token::value_of(token).unwrap(),
+            value: res.try_into()?,
+            relative_to: Token::ADA,
+        })?;
+        Ok(())
     }
 }
 
