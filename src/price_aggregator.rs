@@ -16,13 +16,13 @@ use crate::{
 };
 
 #[derive(Clone)]
-pub struct Aggregator {
+pub struct PriceAggregator {
     prices: Arc<DashMap<(Token, Origin), PriceInfo>>,
 }
 
-impl Aggregator {
+impl PriceAggregator {
     pub fn new() -> Self {
-        Aggregator {
+        PriceAggregator {
             prices: Arc::new(DashMap::new()),
         }
     }

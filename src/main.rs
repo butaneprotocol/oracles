@@ -1,8 +1,8 @@
 use std::{sync::Arc, time::Duration};
 
-use aggregator::Aggregator;
 use clap::Parser;
 use networking::Network;
+use price_aggregator::PriceAggregator;
 use raft::Raft;
 use tokio::{
     sync::mpsc,
@@ -12,10 +12,10 @@ use tokio::{
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
 
-pub mod aggregator;
 pub mod apis;
 pub mod frost;
 pub mod networking;
+pub mod price_aggregator;
 pub mod raft;
 pub mod token;
 
@@ -74,7 +74,7 @@ impl Node {
             network.handle_network(port, peers).await.unwrap();
         });
 
-        let aggregator = Aggregator::new();
+        let aggregator = PriceAggregator::new();
         set.spawn(async move {
             aggregator.run().await;
         });
