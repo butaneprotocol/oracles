@@ -2,7 +2,7 @@ use std::{collections::HashSet, ops::Sub, sync::Arc};
 
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, watch::Sender, Mutex};
 use tracing::{info, trace, warn};
 
 use crate::networking::{Message, Network};
@@ -59,6 +59,8 @@ pub struct RaftState {
 
     pub status: RaftStatus,
     pub term: usize,
+
+    pub is_leader: Arc<Sender<bool>>,
 }
 
 #[derive(Clone)]
@@ -76,6 +78,7 @@ impl RaftState {
         quorum: usize,
         heartbeat_freq: std::time::Duration,
         timeout_freq: std::time::Duration,
+        is_leader: Sender<bool>,
     ) -> Self {
         RaftState {
             id: id.to_string(),
@@ -91,6 +94,7 @@ impl RaftState {
                 voted_for: None,
             },
             term: 0,
+            is_leader: Arc::new(is_leader),
         }
     }
 
@@ -255,6 +259,7 @@ impl RaftState {
                                 "Election won"
                             );
                             self.status = RaftStatus::Leader;
+                            self.is_leader.send(true);
                             // Immediately send a heartbeat to make leader election stable
                             return self
                                 .peers
@@ -379,6 +384,7 @@ impl Raft {
 
         incoming_messages: mpsc::Receiver<RaftMessage>,
         network: Network,
+        is_leader: Sender<bool>,
     ) -> Self {
         info!(
             me = id,
@@ -396,6 +402,7 @@ impl Raft {
                 quorum,
                 heartbeat_freq,
                 timeout_freq,
+                is_leader,
             ))),
         }
     }

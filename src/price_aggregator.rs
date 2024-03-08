@@ -4,7 +4,7 @@ use dashmap::DashMap;
 use futures::{channel::mpsc, StreamExt};
 use num_integer::Integer;
 use rust_decimal::Decimal;
-use tokio::{task::JoinSet, time::sleep};
+use tokio::{sync::watch::Sender, task::JoinSet, time::sleep};
 use tracing::warn;
 
 use crate::{
@@ -18,12 +18,14 @@ use crate::{
 #[derive(Clone)]
 pub struct PriceAggregator {
     prices: Arc<DashMap<(Token, Origin), PriceInfo>>,
+    tx: Arc<Sender<Vec<PriceFeed>>>,
 }
 
 impl PriceAggregator {
-    pub fn new() -> Self {
+    pub fn new(tx: Sender<Vec<PriceFeed>>) -> Self {
         PriceAggregator {
             prices: Arc::new(DashMap::new()),
+            tx: Arc::new(tx),
         }
     }
 
@@ -118,18 +120,22 @@ impl PriceAggregator {
         }
         all_prices.insert(Token::USDT, Decimal::new(1, 0));
 
+        let mut payloads = vec![];
         for synthetic in config {
             if let Some(payload) = compute_payload(synthetic, &all_prices) {
-                println!("{:?}", payload);
+                payloads.push(payload);
             }
         }
+        println!("Calculated new value!");
+        self.tx.send_replace(payloads);
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct PriceFeed {
     pub collateral_prices: Vec<u64>,
     pub synthetic: String,
+    pub price: Decimal,
     pub denominator: u64,
     /* TODO: validity */
 }
@@ -169,6 +175,7 @@ fn compute_payload(
     let (collateral_prices, denominator) = normalize_collateral_prices(&prices);
     Some(PriceFeed {
         collateral_prices,
+        price: *synth_price,
         synthetic: config.token.name(),
         denominator,
     })

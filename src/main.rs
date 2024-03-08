@@ -1,11 +1,13 @@
 use std::{sync::Arc, time::Duration};
 
+use anyhow::Result;
 use clap::Parser;
 use networking::Network;
 use price_aggregator::PriceAggregator;
 use raft::Raft;
+use signature_aggregator::SingleSignatureAggregator;
 use tokio::{
-    sync::mpsc,
+    sync::{mpsc, watch},
     task::{JoinError, JoinSet},
     time::sleep,
 };
@@ -18,6 +20,7 @@ pub mod networking;
 pub mod price_aggregator;
 pub mod raft;
 pub mod token;
+mod signature_aggregator;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -37,6 +40,8 @@ struct Node {
     id: String,
     network: Network,
     raft: Raft,
+    price_aggregator: PriceAggregator,
+    signature_aggregator: SingleSignatureAggregator,
 }
 
 impl Node {
@@ -45,18 +50,30 @@ impl Node {
         quorum: usize,
         heartbeat: std::time::Duration,
         timeout: std::time::Duration,
-    ) -> Self {
+    ) -> Result<Self> {
         // Construct mpsc channels for each of our abstract state machines
         let (raft_tx, raft_rx) = mpsc::channel(10);
 
         // Construct a peer-to-peer network that can connect to peers, and dispatch messages to the correct state machine
         let network = Network::new(id.to_string(), Arc::new(raft_tx));
 
-        Node {
+        let (pa_tx, pa_rx) = watch::channel(vec![]);
+
+        let price_aggregator = PriceAggregator::new(pa_tx);
+
+        let (leader_tx, leader_rx) = watch::channel(false);
+
+        let (result_tx, result_rx) = mpsc::channel(10);
+
+        let signature_aggregator = SingleSignatureAggregator::new(pa_rx, result_tx)?;
+
+        Ok(Node {
             id: id.to_string(),
             network: network.clone(),
-            raft: Raft::new(id, quorum, heartbeat, timeout, raft_rx, network),
-        }
+            raft: Raft::new(id, quorum, heartbeat, timeout, raft_rx, network, leader_tx),
+            price_aggregator,
+            signature_aggregator,
+        })
     }
 
     pub async fn start(self, port: u16, peers: Vec<String>) -> Result<Self, JoinError> {
@@ -74,9 +91,14 @@ impl Node {
             network.handle_network(port, peers).await.unwrap();
         });
 
-        let aggregator = PriceAggregator::new();
+        let aggregator = self.price_aggregator.clone();
         set.spawn(async move {
             aggregator.run().await;
+        });
+
+        let mut signature_aggregator = self.signature_aggregator.clone();
+        set.spawn(async move {
+            signature_aggregator.run().await;
         });
 
         // Then wait for all of them to complete (they won't)
@@ -119,7 +141,7 @@ impl Node {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<()> {
     let args = Args::parse();
 
     let debug = false;
@@ -145,7 +167,7 @@ async fn main() {
         (num_nodes / 2) + 1,
         std::time::Duration::from_millis(100 * if debug { 10 } else { 1 }),
         timeout,
-    );
+    )?;
 
     // Start the node, which will spawn a bunch of threads and infinite loop
     if debug {
@@ -156,4 +178,5 @@ async fn main() {
     } else {
         node.start(args.port, args.peers).await.unwrap();
     }
+    Ok(())
 }
