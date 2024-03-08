@@ -102,7 +102,7 @@ impl Aggregator {
                     "Can't handle converting from {:?} to USDT",
                     price_info.relative_to
                 ),
-            };
+            }.round_dp(price_info.token.digits());
             aggregated_prices
                 .entry(price_info.token)
                 .and_modify(|e| e.push(normalized_price))

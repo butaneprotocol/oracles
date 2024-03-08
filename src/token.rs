@@ -15,6 +15,14 @@ impl Token {
         format!("{:?}", self)
     }
 
+    pub fn digits(&self) -> u32 {
+        match self {
+            Token::BTC => 8,
+            Token::SNEK => 0,
+            _ => 6
+        }
+    }
+
     pub fn value_of(name: &str) -> Option<Token> {
         match name.to_uppercase().as_str() {
             "ADA" => Some(Token::ADA),
