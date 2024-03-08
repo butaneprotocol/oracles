@@ -84,9 +84,9 @@ impl Aggregator {
     }
 
     fn report(&self, config: &[SyntheticConfiguration]) {
-        // Normalize to USDT for now.
+        // Normalize to ADA for now.
         // TODO: this logic is almost certainly wrong.
-        let ada_to_usdt = match self.prices.get(&(Token::ADA, Origin::Binance)) {
+        let ada_in_usdt = match self.prices.get(&(Token::ADA, Origin::Binance)) {
             Some(uh) => uh.value,
             _ => {
                 // If we haven't found this value yet, just don't report anything
@@ -96,13 +96,13 @@ impl Aggregator {
         let mut aggregated_prices: HashMap<Token, Vec<Decimal>> = HashMap::new();
         for price_info in self.prices.iter() {
             let normalized_price = match price_info.relative_to {
-                Token::ADA => price_info.value * ada_to_usdt,
-                Token::USDT => price_info.value,
+                Token::ADA => price_info.value,
+                Token::USDT => price_info.value * ada_in_usdt,
                 _ => panic!(
-                    "Can't handle converting from {:?} to USDT",
+                    "Can't handle converting from {:?} to ADA",
                     price_info.relative_to
                 ),
-            }.round_dp(price_info.token.digits());
+            };
             aggregated_prices
                 .entry(price_info.token)
                 .and_modify(|e| e.push(normalized_price))
@@ -110,16 +110,18 @@ impl Aggregator {
         }
 
         // Now we've collected a bunch of prices, average results across sources
-        let mut average_prices = HashMap::new();
+        let mut all_prices = HashMap::new();
         for (token, prices) in aggregated_prices {
             let average_price = prices.iter().fold(Decimal::ZERO, |a, b| a + b)
                 / Decimal::new(prices.len() as i64, 0);
-            average_prices.insert(token, average_price);
+            all_prices.insert(token, average_price);
         }
+        all_prices.insert(Token::USDT, Decimal::new(1, 0));
 
         for synthetic in config {
-            let payload = compute_payload(synthetic, &average_prices);
-            println!("{:?}", payload);
+            if let Some(payload) = compute_payload(synthetic, &all_prices) {
+                println!("{:?}", payload);
+            }
         }
     }
 }
@@ -156,19 +158,20 @@ fn normalize_collateral_prices(prices: &[Decimal]) -> (Vec<u64>, u64) {
 fn compute_payload(
     config: &SyntheticConfiguration,
     all_prices: &HashMap<Token, Decimal>,
-) -> PriceFeed {
+) -> Option<PriceFeed> {
+    let synth_price = all_prices.get(&config.token)?;
     // TODO: how to handle missing prices?
     let prices: Vec<_> = config
         .collateral
         .iter()
-        .map(|token| all_prices[token])
+        .map(|token| all_prices[token] / synth_price)
         .collect();
     let (collateral_prices, denominator) = normalize_collateral_prices(&prices);
-    PriceFeed {
+    Some(PriceFeed {
         collateral_prices,
         synthetic: config.token.name(),
         denominator,
-    }
+    })
 }
 
 #[cfg(test)]
@@ -180,6 +183,13 @@ mod tests {
     #[test]
     fn should_not_panic_on_empty_input() {
         assert_eq!((vec![], 1), normalize_collateral_prices(&[]));
+    }
+
+    #[test]
+    fn should_compute_gcd() {
+        let prices = [Decimal::new(5526312, 7), Decimal::new(1325517, 6)];
+        let (collateral_prices, denominator) = normalize_collateral_prices(&prices);
+        assert_eq!((vec![2763156, 6627585], 5000000), (collateral_prices, denominator));
     }
 
     #[test]
