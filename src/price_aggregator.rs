@@ -137,7 +137,6 @@ pub struct PriceFeed {
     pub synthetic: String,
     pub price: Decimal,
     pub denominator: u64,
-    /* TODO: validity */
 }
 
 pub struct SyntheticConfiguration {
@@ -170,7 +169,8 @@ fn compute_payload(
     let prices: Vec<_> = config
         .collateral
         .iter()
-        .map(|token| all_prices[token] / synth_price)
+        .map(|token| all_prices.get(token).unwrap_or(&Decimal::ZERO) / synth_price)
+        .filter(|x| !x.is_zero())
         .collect();
     let (collateral_prices, denominator) = normalize_collateral_prices(&prices);
     Some(PriceFeed {

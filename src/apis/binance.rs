@@ -24,7 +24,10 @@ impl BinanceSource {
 
     pub async fn query(self, sink: PriceSink) {
         loop {
-            let (mut stream, _) = connect_async(URL).await.unwrap();
+            let Ok((mut stream, _)) = connect_async(URL).await else {
+                warn!("Could not connect to binance, retrying...");
+                continue;
+            };
             trace!("Connected to binance!");
             while let Some(res) = stream.next().await {
                 match res {
