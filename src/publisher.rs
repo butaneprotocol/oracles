@@ -22,7 +22,7 @@ impl Publisher {
     }
 
     pub async fn run(&mut self) {
-        const DEBUG: bool = true;
+        const DEBUG: bool = false;
 
         let mut source = self.source.lock().await;
         while let Some(payload) = source.recv().await {

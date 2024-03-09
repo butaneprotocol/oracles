@@ -127,15 +127,15 @@ impl PriceAggregator {
             .iter()
             .map(|c| {
                 let collateral = self.get_collateral(c.as_str());
-                let multiplier = Decimal::new(10i64.pow(collateral.digits), 0) / Decimal::new(10i64.pow(synth.digits), 0);
+                let multiplier = Decimal::new(10i64.pow(synth.digits), 0) / Decimal::new(10i64.pow(collateral.digits), 0);
                 let p = all_prices
                     .get(c.as_str())
                     .cloned()
                     .unwrap_or_else(|| collateral.price);
-                p * multiplier / price
+                p * multiplier
             })
             .collect();
-        let (collateral_prices, denominator) = normalize_collateral_prices(&prices);
+        let (collateral_prices, denominator) = normalize(&prices, price);
         Some(PriceFeed {
             collateral_prices,
             price,
@@ -160,37 +160,44 @@ pub struct PriceFeed {
     pub denominator: BigUint,
 }
 
-fn normalize_collateral_prices(prices: &[Decimal]) -> (Vec<BigUint>, BigUint) {
-    let scale = prices.iter().map(|p| p.scale()).max().unwrap_or(0);
-    let normalized_values: Vec<_> = prices
+fn normalize(prices: &[Decimal], denominator: Decimal) -> (Vec<BigUint>, BigUint) {
+    let scale = prices.iter().fold(denominator.scale(), |acc, p| acc.max(p.scale()));
+    let normalized_prices: Vec<BigUint> = prices
         .iter()
-        .map(|p| (p.mantissa() as u128) * 10u128.pow(scale - p.scale()))
+        .map(|p| {
+            let res = BigUint::from(p.mantissa() as u128);
+            res * BigUint::from(10u128.pow(scale - p.scale()))
+        })
         .collect();
+    let normalized_denominator = {
+        let res = BigUint::from(denominator.mantissa() as u128);
+        res * BigUint::from(10u128.pow(scale - denominator.scale()))
+    };
 
-    let denominator = 10u128.pow(scale);
-    let gcd = normalized_values
+    let gcd = normalized_prices
         .iter()
-        .fold(denominator, |acc, &el| acc.gcd(&el));
+        .fold(normalized_denominator.clone(), |acc, el| acc.gcd(&el));
 
-    let collateral_prices = normalized_values.iter().map(|p| (p / gcd).into()).collect();
-    (collateral_prices, (denominator / gcd).into())
+    let collateral_prices = normalized_prices.iter().map(|p| p / gcd.clone()).collect();
+    let denominator = normalized_denominator / gcd;
+    (collateral_prices, denominator)
 }
 
 #[cfg(test)]
 mod tests {
     use rust_decimal::Decimal;
 
-    use super::normalize_collateral_prices;
+    use super::normalize;
 
     #[test]
     fn should_not_panic_on_empty_input() {
-        assert_eq!((vec![], 1u128.into()), normalize_collateral_prices(&[]));
+        assert_eq!((vec![], 1u128.into()), normalize(&[], Decimal::ONE));
     }
 
     #[test]
     fn should_compute_gcd() {
         let prices = [Decimal::new(5526312, 7), Decimal::new(1325517, 6)];
-        let (collateral_prices, denominator) = normalize_collateral_prices(&prices);
+        let (collateral_prices, denominator) = normalize(&prices, Decimal::ONE);
         assert_eq!(
             (
                 vec![2763156u128.into(), 6627585u128.into()],
@@ -201,9 +208,26 @@ mod tests {
     }
 
     #[test]
+    fn should_include_denominator_in_gcd() {
+        let prices = [
+            Decimal::new(2, 1),
+            Decimal::new(4, 1),
+            Decimal::new(6, 1),
+        ];
+        let (collateral_prices, denominator) = normalize(&prices, Decimal::new(7, 0));
+        assert_eq!(
+            (
+                vec![1u128.into(), 2u128.into(), 3u128.into()],
+                35u128.into(),
+            ),
+            (collateral_prices, denominator)
+        );
+    }
+
+    #[test]
     fn should_normalize_numbers_with_same_decimal_count() {
         let prices = [Decimal::new(1337, 3), Decimal::new(9001, 3)];
-        let (collateral_prices, denominator) = normalize_collateral_prices(&prices);
+        let (collateral_prices, denominator) = normalize(&prices, Decimal::ONE);
         assert_eq!(
             (vec![1337u128.into(), 9001u128.into()], 1000u128.into()),
             (collateral_prices, denominator)
@@ -217,7 +241,7 @@ mod tests {
             Decimal::new(4_000_000, 6),
             Decimal::new(6_000_000_000, 9),
         ];
-        let (collateral_prices, denominator) = normalize_collateral_prices(&prices);
+        let (collateral_prices, denominator) = normalize(&prices, Decimal::ONE);
         assert_eq!(
             (vec![2u128.into(), 4u128.into(), 6u128.into()], 1u128.into()),
             (collateral_prices, denominator)
