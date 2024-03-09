@@ -259,7 +259,8 @@ impl RaftState {
                                 "Election won"
                             );
                             self.status = RaftStatus::Leader;
-                            self.is_leader.send(true);
+                            // sending this update is fire and forget
+                            let _ = self.is_leader.send(true);
                             // Immediately send a heartbeat to make leader election stable
                             return self
                                 .peers

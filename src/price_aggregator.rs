@@ -126,7 +126,6 @@ impl PriceAggregator {
                 payloads.push(payload);
             }
         }
-        println!("Calculated new value!");
         self.tx.send_replace(payloads);
     }
 }

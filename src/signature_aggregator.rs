@@ -12,6 +12,7 @@ use tokio::{
     sync::{mpsc::Sender, watch::Receiver},
     time::sleep,
 };
+use tracing::warn;
 
 use crate::price_aggregator::PriceFeed;
 
@@ -34,7 +35,6 @@ impl SingleSignatureAggregator {
     }
 
     pub async fn run(&mut self) {
-        println!("{:x?}", self.key.public_key());
         loop {
             sleep(Duration::from_secs(5)).await;
             let price_feed: Vec<PriceFeed> = {
@@ -42,9 +42,16 @@ impl SingleSignatureAggregator {
                 price_feed_ref.iter().cloned().collect::<Vec<PriceFeed>>()
             };
 
-            let payload = self.serialize_payload(price_feed).expect("should work");
-
-            println!("{}", payload)
+            let payload = match self.serialize_payload(price_feed) {
+                Ok(str) => str,
+                Err(error) => {
+                    warn!("Could not serialize payload: {}", error);
+                    continue;
+                }
+            };
+            if let Err(error) = self.payload_sink.send(payload).await {
+                warn!("Could not send payload: {}", error);
+            }
         }
     }
 

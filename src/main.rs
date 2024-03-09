@@ -4,6 +4,7 @@ use anyhow::Result;
 use clap::Parser;
 use networking::Network;
 use price_aggregator::PriceAggregator;
+use publisher::Publisher;
 use raft::Raft;
 use signature_aggregator::SingleSignatureAggregator;
 use tokio::{
@@ -18,8 +19,9 @@ pub mod apis;
 pub mod frost;
 pub mod networking;
 pub mod price_aggregator;
+pub mod publisher;
 pub mod raft;
-mod signature_aggregator;
+pub mod signature_aggregator;
 pub mod token;
 
 #[derive(Parser, Debug)]
@@ -42,6 +44,7 @@ struct Node {
     raft: Raft,
     price_aggregator: PriceAggregator,
     signature_aggregator: SingleSignatureAggregator,
+    publisher: Publisher,
 }
 
 impl Node {
@@ -67,12 +70,15 @@ impl Node {
 
         let signature_aggregator = SingleSignatureAggregator::new(pa_rx, result_tx)?;
 
+        let publisher = Publisher::new(result_rx);
+
         Ok(Node {
             id: id.to_string(),
             network: network.clone(),
             raft: Raft::new(id, quorum, heartbeat, timeout, raft_rx, network, leader_tx),
             price_aggregator,
             signature_aggregator,
+            publisher,
         })
     }
 
@@ -99,6 +105,11 @@ impl Node {
         let mut signature_aggregator = self.signature_aggregator.clone();
         set.spawn(async move {
             signature_aggregator.run().await;
+        });
+
+        let mut publisher = self.publisher.clone();
+        set.spawn(async move {
+            publisher.run().await;
         });
 
         // Then wait for all of them to complete (they won't)
