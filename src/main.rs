@@ -19,8 +19,8 @@ pub mod frost;
 pub mod networking;
 pub mod price_aggregator;
 pub mod raft;
-pub mod token;
 mod signature_aggregator;
+pub mod token;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]

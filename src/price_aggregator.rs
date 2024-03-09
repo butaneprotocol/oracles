@@ -169,8 +169,7 @@ fn compute_payload(
     let prices: Vec<_> = config
         .collateral
         .iter()
-        .map(|token| all_prices.get(token).unwrap_or(&Decimal::ZERO) / synth_price)
-        .filter(|x| !x.is_zero())
+        .filter_map(|token| all_prices.get(token).map(|p| p / synth_price))
         .collect();
     let (collateral_prices, denominator) = normalize_collateral_prices(&prices);
     Some(PriceFeed {
@@ -196,7 +195,10 @@ mod tests {
     fn should_compute_gcd() {
         let prices = [Decimal::new(5526312, 7), Decimal::new(1325517, 6)];
         let (collateral_prices, denominator) = normalize_collateral_prices(&prices);
-        assert_eq!((vec![2763156, 6627585], 5000000), (collateral_prices, denominator));
+        assert_eq!(
+            (vec![2763156, 6627585], 5000000),
+            (collateral_prices, denominator)
+        );
     }
 
     #[test]

@@ -1044,6 +1044,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "minicbor"
+version = "0.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a3d732cecc693ad7c5ea353198182ff4d9bf92428af793c411102b175855ab04"
+dependencies = [
+ "minicbor-derive",
+]
+
+[[package]]
 name = "minicbor-derive"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1202,6 +1211,7 @@ dependencies = [
  "frost-ed25519",
  "futures",
  "hex",
+ "minicbor 0.21.0",
  "num-integer",
  "pallas-crypto",
  "rand",
@@ -1232,7 +1242,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9f8d41f17000f9a6bab7c26c99b19038a12de5cf004e901e1d0f5fa993e3d7d"
 dependencies = [
  "hex",
- "minicbor",
+ "minicbor 0.20.0",
  "serde",
  "thiserror",
 ]

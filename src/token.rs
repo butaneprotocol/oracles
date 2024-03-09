@@ -19,7 +19,7 @@ impl Token {
         match self {
             Token::BTC => 8,
             Token::SNEK => 0,
-            _ => 6
+            _ => 6,
         }
     }
 
