@@ -108,8 +108,8 @@ impl PriceAggregator {
         for synthetic in &self.config.synthetics {
             let price = all_prices
                 .get(synthetic.name.as_str())
-                .unwrap_or_else(|| &synthetic.price);
-            if let Some(payload) = self.compute_payload(&synthetic, *price, &all_prices) {
+                .unwrap_or(&synthetic.price);
+            if let Some(payload) = self.compute_payload(synthetic, *price, &all_prices) {
                 payloads.push(payload);
             }
         }
@@ -127,11 +127,12 @@ impl PriceAggregator {
             .iter()
             .map(|c| {
                 let collateral = self.get_collateral(c.as_str());
-                let multiplier = Decimal::new(10i64.pow(synth.digits), 0) / Decimal::new(10i64.pow(collateral.digits), 0);
+                let multiplier = Decimal::new(10i64.pow(synth.digits), 0)
+                    / Decimal::new(10i64.pow(collateral.digits), 0);
                 let p = all_prices
                     .get(c.as_str())
                     .cloned()
-                    .unwrap_or_else(|| collateral.price);
+                    .unwrap_or(collateral.price);
                 p * multiplier
             })
             .collect();
@@ -161,7 +162,9 @@ pub struct PriceFeed {
 }
 
 fn normalize(prices: &[Decimal], denominator: Decimal) -> (Vec<BigUint>, BigUint) {
-    let scale = prices.iter().fold(denominator.scale(), |acc, p| acc.max(p.scale()));
+    let scale = prices
+        .iter()
+        .fold(denominator.scale(), |acc, p| acc.max(p.scale()));
     let normalized_prices: Vec<BigUint> = prices
         .iter()
         .map(|p| {
@@ -176,7 +179,7 @@ fn normalize(prices: &[Decimal], denominator: Decimal) -> (Vec<BigUint>, BigUint
 
     let gcd = normalized_prices
         .iter()
-        .fold(normalized_denominator.clone(), |acc, el| acc.gcd(&el));
+        .fold(normalized_denominator.clone(), |acc, el| acc.gcd(el));
 
     let collateral_prices = normalized_prices.iter().map(|p| p / gcd.clone()).collect();
     let denominator = normalized_denominator / gcd;
@@ -209,11 +212,7 @@ mod tests {
 
     #[test]
     fn should_include_denominator_in_gcd() {
-        let prices = [
-            Decimal::new(2, 1),
-            Decimal::new(4, 1),
-            Decimal::new(6, 1),
-        ];
+        let prices = [Decimal::new(2, 1), Decimal::new(4, 1), Decimal::new(6, 1)];
         let (collateral_prices, denominator) = normalize(&prices, Decimal::new(7, 0));
         assert_eq!(
             (

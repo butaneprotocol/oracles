@@ -26,5 +26,5 @@ pub struct CollateralConfig {
 
 pub async fn load_config() -> Result<Config> {
     let raw_config = fs::read("config.yaml").await?;
-    return Ok(serde_yaml::from_slice(&raw_config)?);
+    Ok(serde_yaml::from_slice(&raw_config)?)
 }
