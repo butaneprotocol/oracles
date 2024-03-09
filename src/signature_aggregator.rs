@@ -83,7 +83,7 @@ impl SingleSignatureAggregator {
                     },
                     upper_bound: IntervalBound {
                         bound_type: IntervalBoundType::PositiveInfinity,
-                        is_inclusive: true,
+                        is_inclusive: false,
                     },
                 })?;
 
