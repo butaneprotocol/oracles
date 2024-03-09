@@ -3,7 +3,7 @@ use std::{sync::Arc, time::Duration};
 use anyhow::Result;
 use reqwest::Client;
 use tokio::sync::{mpsc::Receiver, Mutex};
-use tracing::{info, warn};
+use tracing::{trace, warn};
 
 const URL: &str = "https://infra-integration.silver-train-1la.pages.dev/api/updatePrices";
 
@@ -22,14 +22,17 @@ impl Publisher {
     }
 
     pub async fn run(&mut self) {
+        const DEBUG: bool = true;
+
         let mut source = self.source.lock().await;
         while let Some(payload) = source.recv().await {
             println!("{}", payload);
 
-            // TODO: actually publish this to an endpoint
-            match self.make_request(payload).await {
-                Ok(res) => info!("Payload published! {}", res),
-                Err(err) => warn!("Could not publish payload: {}", err),
+            if !DEBUG {
+                match self.make_request(payload).await {
+                    Ok(res) => trace!("Payload published! {}", res),
+                    Err(err) => warn!("Could not publish payload: {}", err),
+                }
             }
         }
     }
