@@ -12,20 +12,22 @@ use crate::{
         self,
         source::{Origin, PriceInfo},
     },
-    token::Token,
+    config::{Config, SyntheticConfig},
 };
 
 #[derive(Clone)]
 pub struct PriceAggregator {
-    prices: Arc<DashMap<(Token, Origin), PriceInfo>>,
+    prices: Arc<DashMap<(String, Origin), PriceInfo>>,
     tx: Arc<Sender<Vec<PriceFeed>>>,
+    config: Arc<Config>,
 }
 
 impl PriceAggregator {
-    pub fn new(tx: Sender<Vec<PriceFeed>>) -> Self {
+    pub fn new(tx: Sender<Vec<PriceFeed>>, config: Config) -> Self {
         PriceAggregator {
             prices: Arc::new(DashMap::new()),
             tx: Arc::new(tx),
+            config: Arc::new(config),
         }
     }
 
@@ -37,22 +39,10 @@ impl PriceAggregator {
             me.aggregate().await;
         });
 
-        let config = vec![SyntheticConfiguration {
-            token: Token::USDT,
-            collateral: vec![
-                Token::LENFI,
-                Token::IUSD,
-                Token::MIN,
-                Token::SNEK,
-                Token::ENCS,
-                Token::DJED,
-            ],
-        }];
-
         let me = self.clone();
         set.spawn(async move {
             loop {
-                me.report(&config);
+                me.report();
                 sleep(Duration::from_secs(1)).await;
             }
         });
@@ -81,32 +71,26 @@ impl PriceAggregator {
         });
 
         while let Some(info) = rx.next().await {
-            self.prices.insert((info.token, info.origin), info);
+            self.prices.insert((info.token.clone(), info.origin), info);
         }
     }
 
-    fn report(&self, config: &[SyntheticConfiguration]) {
+    fn report(&self) {
         // Normalize to ADA for now.
-        // TODO: this logic is almost certainly wrong.
-        let ada_in_usdt = match self.prices.get(&(Token::ADA, Origin::Binance)) {
-            Some(uh) => uh.value,
-            _ => {
-                // If we haven't found this value yet, just don't report anything
-                return;
-            }
-        };
-        let mut aggregated_prices: HashMap<Token, Vec<Decimal>> = HashMap::new();
+        // TODO: use whatever has the most liquidity
+        let ada_in_usdt = self.get_collateral_price("ADA");
+        let mut aggregated_prices: HashMap<String, Vec<Decimal>> = HashMap::new();
         for price_info in self.prices.iter() {
-            let normalized_price = match price_info.relative_to {
-                Token::ADA => price_info.value,
-                Token::USDT => price_info.value * ada_in_usdt,
+            let normalized_price = match price_info.relative_to.as_str() {
+                "ADA" => price_info.value * ada_in_usdt,
+                "USDb" => price_info.value,
                 _ => panic!(
                     "Can't handle converting from {:?} to ADA",
                     price_info.relative_to
                 ),
             };
             aggregated_prices
-                .entry(price_info.token)
+                .entry(price_info.token.clone())
                 .and_modify(|e| e.push(normalized_price))
                 .or_insert(vec![normalized_price]);
         }
@@ -118,15 +102,50 @@ impl PriceAggregator {
                 / Decimal::new(prices.len() as i64, 0);
             all_prices.insert(token, average_price);
         }
-        all_prices.insert(Token::USDT, Decimal::new(1, 0));
 
         let mut payloads = vec![];
-        for synthetic in config {
-            if let Some(payload) = compute_payload(synthetic, &all_prices) {
+        for synthetic in &self.config.synthetics {
+            let price = all_prices
+                .get(synthetic.name.as_str())
+                .unwrap_or_else(|| &synthetic.price);
+            if let Some(payload) = self.compute_payload(&synthetic, *price, &all_prices) {
                 payloads.push(payload);
             }
         }
         self.tx.send_replace(payloads);
+    }
+
+    fn compute_payload(
+        &self,
+        synth: &SyntheticConfig,
+        price: Decimal,
+        all_prices: &HashMap<String, Decimal>,
+    ) -> Option<PriceFeed> {
+        let prices: Vec<_> = synth
+            .collateral
+            .iter()
+            .map(|c| {
+                all_prices
+                    .get(c.as_str())
+                    .cloned()
+                    .unwrap_or_else(|| self.get_collateral_price(c.as_str()))
+            })
+            .map(|p| p / price)
+            .collect();
+        let (collateral_prices, denominator) = normalize_collateral_prices(&prices);
+        Some(PriceFeed {
+            collateral_prices,
+            price,
+            synthetic: synth.name.clone(),
+            denominator,
+        })
+    }
+
+    fn get_collateral_price(&self, collateral: &str) -> Decimal {
+        let Some(config) = self.config.collateral.iter().find(|c| c.name == collateral) else {
+            panic!("Unrecognized collateral {}", collateral);
+        };
+        config.price
     }
 }
 
@@ -136,11 +155,6 @@ pub struct PriceFeed {
     pub synthetic: String,
     pub price: Decimal,
     pub denominator: u64,
-}
-
-pub struct SyntheticConfiguration {
-    pub token: Token,
-    pub collateral: Vec<Token>,
 }
 
 fn normalize_collateral_prices(prices: &[Decimal]) -> (Vec<u64>, u64) {
@@ -157,26 +171,6 @@ fn normalize_collateral_prices(prices: &[Decimal]) -> (Vec<u64>, u64) {
 
     let collateral_prices = normalized_values.iter().map(|p| (p / gcd) as u64).collect();
     (collateral_prices, (denominator / gcd) as u64)
-}
-
-fn compute_payload(
-    config: &SyntheticConfiguration,
-    all_prices: &HashMap<Token, Decimal>,
-) -> Option<PriceFeed> {
-    let synth_price = all_prices.get(&config.token)?;
-    // TODO: how to handle missing prices?
-    let prices: Vec<_> = config
-        .collateral
-        .iter()
-        .filter_map(|token| all_prices.get(token).map(|p| p / synth_price))
-        .collect();
-    let (collateral_prices, denominator) = normalize_collateral_prices(&prices);
-    Some(PriceFeed {
-        collateral_prices,
-        price: *synth_price,
-        synthetic: config.token.name(),
-        denominator,
-    })
 }
 
 #[cfg(test)]

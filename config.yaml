@@ -1,0 +1,109 @@
+synthetics:
+  - name: USDb
+    price: 1
+    digits: 6
+    collateral:
+      - ADA
+      - BTN
+      - ENCS
+      - LENFI
+      - MIN
+      - SNEK
+  - name: USDs
+    price: 1
+    digits: 6
+    collateral:
+      - ADA
+      - BTN
+      - DJED
+      - USDb
+      - iUSD
+      - myUSD
+  - name: EURb
+    price: 1.0931
+    digits: 6
+    collateral:
+      - ADA
+      - USDb
+      - USDs
+      - BTN
+  - name: JPYb
+    price: 0.006900120752113162
+    digits: 6
+    collateral:
+      - ADA
+      - USDb
+      - USDs
+      - BTN
+  - name: BTCb
+    price: 45944.3
+    digits: 8
+    collateral:
+      - ADA
+      - USDb
+      - USDs
+      - BTN
+      - ENCS
+      - LENFI
+      - MIN
+      - SNEK
+  - name: MATICb
+    price: 0.8206
+    digits: 6
+    collateral:
+      - ADA
+      - BTCb
+      - BTN
+      - ENCS
+      - LENFI
+      - MIN
+      - SNEK
+  - name: SOLp
+    price: 0.010185788787483703
+    digits: 9
+    collateral:
+      - ADA
+      - USDb
+      - USDs
+      - BTN
+      - ENCS
+      - LENFI
+      - MIN
+      - SNEK
+collateral:
+  - name: ADA
+    price: 0.5235
+    digits: 6
+  - name: BTCb
+    price: 45944.3
+    digits: 8
+  - name: BTN
+    price: 1.001
+    digits: 6
+  - name: DJED
+    price: 1
+    digits: 6
+  - name: ENCS
+    price: 0.5923
+    digits: 6
+  - name: iUSD
+    price: 0.79
+    digits: 6
+  - name: LENFI
+    price: 3.79
+    digits: 6
+  - name: MIN
+    price: 0.03457
+    digits: 6
+  - name: myUSD
+    price: 1
+    digits: 6
+  - name: SNEK
+    price: 0.001194
+    digits: 0
+  - name: USDb
+    price: 1
+    digits: 6
+  - name: USDs
+    price: 1
+    digits: 6

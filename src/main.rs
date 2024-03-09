@@ -2,6 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use anyhow::Result;
 use clap::Parser;
+use config::{load_config, Config};
 use networking::Network;
 use price_aggregator::PriceAggregator;
 use publisher::Publisher;
@@ -16,13 +17,13 @@ use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
 
 pub mod apis;
+pub mod config;
 pub mod frost;
 pub mod networking;
 pub mod price_aggregator;
 pub mod publisher;
 pub mod raft;
 pub mod signature_aggregator;
-pub mod token;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -53,6 +54,7 @@ impl Node {
         quorum: usize,
         heartbeat: std::time::Duration,
         timeout: std::time::Duration,
+        config: Config,
     ) -> Result<Self> {
         // Construct mpsc channels for each of our abstract state machines
         let (raft_tx, raft_rx) = mpsc::channel(10);
@@ -62,7 +64,7 @@ impl Node {
 
         let (pa_tx, pa_rx) = watch::channel(vec![]);
 
-        let price_aggregator = PriceAggregator::new(pa_tx);
+        let price_aggregator = PriceAggregator::new(pa_tx, config);
 
         let (leader_tx, leader_rx) = watch::channel(false);
 
@@ -155,6 +157,8 @@ impl Node {
 async fn main() -> Result<()> {
     let args = Args::parse();
 
+    let config = load_config().await?;
+
     let debug = false;
 
     let subscriber = FmtSubscriber::builder()
@@ -178,6 +182,7 @@ async fn main() -> Result<()> {
         (num_nodes / 2) + 1,
         std::time::Duration::from_millis(100 * if debug { 10 } else { 1 }),
         timeout,
+        config,
     )?;
 
     // Start the node, which will spawn a bunch of threads and infinite loop

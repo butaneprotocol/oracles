@@ -1,16 +1,13 @@
 use std::str::FromStr;
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use futures::{SinkExt, StreamExt};
 use rust_decimal::Decimal;
 use serde::Deserialize;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{trace, warn};
 
-use crate::{
-    apis::source::{Origin, PriceInfo, PriceSink},
-    token::Token,
-};
+use crate::apis::source::{Origin, PriceInfo, PriceSink};
 
 // TODO: currencies shouldn't be hard-coded
 const URL: &str = "wss://fstream.binance.com/stream?streams=btcusdt@markPrice/adausdt@markPrice";
@@ -75,10 +72,9 @@ fn process_binance_message(contents: String, sink: &PriceSink) -> Result<()> {
 
     sink.unbounded_send(PriceInfo {
         origin: Origin::Binance,
-        token: Token::value_of(currency)
-            .ok_or_else(|| anyhow!("Unrecognized currency {}", currency))?,
+        token: currency.to_uppercase(),
         value: Decimal::from_str(price)?,
-        relative_to: Token::USDT,
+        relative_to: "USDb".to_string(),
     })?;
 
     Ok(())

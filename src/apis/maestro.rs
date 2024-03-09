@@ -5,10 +5,7 @@ use std::{env, sync::Arc, time::Duration};
 use tokio::{task::JoinSet, time::sleep};
 use tracing::warn;
 
-use crate::{
-    apis::source::{Origin, PriceInfo, PriceSink},
-    token::Token,
-};
+use crate::apis::source::{Origin, PriceInfo, PriceSink};
 
 // TODO: currencies shouldn't be hard-coded
 const TOKENS: [&str; 6] = ["LENFI", "iUSD", "MIN", "SNEK", "ENCS", "DJED"];
@@ -67,9 +64,9 @@ impl MaestroSource {
 
         sink.unbounded_send(PriceInfo {
             origin: Origin::Maestro,
-            token: Token::value_of(token).unwrap(),
+            token: token.to_string(),
             value: res.try_into()?,
-            relative_to: Token::ADA,
+            relative_to: "ADA".to_string(),
         })?;
         Ok(())
     }
