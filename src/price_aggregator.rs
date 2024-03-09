@@ -13,7 +13,7 @@ use crate::{
         self,
         source::{Origin, PriceInfo},
     },
-    config::{Config, SyntheticConfig},
+    config::{CollateralConfig, Config, SyntheticConfig},
 };
 
 #[derive(Clone)]
@@ -79,7 +79,7 @@ impl PriceAggregator {
     fn report(&self) {
         // Normalize to ADA for now.
         // TODO: use whatever has the most liquidity
-        let ada_in_usdt = self.get_collateral_price("ADA");
+        let ada_in_usdt = self.get_collateral("ADA").price;
         let mut aggregated_prices: HashMap<String, Vec<Decimal>> = HashMap::new();
         for price_info in self.prices.iter() {
             let normalized_price = match price_info.relative_to.as_str() {
@@ -126,12 +126,14 @@ impl PriceAggregator {
             .collateral
             .iter()
             .map(|c| {
-                all_prices
+                let collateral = self.get_collateral(c.as_str());
+                let multiplier = Decimal::new(10i64.pow(collateral.digits), 0) / Decimal::new(10i64.pow(synth.digits), 0);
+                let p = all_prices
                     .get(c.as_str())
                     .cloned()
-                    .unwrap_or_else(|| self.get_collateral_price(c.as_str()))
+                    .unwrap_or_else(|| collateral.price);
+                p * multiplier / price
             })
-            .map(|p| p / price)
             .collect();
         let (collateral_prices, denominator) = normalize_collateral_prices(&prices);
         Some(PriceFeed {
@@ -142,11 +144,11 @@ impl PriceAggregator {
         })
     }
 
-    fn get_collateral_price(&self, collateral: &str) -> Decimal {
+    fn get_collateral(&self, collateral: &str) -> &CollateralConfig {
         let Some(config) = self.config.collateral.iter().find(|c| c.name == collateral) else {
             panic!("Unrecognized collateral {}", collateral);
         };
-        config.price
+        config
     }
 }
 
