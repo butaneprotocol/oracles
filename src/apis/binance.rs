@@ -69,15 +69,18 @@ fn process_binance_message(contents: String, sink: &PriceSink) -> Result<()> {
 
     let currency = match message.stream.find("usdt") {
         Some(index) => &message.stream[0..index],
-        None => return Err(anyhow!("Malformed stream {}", message.stream))
+        None => return Err(anyhow!("Malformed stream {}", message.stream)),
     };
     let mut value = Decimal::from_str(&message.data.price)?;
     let token = match currency {
         "btc" => "BTCb",
         "ada" => "ADA",
-        "sol" => { value = Decimal::ONE / value; "SOLp" },
+        "sol" => {
+            value = Decimal::ONE / value;
+            "SOLp"
+        }
         "matic" => "MATICb",
-        _ => return Err(anyhow!("Unrecognized currency {}", message.stream))
+        _ => return Err(anyhow!("Unrecognized currency {}", message.stream)),
     };
 
     sink.unbounded_send(PriceInfo {
