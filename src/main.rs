@@ -72,7 +72,7 @@ impl Node {
 
         let signature_aggregator = SingleSignatureAggregator::new(pa_rx, result_tx)?;
 
-        let publisher = Publisher::new(result_rx);
+        let publisher = Publisher::new(result_rx)?;
 
         Ok(Node {
             id: id.to_string(),
