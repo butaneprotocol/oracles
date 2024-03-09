@@ -22,14 +22,20 @@ const CBOR_VARIANT_0: u64 = 121;
 pub struct SingleSignatureAggregator {
     key: SecretKey,
     price_feed: Receiver<Vec<PriceFeed>>,
+    leader_feed: Receiver<bool>,
     payload_sink: Sender<String>,
 }
 
 impl SingleSignatureAggregator {
-    pub fn new(rx: Receiver<Vec<PriceFeed>>, tx: Sender<String>) -> Result<Self> {
+    pub fn new(
+        price_rx: Receiver<Vec<PriceFeed>>,
+        leader_rx: Receiver<bool>,
+        tx: Sender<String>,
+    ) -> Result<Self> {
         Ok(Self {
             key: decode_key()?,
-            price_feed: rx,
+            price_feed: price_rx,
+            leader_feed: leader_rx,
             payload_sink: tx,
         })
     }
@@ -37,6 +43,10 @@ impl SingleSignatureAggregator {
     pub async fn run(&mut self) {
         loop {
             sleep(Duration::from_secs(5)).await;
+            if !*self.leader_feed.borrow() {
+                continue;
+            }
+
             let price_feed: Vec<PriceFeed> = {
                 let price_feed_ref = self.price_feed.borrow_and_update();
                 price_feed_ref.iter().cloned().collect::<Vec<PriceFeed>>()

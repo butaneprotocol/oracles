@@ -70,7 +70,7 @@ impl Node {
 
         let (result_tx, result_rx) = mpsc::channel(10);
 
-        let signature_aggregator = SingleSignatureAggregator::new(pa_rx, result_tx)?;
+        let signature_aggregator = SingleSignatureAggregator::new(pa_rx, leader_rx, result_tx)?;
 
         let publisher = Publisher::new(result_rx)?;
 
