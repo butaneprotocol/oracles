@@ -169,10 +169,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4c7f02d4ea65f2c1853089ffd8d2787bdbc63de2f0d29dedbcf8ccdfa0ccd4cf"
 
 [[package]]
+name = "base58"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6107fe1be6682a68940da878d9e9f5e90ca5745b3dec9fd1bb393c8777d4f581"
+
+[[package]]
 name = "base64"
 version = "0.21.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9d297deb1925b89f2ccc13d7635fa0714f12c87adce1c75356b39ca9b7178567"
+
+[[package]]
+name = "bech32"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d86b93f97252c47b41663388e6d155714a9d0c398b99f1005cbc5f978b29f445"
 
 [[package]]
 name = "bech32"
@@ -1044,15 +1056,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "minicbor"
-version = "0.21.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3d732cecc693ad7c5ea353198182ff4d9bf92428af793c411102b175855ab04"
-dependencies = [
- "minicbor-derive",
-]
-
-[[package]]
 name = "minicbor-derive"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1216,16 +1219,17 @@ dependencies = [
  "almost-raft",
  "anyhow",
  "async-trait",
- "bech32",
+ "bech32 0.11.0",
  "clap",
  "dashmap",
  "frost-ed25519",
  "futures",
  "hex",
- "minicbor 0.21.0",
+ "minicbor",
  "num-bigint",
  "num-integer",
  "pallas-crypto",
+ "pallas-primitives",
  "rand",
  "reqwest",
  "rust_decimal",
@@ -1255,7 +1259,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2f6659ef912bf95cb19423e83638b7b37ca86fe3be4fe7ea8eee87f90ccad7a"
 dependencies = [
  "hex",
- "minicbor 0.20.0",
+ "minicbor",
  "serde",
  "thiserror",
 ]
@@ -1272,6 +1276,22 @@ dependencies = [
  "rand_core",
  "serde",
  "thiserror",
+]
+
+[[package]]
+name = "pallas-primitives"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b618f46fb123c60d51e75b51d8170cc6113183b2ea61581ffee3631bfa1ca1d"
+dependencies = [
+ "base58",
+ "bech32 0.9.1",
+ "hex",
+ "log",
+ "pallas-codec",
+ "pallas-crypto",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
