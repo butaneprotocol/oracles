@@ -2,6 +2,7 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use dashmap::DashMap;
 use futures::{channel::mpsc, StreamExt};
+use num_bigint::BigUint;
 use num_integer::Integer;
 use rust_decimal::Decimal;
 use tokio::{sync::watch::Sender, task::JoinSet, time::sleep};
@@ -151,26 +152,26 @@ impl PriceAggregator {
 
 #[derive(Clone, Debug)]
 pub struct PriceFeed {
-    pub collateral_prices: Vec<u64>,
+    pub collateral_prices: Vec<BigUint>,
     pub synthetic: String,
     pub price: Decimal,
-    pub denominator: u64,
+    pub denominator: BigUint,
 }
 
-fn normalize_collateral_prices(prices: &[Decimal]) -> (Vec<u64>, u64) {
+fn normalize_collateral_prices(prices: &[Decimal]) -> (Vec<BigUint>, BigUint) {
     let scale = prices.iter().map(|p| p.scale()).max().unwrap_or(0);
     let normalized_values: Vec<_> = prices
         .iter()
-        .map(|p| p.mantissa() * 10i128.pow(scale - p.scale()))
+        .map(|p| (p.mantissa() as u128) * 10u128.pow(scale - p.scale()))
         .collect();
 
-    let denominator = 10i128.pow(scale);
+    let denominator = 10u128.pow(scale);
     let gcd = normalized_values
         .iter()
         .fold(denominator, |acc, &el| acc.gcd(&el));
 
-    let collateral_prices = normalized_values.iter().map(|p| (p / gcd) as u64).collect();
-    (collateral_prices, (denominator / gcd) as u64)
+    let collateral_prices = normalized_values.iter().map(|p| (p / gcd).into()).collect();
+    (collateral_prices, (denominator / gcd).into())
 }
 
 #[cfg(test)]
@@ -181,7 +182,7 @@ mod tests {
 
     #[test]
     fn should_not_panic_on_empty_input() {
-        assert_eq!((vec![], 1), normalize_collateral_prices(&[]));
+        assert_eq!((vec![], 1u128.into()), normalize_collateral_prices(&[]));
     }
 
     #[test]
@@ -189,7 +190,10 @@ mod tests {
         let prices = [Decimal::new(5526312, 7), Decimal::new(1325517, 6)];
         let (collateral_prices, denominator) = normalize_collateral_prices(&prices);
         assert_eq!(
-            (vec![2763156, 6627585], 5000000),
+            (
+                vec![2763156u128.into(), 6627585u128.into()],
+                5000000u128.into()
+            ),
             (collateral_prices, denominator)
         );
     }
@@ -198,7 +202,10 @@ mod tests {
     fn should_normalize_numbers_with_same_decimal_count() {
         let prices = [Decimal::new(1337, 3), Decimal::new(9001, 3)];
         let (collateral_prices, denominator) = normalize_collateral_prices(&prices);
-        assert_eq!((vec![1337, 9001], 1000), (collateral_prices, denominator));
+        assert_eq!(
+            (vec![1337u128.into(), 9001u128.into()], 1000u128.into()),
+            (collateral_prices, denominator)
+        );
     }
 
     #[test]
@@ -209,6 +216,9 @@ mod tests {
             Decimal::new(6_000_000_000, 9),
         ];
         let (collateral_prices, denominator) = normalize_collateral_prices(&prices);
-        assert_eq!((vec![2, 4, 6], 1), (collateral_prices, denominator));
+        assert_eq!(
+            (vec![2u128.into(), 4u128.into(), 6u128.into()], 1u128.into()),
+            (collateral_prices, denominator)
+        );
     }
 }

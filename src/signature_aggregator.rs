@@ -68,13 +68,21 @@ impl SingleSignatureAggregator {
 
                 encoder.begin_array()?;
                 for collateral in datum.collateral_prices {
-                    encoder.int(collateral.into())?;
+                    match collateral.to_u64() {
+                        Some(val) => encoder.int(val.into())?,
+                        None => encoder.tag(Tag::new(2))?.bytes(&collateral.to_bytes_le())?,
+                    };
                 }
                 encoder.end()?;
 
                 encoder.bytes(datum.synthetic.as_bytes())?;
 
-                encoder.int(datum.denominator.into())?;
+                match datum.denominator.to_u64() {
+                    Some(val) => encoder.int(val.into())?,
+                    None => encoder
+                        .tag(Tag::new(2))?
+                        .bytes(&datum.denominator.to_bytes_le())?,
+                };
 
                 encoder.encode(Validity {
                     lower_bound: IntervalBound {

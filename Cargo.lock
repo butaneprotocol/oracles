@@ -1112,6 +1112,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "num-bigint"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "608e7659b5c3d7cba262d894801b9ec9d00de989e8a82bd4bef91d08da45cdc0"
+dependencies = [
+ "autocfg",
+ "num-integer",
+ "num-traits",
+]
+
+[[package]]
 name = "num-integer"
 version = "0.1.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1212,6 +1223,7 @@ dependencies = [
  "futures",
  "hex",
  "minicbor 0.21.0",
+ "num-bigint",
  "num-integer",
  "pallas-crypto",
  "rand",
@@ -1238,9 +1250,9 @@ checksum = "b15813163c1d831bf4a13c3610c05c0d03b39feb07f7e09fa234dac9b15aaf39"
 
 [[package]]
 name = "pallas-codec"
-version = "0.23.0"
+version = "0.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b9f8d41f17000f9a6bab7c26c99b19038a12de5cf004e901e1d0f5fa993e3d7d"
+checksum = "f2f6659ef912bf95cb19423e83638b7b37ca86fe3be4fe7ea8eee87f90ccad7a"
 dependencies = [
  "hex",
  "minicbor 0.20.0",
@@ -1250,9 +1262,9 @@ dependencies = [
 
 [[package]]
 name = "pallas-crypto"
-version = "0.23.0"
+version = "0.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6610d24e42fe2d8408022bda788ba4bf6d125debe3da404e2499848e108788a1"
+checksum = "66fc2250551c7a07e132898610f8c725c2f8f59300a6311c371dc4cf7ad27353"
 dependencies = [
  "cryptoxide",
  "hex",
