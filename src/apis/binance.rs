@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use futures::{SinkExt, StreamExt};
 use rust_decimal::Decimal;
 use serde::Deserialize;
@@ -9,8 +9,8 @@ use tracing::{trace, warn};
 
 use crate::apis::source::{Origin, PriceInfo, PriceSink};
 
-// TODO: currencies shouldn't be hard-coded
-const URL: &str = "wss://fstream.binance.com/stream?streams=btcusdt@markPrice/adausdt@markPrice";
+// TODO: currencies shouldn't be hard-coded?
+const URL: &str = "wss://fstream.binance.com/stream?streams=btcusdt@markPrice/adausdt@markPrice/solusdt@markPrice/maticusdt@markPrice";
 
 #[derive(Default)]
 pub struct BinanceSource;
@@ -67,13 +67,23 @@ struct BinanceMarkPriceMessageData {
 fn process_binance_message(contents: String, sink: &PriceSink) -> Result<()> {
     let message: BinanceMarkPriceMessage = serde_json::from_str(&contents)?;
 
-    let currency = &message.stream[0..3];
-    let price = &message.data.price;
+    let currency = match message.stream.find("usdt") {
+        Some(index) => &message.stream[0..index],
+        None => return Err(anyhow!("Malformed stream {}", message.stream))
+    };
+    let mut value = Decimal::from_str(&message.data.price)?;
+    let token = match currency {
+        "btc" => "BTCb",
+        "ada" => "ADA",
+        "sol" => { value = Decimal::ONE / value; "SOLp" },
+        "matic" => "MATICb",
+        _ => return Err(anyhow!("Unrecognized currency {}", message.stream))
+    };
 
     sink.unbounded_send(PriceInfo {
         origin: Origin::Binance,
-        token: currency.to_uppercase(),
-        value: Decimal::from_str(price)?,
+        token: token.to_string(),
+        value,
         relative_to: "USDb".to_string(),
     })?;
 
