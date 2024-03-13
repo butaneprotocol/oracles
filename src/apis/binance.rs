@@ -87,7 +87,7 @@ fn process_binance_message(contents: String, sink: &PriceSink) -> Result<()> {
         origin: Origin::Binance,
         token: token.to_string(),
         value,
-        relative_to: "USDb".to_string(),
+        relative_to: "USD".to_string(),
     })?;
 
     Ok(())

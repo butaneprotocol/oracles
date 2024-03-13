@@ -71,22 +71,28 @@ impl PriceAggregator {
             maestro.query(tx2).await;
         });
 
+        let tx2 = tx.clone();
+        let coinbase = apis::coinbase::CoinbaseSource::new();
+        set.spawn(async move {
+            coinbase.query(tx2).await;
+        });
+
         while let Some(info) = rx.next().await {
             self.prices.insert((info.token.clone(), info.origin), info);
         }
     }
 
     fn report(&self) {
-        // Normalize to ADA for now.
+        // Normalize to USD for now.
         // TODO: use whatever has the most liquidity
-        let ada_in_usdt = self.get_collateral("ADA").price;
+        let usd_per_ada = self.get_collateral("ADA").price;
         let mut aggregated_prices: HashMap<String, Vec<Decimal>> = HashMap::new();
         for price_info in self.prices.iter() {
             let normalized_price = match price_info.relative_to.as_str() {
-                "ADA" => price_info.value * ada_in_usdt,
-                "USDb" => price_info.value,
+                "ADA" => price_info.value * usd_per_ada,
+                "USD" => price_info.value,
                 _ => panic!(
-                    "Can't handle converting from {:?} to ADA",
+                    "Can't handle converting from {} to USD",
                     price_info.relative_to
                 ),
             };

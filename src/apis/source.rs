@@ -4,6 +4,7 @@ use rust_decimal::Decimal;
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum Origin {
     Binance,
+    Coinbase,
     Maestro,
 }
 
