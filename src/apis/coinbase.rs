@@ -41,6 +41,12 @@ impl CoinbaseSource {
             channels: vec!["ticker".into()],
         };
         stream.send(request.try_into()?).await?;
+        let Some(first_result) = stream.next().await else {
+            return Err(anyhow!("Channel closed without sending a response"));
+        };
+        let CoinbaseResponse::Subscriptions {} = first_result?.try_into()? else {
+            return Err(anyhow!("Did not receive expected first response"));
+        };
 
         while let Some(result) = stream.next().await {
             // on stream error, just try reconnecting
@@ -112,6 +118,7 @@ enum CoinbaseResponse {
     Error {
         message: String,
     },
+    Subscriptions {},
     Ticker {
         product_id: String,
         price: String,
