@@ -62,7 +62,7 @@ impl MaestroSource {
         let messages: [MaestroOHLCMessage; 1] = serde_json::from_str(&contents)?;
         let res = (messages[0].coin_a_open + messages[0].coin_a_close) / 2.;
 
-        sink.unbounded_send(PriceInfo {
+        sink.send(PriceInfo {
             origin: Origin::Maestro,
             token: token.to_string(),
             value: res.try_into()?,

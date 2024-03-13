@@ -1,11 +1,14 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use dashmap::DashMap;
-use futures::{channel::mpsc, StreamExt};
 use num_bigint::BigUint;
 use num_integer::Integer;
 use rust_decimal::Decimal;
-use tokio::{sync::watch::Sender, task::JoinSet, time::sleep};
+use tokio::{
+    sync::{mpsc, watch::Sender},
+    task::JoinSet,
+    time::sleep,
+};
 use tracing::warn;
 
 use crate::{
@@ -24,11 +27,11 @@ pub struct PriceAggregator {
 }
 
 impl PriceAggregator {
-    pub fn new(tx: Sender<Vec<PriceFeed>>, config: Config) -> Self {
+    pub fn new(tx: Sender<Vec<PriceFeed>>, config: Arc<Config>) -> Self {
         PriceAggregator {
             prices: Arc::new(DashMap::new()),
             tx: Arc::new(tx),
-            config: Arc::new(config),
+            config,
         }
     }
 
@@ -57,7 +60,7 @@ impl PriceAggregator {
 
     async fn aggregate(&self) {
         let mut set = JoinSet::new();
-        let (tx, mut rx) = mpsc::unbounded();
+        let (tx, mut rx) = mpsc::unbounded_channel();
 
         let tx2 = tx.clone();
         let binance = apis::binance::BinanceSource::new();
@@ -77,7 +80,7 @@ impl PriceAggregator {
             coinbase.query(tx2).await;
         });
 
-        while let Some(info) = rx.next().await {
+        while let Some(info) = rx.recv().await {
             self.prices.insert((info.token.clone(), info.origin), info);
         }
     }

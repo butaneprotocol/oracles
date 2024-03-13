@@ -83,7 +83,7 @@ fn process_binance_message(contents: String, sink: &PriceSink) -> Result<()> {
         _ => return Err(anyhow!("Unrecognized currency {}", message.stream)),
     };
 
-    sink.unbounded_send(PriceInfo {
+    sink.send(PriceInfo {
         origin: Origin::Binance,
         token: token.to_string(),
         value,

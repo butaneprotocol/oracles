@@ -1,5 +1,5 @@
-use futures::channel::mpsc;
 use rust_decimal::Decimal;
+use tokio::sync::mpsc;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum Origin {

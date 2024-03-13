@@ -27,7 +27,7 @@ impl CoinbaseSource {
         }
     }
 
-    async fn run_query(&self, mut sink: PriceSink) -> Result<()> {
+    async fn run_query(&self, sink: PriceSink) -> Result<()> {
         let (mut stream, _) = connect_async(URL).await?;
 
         trace!("Connecting to coinbase");
@@ -61,7 +61,7 @@ impl CoinbaseSource {
                 }
             };
 
-            sink.send(price_info).await?;
+            sink.send(price_info)?;
         }
 
         Ok(())

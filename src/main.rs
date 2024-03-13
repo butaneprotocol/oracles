@@ -3,6 +3,7 @@ use std::{sync::Arc, time::Duration};
 use anyhow::Result;
 use clap::Parser;
 use config::{load_config, Config};
+use health::HealthServer;
 use networking::Network;
 use price_aggregator::PriceAggregator;
 use publisher::Publisher;
@@ -19,6 +20,7 @@ use tracing_subscriber::FmtSubscriber;
 pub mod apis;
 pub mod config;
 pub mod frost;
+pub mod health;
 pub mod networking;
 pub mod price_aggregator;
 pub mod publisher;
@@ -38,9 +40,9 @@ struct Args {
     peers: Vec<String>,
 }
 
-#[derive(Clone)]
 struct Node {
     id: String,
+    health_server: HealthServer,
     network: Network,
     raft: Raft,
     price_aggregator: PriceAggregator,
@@ -54,8 +56,16 @@ impl Node {
         quorum: usize,
         heartbeat: std::time::Duration,
         timeout: std::time::Duration,
-        config: Config,
+        config: &Arc<Config>,
     ) -> Result<Self> {
+        let (health_server, health_sink) = HealthServer::new();
+
+        // Testing health endpoint
+        health_sink.update(
+            health::Origin::Source(apis::source::Origin::Binance),
+            health::HealthStatus::Unhealthy("testing health".into()),
+        );
+
         // Construct mpsc channels for each of our abstract state machines
         let (raft_tx, raft_rx) = mpsc::channel(10);
 
@@ -64,7 +74,7 @@ impl Node {
 
         let (pa_tx, pa_rx) = watch::channel(vec![]);
 
-        let price_aggregator = PriceAggregator::new(pa_tx, config);
+        let price_aggregator = PriceAggregator::new(pa_tx, config.clone());
 
         let (leader_tx, leader_rx) = watch::channel(false);
 
@@ -76,6 +86,7 @@ impl Node {
 
         Ok(Node {
             id: id.to_string(),
+            health_server,
             network: network.clone(),
             raft: Raft::new(id, quorum, heartbeat, timeout, raft_rx, network, leader_tx),
             price_aggregator,
@@ -84,34 +95,34 @@ impl Node {
         })
     }
 
-    pub async fn start(self, port: u16, peers: Vec<String>) -> Result<Self, JoinError> {
+    pub async fn start(mut self, port: u16, peers: Vec<String>) -> Result<(), JoinError> {
         let mut set = JoinSet::new();
 
-        // Spawn the abstract raft state machine, which internally uses network to maintain a Raft consensus
-        let raft = self.raft.clone();
+        // Start up the health server
         set.spawn(async move {
-            raft.handle_messages().await;
+            self.health_server.run(port + 10000).await;
+        });
+
+        // Spawn the abstract raft state machine, which internally uses network to maintain a Raft consensus
+        set.spawn(async move {
+            self.raft.handle_messages().await;
         });
 
         // Then spawn the peer to peer network, which will maintain a connection to each peer, and dispatch messages to the correct state machine
-        let network = self.network.clone();
         set.spawn(async move {
-            network.handle_network(port, peers).await.unwrap();
+            self.network.handle_network(port, peers).await.unwrap();
         });
 
-        let aggregator = self.price_aggregator.clone();
         set.spawn(async move {
-            aggregator.run().await;
+            self.price_aggregator.run().await;
         });
 
-        let mut signature_aggregator = self.signature_aggregator.clone();
         set.spawn(async move {
-            signature_aggregator.run().await;
+            self.signature_aggregator.run().await;
         });
 
-        let mut publisher = self.publisher.clone();
         set.spawn(async move {
-            publisher.run().await;
+            self.publisher.run().await;
         });
 
         // Then wait for all of them to complete (they won't)
@@ -119,37 +130,50 @@ impl Node {
             res?
         }
 
-        Ok(self)
+        Ok(())
     }
+}
 
-    pub async fn start_debug(
-        self,
-        port: u16,
-        peers: Vec<String>,
-        restart_after: Duration,
-    ) -> Result<Self, JoinError> {
-        loop {
-            let mut set = JoinSet::new();
+async fn run<F>(node_factory: F, port: u16, peers: Vec<String>) -> Result<()>
+where
+    F: Fn() -> Result<Node>,
+{
+    let node = node_factory()?;
+    node.start(port, peers).await?;
+    Ok(())
+}
 
-            let me = self.clone();
-            let peers = peers.clone();
-            set.spawn(async move {
-                // runs forever
-                me.start(port, peers).await.unwrap();
-            });
+async fn run_debug<F>(
+    node_factory: F,
+    port: u16,
+    peers: Vec<String>,
+    restart_after: Duration,
+) -> Result<()>
+where
+    F: Fn() -> Result<Node>,
+{
+    loop {
+        let mut set = JoinSet::new();
 
-            set.spawn_blocking(|| {
-                // runs until we get input
-                let mut line = String::new();
-                std::io::stdin().read_line(&mut line).unwrap();
-            });
+        let node = node_factory()?;
+        let id = node.id.clone();
+        let peers = peers.clone();
+        set.spawn(async move {
+            // Runs forever
+            node.start(port, peers).await.unwrap();
+        });
 
-            set.join_next().await.unwrap()?;
-            set.abort_all();
-            info!(me = self.id, "Node shutting down for {:?}", restart_after);
-            sleep(restart_after).await;
-            info!(me = self.id, "Node restarting...");
-        }
+        set.spawn_blocking(|| {
+            // runs until we get input
+            let mut line = String::new();
+            std::io::stdin().read_line(&mut line).unwrap();
+        });
+
+        set.join_next().await.unwrap()?;
+        set.abort_all();
+        info!(me = id, "Node shutting down for {:?}", restart_after);
+        sleep(restart_after).await;
+        info!(me = id, "Node restarting...");
     }
 }
 
@@ -157,7 +181,7 @@ impl Node {
 async fn main() -> Result<()> {
     let args = Args::parse();
 
-    let config = load_config().await?;
+    let config = Arc::new(load_config().await?);
 
     let debug = false;
 
@@ -177,22 +201,22 @@ async fn main() -> Result<()> {
 
     // Construct a new node; quorum is set to a majority of expected nodes (which includes ourself!)
     let num_nodes = args.peers.len() + 1;
-    let node = Node::new(
-        &id,
-        (num_nodes / 2) + 1,
-        std::time::Duration::from_millis(100 * if debug { 10 } else { 1 }),
-        timeout,
-        config,
-    )?;
+    let node_factory = || {
+        Node::new(
+            &id,
+            (num_nodes / 2) + 1,
+            std::time::Duration::from_millis(100 * if debug { 10 } else { 1 }),
+            timeout,
+            &config,
+        )
+    };
 
     // Start the node, which will spawn a bunch of threads and infinite loop
     if debug {
         let restart_after = timeout + Duration::from_secs(1);
-        node.start_debug(args.port, args.peers, restart_after)
-            .await
-            .unwrap();
+        run_debug(node_factory, args.port, args.peers, restart_after).await?;
     } else {
-        node.start(args.port, args.peers).await.unwrap();
+        run(node_factory, args.port, args.peers).await.unwrap();
     }
     Ok(())
 }
