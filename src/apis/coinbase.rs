@@ -1,36 +1,38 @@
 use std::str::FromStr;
 
 use anyhow::{anyhow, Result};
-use futures::{SinkExt, StreamExt};
+use futures::{future::BoxFuture, FutureExt, SinkExt, StreamExt};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{trace, warn};
 
-use super::source::{Origin, PriceInfo, PriceSink};
+use super::source::{Origin, PriceInfo, PriceSink, Source};
 
 const URL: &str = "wss://ws-feed.exchange.coinbase.com";
 
 #[derive(Default)]
 pub struct CoinbaseSource;
 
+impl Source for CoinbaseSource {
+    fn origin(&self) -> Origin {
+        Origin::Coinbase
+    }
+
+    fn query<'a>(&'a self, sink: &'a PriceSink) -> BoxFuture<Result<()>> {
+        self.query_impl(sink).boxed()
+    }
+}
+
 impl CoinbaseSource {
     pub fn new() -> Self {
         Self
     }
 
-    pub async fn query(&self, sink: PriceSink) {
-        loop {
-            if let Err(error) = self.run_query(sink.clone()).await {
-                warn!("Error querying coinbase, retrying: {}", error);
-            }
-        }
-    }
-
-    async fn run_query(&self, sink: PriceSink) -> Result<()> {
+    async fn query_impl(&self, sink: &PriceSink) -> Result<()> {
+        trace!("Connecting to coinbase");
         let (mut stream, _) = connect_async(URL).await?;
 
-        trace!("Connecting to coinbase");
         let request = CoinbaseRequest::Subscribe {
             product_ids: vec![
                 "ADA-USD".into(),
@@ -41,6 +43,7 @@ impl CoinbaseSource {
             channels: vec!["ticker".into()],
         };
         stream.send(request.try_into()?).await?;
+
         let Some(first_result) = stream.next().await else {
             return Err(anyhow!("Channel closed without sending a response"));
         };

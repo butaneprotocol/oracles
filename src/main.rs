@@ -74,7 +74,7 @@ impl Node {
 
         let (pa_tx, pa_rx) = watch::channel(vec![]);
 
-        let price_aggregator = PriceAggregator::new(pa_tx, config.clone());
+        let price_aggregator = PriceAggregator::new(pa_tx, config.clone())?;
 
         let (leader_tx, leader_rx) = watch::channel(false);
 

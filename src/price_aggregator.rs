@@ -1,11 +1,12 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
+use anyhow::Result;
 use dashmap::DashMap;
 use num_bigint::BigUint;
 use num_integer::Integer;
 use rust_decimal::Decimal;
 use tokio::{
-    sync::{mpsc, watch::Sender},
+    sync::{mpsc::unbounded_channel, watch::Sender},
     task::JoinSet,
     time::sleep,
 };
@@ -13,40 +14,105 @@ use tracing::warn;
 
 use crate::{
     apis::{
-        self,
-        source::{Origin, PriceInfo},
+        binance::BinanceSource,
+        coinbase::CoinbaseSource,
+        maestro::MaestroSource,
+        source::{Origin, PriceInfo, Source},
     },
     config::{CollateralConfig, Config, SyntheticConfig},
 };
 
-#[derive(Clone)]
+struct SourceAdapter {
+    origin: Origin,
+    source: Box<dyn Source + Send + Sync>,
+    prices: Arc<DashMap<String, PriceInfo>>,
+}
+
+impl SourceAdapter {
+    pub fn new<T: Source + Send + Sync + 'static>(source: T) -> Self {
+        Self {
+            origin: source.origin(),
+            source: Box::new(source),
+            prices: Arc::new(DashMap::new()),
+        }
+    }
+
+    pub fn get_prices(&self) -> Arc<DashMap<String, PriceInfo>> {
+        self.prices.clone()
+    }
+
+    pub async fn run(self) {
+        let mut set = JoinSet::new();
+
+        let (tx, mut rx) = unbounded_channel();
+
+        let source = self.source;
+        set.spawn(async move {
+            // read values from the source
+            loop {
+                if let Err(error) = source.query(&tx).await {
+                    warn!(
+                        "Error occurred while querying {:?}, retrying: {}",
+                        self.origin, error
+                    );
+                }
+            }
+        });
+
+        let prices = self.prices;
+        set.spawn(async move {
+            // write emitted values into our map
+            while let Some(info) = rx.recv().await {
+                prices.insert(info.token.clone(), info);
+            }
+        });
+
+        // TODO: check ages of prices, mark ourself as unhealthy if any are too old
+
+        while let Some(res) = set.join_next().await {
+            if let Err(error) = res {
+                warn!("{}", error);
+            }
+        }
+    }
+}
+
 pub struct PriceAggregator {
-    prices: Arc<DashMap<(String, Origin), PriceInfo>>,
     tx: Arc<Sender<Vec<PriceFeed>>>,
+    sources: Option<Vec<SourceAdapter>>,
     config: Arc<Config>,
 }
 
 impl PriceAggregator {
-    pub fn new(tx: Sender<Vec<PriceFeed>>, config: Arc<Config>) -> Self {
-        PriceAggregator {
-            prices: Arc::new(DashMap::new()),
+    pub fn new(tx: Sender<Vec<PriceFeed>>, config: Arc<Config>) -> Result<Self> {
+        Ok(Self {
             tx: Arc::new(tx),
+            sources: Some(vec![
+                SourceAdapter::new(BinanceSource::new()),
+                SourceAdapter::new(CoinbaseSource::new()),
+                SourceAdapter::new(MaestroSource::new()?),
+            ]),
             config,
-        }
+        })
     }
 
-    pub async fn run(&self) {
+    pub async fn run(mut self) {
         let mut set = JoinSet::new();
 
-        let me = self.clone();
-        set.spawn(async move {
-            me.aggregate().await;
-        });
+        let sources = self.sources.take().unwrap();
+        let price_maps: Vec<_> = sources.iter().map(|s| s.get_prices()).collect();
 
-        let me = self.clone();
+        // Make each source update its price map asynchronously.
+        for source in sources {
+            set.spawn(async move {
+                source.run().await;
+            });
+        }
+
+        // Every second, we report the latest values from those price maps.
         set.spawn(async move {
             loop {
-                me.report();
+                self.report(&price_maps);
                 sleep(Duration::from_secs(1)).await;
             }
         });
@@ -58,39 +124,14 @@ impl PriceAggregator {
         }
     }
 
-    async fn aggregate(&self) {
-        let mut set = JoinSet::new();
-        let (tx, mut rx) = mpsc::unbounded_channel();
+    fn report(&self, prices: &[Arc<DashMap<String, PriceInfo>>]) {
+        let prices = prices.iter().flat_map(|m| m.iter());
 
-        let tx2 = tx.clone();
-        let binance = apis::binance::BinanceSource::new();
-        set.spawn(async move {
-            binance.query(tx2).await;
-        });
-
-        let tx2 = tx.clone();
-        let maestro = apis::maestro::MaestroSource::new().unwrap();
-        set.spawn(async move {
-            maestro.query(tx2).await;
-        });
-
-        let tx2 = tx.clone();
-        let coinbase = apis::coinbase::CoinbaseSource::new();
-        set.spawn(async move {
-            coinbase.query(tx2).await;
-        });
-
-        while let Some(info) = rx.recv().await {
-            self.prices.insert((info.token.clone(), info.origin), info);
-        }
-    }
-
-    fn report(&self) {
         // Normalize to USD for now.
         // TODO: use whatever has the most liquidity
         let usd_per_ada = self.get_collateral("ADA").price;
         let mut aggregated_prices: HashMap<String, Vec<Decimal>> = HashMap::new();
-        for price_info in self.prices.iter() {
+        for price_info in prices {
             let normalized_price = match price_info.relative_to.as_str() {
                 "ADA" => price_info.value * usd_per_ada,
                 "USD" => price_info.value,

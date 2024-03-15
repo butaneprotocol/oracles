@@ -1,4 +1,5 @@
 use anyhow::Result;
+use futures::{future::BoxFuture, FutureExt};
 use reqwest::Client;
 use serde::Deserialize;
 use std::{env, sync::Arc, time::Duration};
@@ -7,8 +8,17 @@ use tracing::warn;
 
 use crate::apis::source::{Origin, PriceInfo, PriceSink};
 
+use super::source::Source;
+
 // TODO: currencies shouldn't be hard-coded
 const TOKENS: [&str; 6] = ["LENFI", "iUSD", "MIN", "SNEK", "ENCS", "DJED"];
+
+fn ohlc_url(cnt: &str) -> String {
+    format!(
+        "https://mainnet.gomaestro-api.org/v1/markets/dexs/ohlc/minswap/ADA-{}",
+        cnt
+    )
+}
 
 #[derive(Clone)]
 pub struct MaestroSource {
@@ -16,11 +26,14 @@ pub struct MaestroSource {
     client: Arc<Client>,
 }
 
-fn ohlc_url(cnt: &str) -> String {
-    format!(
-        "https://mainnet.gomaestro-api.org/v1/markets/dexs/ohlc/minswap/ADA-{}",
-        cnt
-    )
+impl Source for MaestroSource {
+    fn origin(&self) -> Origin {
+        Origin::Maestro
+    }
+
+    fn query<'a>(&'a self, sink: &'a PriceSink) -> BoxFuture<Result<()>> {
+        self.query_impl(sink).boxed()
+    }
 }
 
 impl MaestroSource {
@@ -30,7 +43,7 @@ impl MaestroSource {
         Ok(Self { api_key, client })
     }
 
-    pub async fn query(&self, sink: PriceSink) {
+    async fn query_impl(&self, sink: &PriceSink) -> Result<()> {
         loop {
             let mut set = JoinSet::new();
             for token in TOKENS {
