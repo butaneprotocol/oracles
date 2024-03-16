@@ -12,15 +12,15 @@ pub enum Origin {
 
 #[derive(Clone, Debug)]
 pub struct PriceInfo {
-    pub origin: Origin,
     pub token: String,
+    pub unit: String,
     pub value: Decimal,
-    pub relative_to: String,
 }
 
 pub type PriceSink = mpsc::UnboundedSender<PriceInfo>;
 
 pub trait Source {
     fn origin(&self) -> Origin;
+    fn tokens(&self) -> Vec<String>;
     fn query<'a>(&'a self, sink: &'a PriceSink) -> BoxFuture<Result<()>>;
 }

@@ -19,6 +19,10 @@ impl Source for CoinbaseSource {
         Origin::Coinbase
     }
 
+    fn tokens(&self) -> Vec<String> {
+        vec!["ADA".into(), "BTCb".into(), "SOLp".into(), "MATICb".into()]
+    }
+
     fn query<'a>(&'a self, sink: &'a PriceSink) -> BoxFuture<Result<()>> {
         self.query_impl(sink).boxed()
     }
@@ -76,7 +80,7 @@ impl CoinbaseSource {
             return Err(anyhow!("Unexpected response from coinbase: {:?}", response));
         };
         let mut value = Decimal::from_str(&price)?;
-        let (token, relative_to) = match product_id.as_str() {
+        let (token, unit) = match product_id.as_str() {
             "ADA-USD" => ("ADA", "USD"),
             "BTC-USD" => ("BTCb", "USD"),
             "MATIC-USD" => ("MATICb", "USD"),
@@ -89,10 +93,9 @@ impl CoinbaseSource {
             }
         };
         Ok(PriceInfo {
-            origin: Origin::Coinbase,
             token: token.into(),
+            unit: unit.into(),
             value,
-            relative_to: relative_to.into(),
         })
     }
 }

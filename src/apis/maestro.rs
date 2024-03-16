@@ -31,6 +31,10 @@ impl Source for MaestroSource {
         Origin::Maestro
     }
 
+    fn tokens(&self) -> Vec<String> {
+        TOKENS.iter().map(|t| t.to_string()).collect()
+    }
+
     fn query<'a>(&'a self, sink: &'a PriceSink) -> BoxFuture<Result<()>> {
         self.query_impl(sink).boxed()
     }
@@ -76,10 +80,9 @@ impl MaestroSource {
         let res = (messages[0].coin_a_open + messages[0].coin_a_close) / 2.;
 
         sink.send(PriceInfo {
-            origin: Origin::Maestro,
             token: token.to_string(),
+            unit: "ADA".to_string(),
             value: res.try_into()?,
-            relative_to: "ADA".to_string(),
         })?;
         Ok(())
     }

@@ -3,7 +3,7 @@ use std::{sync::Arc, time::Duration};
 use anyhow::Result;
 use clap::Parser;
 use config::{load_config, Config};
-use health::HealthServer;
+use health::{HealthServer, HealthSink};
 use networking::Network;
 use price_aggregator::PriceAggregator;
 use publisher::Publisher;
@@ -43,6 +43,7 @@ struct Args {
 struct Node {
     id: String,
     health_server: HealthServer,
+    health_sink: HealthSink,
     network: Network,
     raft: Raft,
     price_aggregator: PriceAggregator,
@@ -59,12 +60,6 @@ impl Node {
         config: &Arc<Config>,
     ) -> Result<Self> {
         let (health_server, health_sink) = HealthServer::new();
-
-        // Testing health endpoint
-        health_sink.update(
-            health::Origin::Source(apis::source::Origin::Binance),
-            health::HealthStatus::Unhealthy("testing health".into()),
-        );
 
         // Construct mpsc channels for each of our abstract state machines
         let (raft_tx, raft_rx) = mpsc::channel(10);
@@ -87,6 +82,7 @@ impl Node {
         Ok(Node {
             id: id.to_string(),
             health_server,
+            health_sink,
             network: network.clone(),
             raft: Raft::new(id, quorum, heartbeat, timeout, raft_rx, network, leader_tx),
             price_aggregator,
@@ -113,8 +109,9 @@ impl Node {
             self.network.handle_network(port, peers).await.unwrap();
         });
 
+        let health = self.health_sink;
         set.spawn(async move {
-            self.price_aggregator.run().await;
+            self.price_aggregator.run(&health).await;
         });
 
         set.spawn(async move {

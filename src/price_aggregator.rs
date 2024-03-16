@@ -8,7 +8,7 @@ use rust_decimal::Decimal;
 use tokio::{
     sync::{mpsc::unbounded_channel, watch::Sender},
     task::JoinSet,
-    time::sleep,
+    time::{sleep, Instant},
 };
 use tracing::warn;
 
@@ -20,6 +20,7 @@ use crate::{
         source::{Origin, PriceInfo, Source},
     },
     config::{CollateralConfig, Config, SyntheticConfig},
+    health::{HealthSink, HealthStatus},
 };
 
 struct SourceAdapter {
@@ -41,10 +42,16 @@ impl SourceAdapter {
         self.prices.clone()
     }
 
-    pub async fn run(self) {
+    pub async fn run(self, health: HealthSink) {
         let mut set = JoinSet::new();
 
         let (tx, mut rx) = unbounded_channel();
+
+        // track when each token was updated
+        let last_updated = Arc::new(DashMap::new());
+        for token in self.source.tokens() {
+            last_updated.insert(token, None);
+        }
 
         let source = self.source;
         set.spawn(async move {
@@ -59,15 +66,43 @@ impl SourceAdapter {
             }
         });
 
-        let prices = self.prices;
+        let updated = last_updated.clone();
+        let prices = self.prices.clone();
         set.spawn(async move {
             // write emitted values into our map
             while let Some(info) = rx.recv().await {
+                updated.insert(info.token.clone(), Some(Instant::now()));
                 prices.insert(info.token.clone(), info);
             }
         });
 
-        // TODO: check ages of prices, mark ourself as unhealthy if any are too old
+        // Check how long it's been since we updated prices
+        // Mark ourself as unhealthy if any prices are too old.
+        set.spawn(async move {
+            loop {
+                sleep(Duration::from_secs(30)).await;
+                let now = Instant::now();
+                let mut missing_updates = vec![];
+                for update_times in last_updated.iter() {
+                    let too_long_without_update = update_times
+                        .value()
+                        .map_or(true, |v| now - v >= Duration::from_secs(30));
+                    if too_long_without_update {
+                        missing_updates.push(update_times.key().clone());
+                    }
+                }
+
+                let status = if missing_updates.is_empty() {
+                    HealthStatus::Healthy
+                } else {
+                    HealthStatus::Unhealthy(format!(
+                        "Went more than 30 seconds without updates for {:?}",
+                        missing_updates
+                    ))
+                };
+                health.update(crate::health::Origin::Source(self.origin), status);
+            }
+        });
 
         while let Some(res) = set.join_next().await {
             if let Err(error) = res {
@@ -96,7 +131,7 @@ impl PriceAggregator {
         })
     }
 
-    pub async fn run(mut self) {
+    pub async fn run(mut self, health: &HealthSink) {
         let mut set = JoinSet::new();
 
         let sources = self.sources.take().unwrap();
@@ -104,8 +139,9 @@ impl PriceAggregator {
 
         // Make each source update its price map asynchronously.
         for source in sources {
+            let health = health.clone();
             set.spawn(async move {
-                source.run().await;
+                source.run(health).await;
             });
         }
 
@@ -199,7 +235,7 @@ impl<'a> ConversionLookup<'a> {
         let mut aggregated_prices: HashMap<_, Vec<Decimal>> = HashMap::new();
         for price in prices {
             aggregated_prices
-                .entry(CurrencyPair(&price.token, &price.relative_to))
+                .entry(CurrencyPair(&price.token, &price.unit))
                 .and_modify(|e| e.push(price.value))
                 .or_insert(vec![price.value]);
         }
@@ -281,7 +317,7 @@ mod tests {
     use rust_decimal::Decimal;
 
     use crate::{
-        apis::source::{Origin, PriceInfo},
+        apis::source::PriceInfo,
         config::{CollateralConfig, Config, SyntheticConfig},
     };
 
@@ -387,9 +423,8 @@ mod tests {
         let config = make_config();
         let prices = vec![PriceInfo {
             token: "BTCb".into(),
-            origin: Origin::Binance,
+            unit: "USD".into(),
             value: Decimal::new(60000, 0),
-            relative_to: "USD".into(),
         }];
         let lookup = ConversionLookup::new(&prices, &config);
 
@@ -402,15 +437,13 @@ mod tests {
         let prices = vec![
             PriceInfo {
                 token: "BTCb".into(),
-                origin: Origin::Binance,
+                unit: "USD".into(),
                 value: Decimal::new(70000, 0),
-                relative_to: "USD".into(),
             },
             PriceInfo {
                 token: "BTCb".into(),
-                origin: Origin::Coinbase,
+                unit: "USD".into(),
                 value: Decimal::new(80000, 0),
-                relative_to: "USD".into(),
             },
         ];
         let lookup = ConversionLookup::new(&prices, &config);
@@ -423,9 +456,8 @@ mod tests {
         let config = make_config();
         let prices = vec![PriceInfo {
             token: "LENFI".into(),
-            origin: Origin::Binance,
+            unit: "ADA".into(),
             value: Decimal::new(10000, 0),
-            relative_to: "ADA".into(),
         }];
         let lookup = ConversionLookup::new(&prices, &config);
 
@@ -438,15 +470,13 @@ mod tests {
         let prices = vec![
             PriceInfo {
                 token: "ADA".into(),
-                origin: Origin::Binance,
+                unit: "USD".into(),
                 value: Decimal::new(3, 1),
-                relative_to: "USD".into(),
             },
             PriceInfo {
                 token: "LENFI".into(),
-                origin: Origin::Binance,
+                unit: "ADA".into(),
                 value: Decimal::new(10000, 0),
-                relative_to: "ADA".into(),
             },
         ];
         let lookup = ConversionLookup::new(&prices, &config);

@@ -22,6 +22,10 @@ impl Source for BinanceSource {
         Origin::Binance
     }
 
+    fn tokens(&self) -> Vec<String> {
+        vec!["ADA".into(), "BTCb".into(), "SOLp".into(), "MATICb".into()]
+    }
+
     fn query<'a>(&'a self, sink: &'a PriceSink) -> BoxFuture<Result<()>> {
         self.query_impl(sink).boxed()
     }
@@ -93,10 +97,9 @@ fn process_binance_message(contents: String, sink: &PriceSink) -> Result<()> {
     };
 
     sink.send(PriceInfo {
-        origin: Origin::Binance,
         token: token.to_string(),
+        unit: "USD".to_string(),
         value,
-        relative_to: "USD".to_string(),
     })?;
 
     Ok(())
