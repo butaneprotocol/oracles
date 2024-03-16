@@ -10,7 +10,7 @@ pub enum Origin {
     Maestro,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct PriceInfo {
     pub origin: Origin,
     pub token: String,

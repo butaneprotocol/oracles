@@ -124,54 +124,29 @@ impl PriceAggregator {
         }
     }
 
-    fn report(&self, prices: &[Arc<DashMap<String, PriceInfo>>]) {
-        let prices = prices.iter().flat_map(|m| m.iter());
-
-        // Normalize to USD for now.
-        // TODO: use whatever has the most liquidity
-        let usd_per_ada = self.get_collateral("ADA").price;
-        let mut aggregated_prices: HashMap<String, Vec<Decimal>> = HashMap::new();
-        for price_info in prices {
-            let normalized_price = match price_info.relative_to.as_str() {
-                "ADA" => price_info.value * usd_per_ada,
-                "USD" => price_info.value,
-                _ => panic!(
-                    "Can't handle converting from {} to USD",
-                    price_info.relative_to
-                ),
-            };
-            aggregated_prices
-                .entry(price_info.token.clone())
-                .and_modify(|e| e.push(normalized_price))
-                .or_insert(vec![normalized_price]);
-        }
-
-        // Now we've collected a bunch of prices, average results across sources
-        let mut all_prices = HashMap::new();
-        for (token, prices) in aggregated_prices {
-            let average_price = prices.iter().fold(Decimal::ZERO, |a, b| a + b)
-                / Decimal::new(prices.len() as i64, 0);
-            all_prices.insert(token, average_price);
-        }
-
-        let mut payloads = vec![];
-        for synthetic in &self.config.synthetics {
-            let price = all_prices
-                .get(synthetic.name.as_str())
-                .unwrap_or(&synthetic.price);
-            if let Some(payload) = self.compute_payload(synthetic, *price, &all_prices) {
-                payloads.push(payload);
+    fn report(&self, price_maps: &[Arc<DashMap<String, PriceInfo>>]) {
+        let mut prices: Vec<PriceInfo> = vec![];
+        for price_map in price_maps {
+            for price in price_map.iter() {
+                prices.push(price.value().clone());
             }
         }
+
+        let conversions = ConversionLookup::new(&prices, &self.config);
+        let payloads = self
+            .config
+            .synthetics
+            .iter()
+            .map(|s| self.compute_payload(s, &conversions))
+            .collect();
         self.tx.send_replace(payloads);
     }
 
     fn compute_payload(
         &self,
         synth: &SyntheticConfig,
-        price: Decimal,
-        all_prices: &HashMap<String, Decimal>,
-    ) -> Option<PriceFeed> {
+        conversions: &ConversionLookup,
+    ) -> PriceFeed {
         let prices: Vec<_> = synth
             .collateral
             .iter()
@@ -179,20 +154,18 @@ impl PriceAggregator {
                 let collateral = self.get_collateral(c.as_str());
                 let multiplier = Decimal::new(10i64.pow(synth.digits), 0)
                     / Decimal::new(10i64.pow(collateral.digits), 0);
-                let p = all_prices
-                    .get(c.as_str())
-                    .cloned()
-                    .unwrap_or(collateral.price);
+                let p = conversions.value_in_usd(&collateral.name);
                 p * multiplier
             })
             .collect();
+        let price = conversions.value_in_usd(&synth.name);
         let (collateral_prices, denominator) = normalize(&prices, price);
-        Some(PriceFeed {
+        PriceFeed {
             collateral_prices,
             price,
             synthetic: synth.name.clone(),
             denominator,
-        })
+        }
     }
 
     fn get_collateral(&self, collateral: &str) -> &CollateralConfig {
@@ -200,6 +173,71 @@ impl PriceAggregator {
             panic!("Unrecognized collateral {}", collateral);
         };
         config
+    }
+}
+
+#[derive(Eq, Hash, PartialEq)]
+struct CurrencyPair<'a>(&'a str, &'a str);
+struct ConversionLookup<'a> {
+    conversions: HashMap<CurrencyPair<'a>, Decimal>,
+    defaults: HashMap<&'a str, Decimal>,
+}
+
+impl<'a> ConversionLookup<'a> {
+    pub fn new(prices: &'a [PriceInfo], config: &'a Arc<Config>) -> Self {
+        let mut conversions = HashMap::new();
+
+        // Set our default prices
+        let mut defaults = HashMap::new();
+        for synth in &config.synthetics {
+            defaults.insert(synth.name.as_str(), synth.price);
+        }
+        for coll in &config.collateral {
+            defaults.insert(coll.name.as_str(), coll.price);
+        }
+
+        let mut aggregated_prices: HashMap<_, Vec<Decimal>> = HashMap::new();
+        for price in prices {
+            aggregated_prices
+                .entry(CurrencyPair(&price.token, &price.relative_to))
+                .and_modify(|e| e.push(price.value))
+                .or_insert(vec![price.value]);
+        }
+        for (currencies, prices) in aggregated_prices {
+            let average_price = prices.iter().fold(Decimal::ZERO, |acc, el| acc + *el)
+                / Decimal::new(prices.len() as i64, 0);
+            conversions.insert(currencies, average_price);
+        }
+
+        Self {
+            conversions,
+            defaults,
+        }
+    }
+
+    pub fn value_in_usd(&self, token: &str) -> Decimal {
+        if token == "USD" {
+            return Decimal::ONE;
+        }
+        // If we have a direct price per unit, return that.
+        if let Some(usd_per_token) = self._get(token, "USD") {
+            return usd_per_token;
+        }
+        // Lots of prices are stored in ada, try converting through that
+        if token != "ADA" {
+            if let Some(ada_per_token) = self._get(token, "ADA") {
+                return ada_per_token * self.value_in_usd("ADA");
+            }
+        }
+
+        *self
+            .defaults
+            .get(token)
+            .unwrap_or_else(|| panic!("No price found for {}", token))
+    }
+
+    fn _get(&self, token: &str, unit: &str) -> Option<Decimal> {
+        return self.conversions.get(&CurrencyPair(token, unit)).cloned();
     }
 }
 
@@ -238,17 +276,24 @@ fn normalize(prices: &[Decimal], denominator: Decimal) -> (Vec<BigUint>, BigUint
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use rust_decimal::Decimal;
 
-    use super::normalize;
+    use crate::{
+        apis::source::{Origin, PriceInfo},
+        config::{CollateralConfig, Config, SyntheticConfig},
+    };
+
+    use super::{normalize, ConversionLookup};
 
     #[test]
-    fn should_not_panic_on_empty_input() {
+    fn normalize_should_not_panic_on_empty_input() {
         assert_eq!((vec![], 1u128.into()), normalize(&[], Decimal::ONE));
     }
 
     #[test]
-    fn should_compute_gcd() {
+    fn normalize_should_compute_gcd() {
         let prices = [Decimal::new(5526312, 7), Decimal::new(1325517, 6)];
         let (collateral_prices, denominator) = normalize(&prices, Decimal::ONE);
         assert_eq!(
@@ -261,7 +306,7 @@ mod tests {
     }
 
     #[test]
-    fn should_include_denominator_in_gcd() {
+    fn normalize_should_include_denominator_in_gcd() {
         let prices = [Decimal::new(2, 1), Decimal::new(4, 1), Decimal::new(6, 1)];
         let (collateral_prices, denominator) = normalize(&prices, Decimal::new(7, 0));
         assert_eq!(
@@ -274,7 +319,7 @@ mod tests {
     }
 
     #[test]
-    fn should_normalize_numbers_with_same_decimal_count() {
+    fn normalize_should_normalize_numbers_with_same_decimal_count() {
         let prices = [Decimal::new(1337, 3), Decimal::new(9001, 3)];
         let (collateral_prices, denominator) = normalize(&prices, Decimal::ONE);
         assert_eq!(
@@ -284,7 +329,7 @@ mod tests {
     }
 
     #[test]
-    fn should_handle_decimals_with_different_scales() {
+    fn normalize_should_handle_decimals_with_different_scales() {
         let prices = [
             Decimal::new(2_000, 3),
             Decimal::new(4_000_000, 6),
@@ -295,5 +340,117 @@ mod tests {
             (vec![2u128.into(), 4u128.into(), 6u128.into()], 1u128.into()),
             (collateral_prices, denominator)
         );
+    }
+
+    fn make_config() -> Arc<Config> {
+        Arc::new(Config {
+            synthetics: vec![
+                SyntheticConfig {
+                    name: "USDb".into(),
+                    price: Decimal::ONE,
+                    digits: 6,
+                    collateral: vec![],
+                },
+                SyntheticConfig {
+                    name: "BTCb".into(),
+                    price: Decimal::new(50000, 0),
+                    digits: 8,
+                    collateral: vec![],
+                },
+            ],
+            collateral: vec![
+                CollateralConfig {
+                    name: "ADA".into(),
+                    price: Decimal::new(6, 1),
+                    digits: 6,
+                },
+                CollateralConfig {
+                    name: "LENFI".into(),
+                    price: Decimal::new(379, 2),
+                    digits: 6,
+                },
+            ],
+        })
+    }
+
+    #[test]
+    fn value_in_usd_should_return_defaults() {
+        let config = make_config();
+        let prices = vec![];
+        let lookup = ConversionLookup::new(&prices, &config);
+
+        assert_eq!(lookup.value_in_usd("ADA"), Decimal::new(6, 1));
+    }
+
+    #[test]
+    fn value_in_usd_should_return_value_from_source() {
+        let config = make_config();
+        let prices = vec![PriceInfo {
+            token: "BTCb".into(),
+            origin: Origin::Binance,
+            value: Decimal::new(60000, 0),
+            relative_to: "USD".into(),
+        }];
+        let lookup = ConversionLookup::new(&prices, &config);
+
+        assert_eq!(lookup.value_in_usd("BTCb"), Decimal::new(60000, 0));
+    }
+
+    #[test]
+    fn value_in_usd_should_average_prices() {
+        let config = make_config();
+        let prices = vec![
+            PriceInfo {
+                token: "BTCb".into(),
+                origin: Origin::Binance,
+                value: Decimal::new(70000, 0),
+                relative_to: "USD".into(),
+            },
+            PriceInfo {
+                token: "BTCb".into(),
+                origin: Origin::Coinbase,
+                value: Decimal::new(80000, 0),
+                relative_to: "USD".into(),
+            },
+        ];
+        let lookup = ConversionLookup::new(&prices, &config);
+
+        assert_eq!(lookup.value_in_usd("BTCb"), Decimal::new(75000, 0));
+    }
+
+    #[test]
+    fn value_in_usd_should_convert_prices_in_ada_using_default_ada_price() {
+        let config = make_config();
+        let prices = vec![PriceInfo {
+            token: "LENFI".into(),
+            origin: Origin::Binance,
+            value: Decimal::new(10000, 0),
+            relative_to: "ADA".into(),
+        }];
+        let lookup = ConversionLookup::new(&prices, &config);
+
+        assert_eq!(lookup.value_in_usd("LENFI"), Decimal::new(6000, 0));
+    }
+
+    #[test]
+    fn value_in_usd_should_convert_prices_in_ada_using_ada_price_from_api() {
+        let config = make_config();
+        let prices = vec![
+            PriceInfo {
+                token: "ADA".into(),
+                origin: Origin::Binance,
+                value: Decimal::new(3, 1),
+                relative_to: "USD".into(),
+            },
+            PriceInfo {
+                token: "LENFI".into(),
+                origin: Origin::Binance,
+                value: Decimal::new(10000, 0),
+                relative_to: "ADA".into(),
+            },
+        ];
+        let lookup = ConversionLookup::new(&prices, &config);
+
+        assert_eq!(lookup.value_in_usd("LENFI"), Decimal::new(3000, 0));
     }
 }
