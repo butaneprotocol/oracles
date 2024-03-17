@@ -8,6 +8,7 @@ pub enum Origin {
     Binance,
     Coinbase,
     Maestro,
+    SundaeSwap,
 }
 
 #[derive(Clone, Debug)]

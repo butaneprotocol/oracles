@@ -52,6 +52,7 @@ impl SourceAdapter {
                         "Error occurred while querying {:?}, retrying: {}",
                         self.origin, error
                     );
+                    sleep(Duration::from_secs(1)).await;
                 }
             }
         });
