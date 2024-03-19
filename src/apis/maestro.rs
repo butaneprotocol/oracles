@@ -72,7 +72,7 @@ impl MaestroSource {
             .query(&[("limit", "1"), ("resolution", "1m")])
             .header("Accept", "application/json")
             .header("api-key", self.api_key.as_str())
-            .timeout(Duration::from_secs(2))
+            .timeout(Duration::from_secs(10))
             .send()
             .await?;
         let contents = response.text().await?;
