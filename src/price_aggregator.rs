@@ -10,8 +10,8 @@ use tracing::warn;
 
 use crate::{
     apis::{
-        binance::BinanceSource, coinbase::CoinbaseSource, maestro::MaestroSource,
-        source::PriceInfo, sundaeswap::SundaeSwapSource,
+        binance::BinanceSource, bybit::ByBitSource, coinbase::CoinbaseSource,
+        maestro::MaestroSource, source::PriceInfo, sundaeswap::SundaeSwapSource,
     },
     config::{CollateralConfig, Config, SyntheticConfig},
     health::HealthSink,
@@ -34,6 +34,7 @@ impl PriceAggregator {
             tx: Arc::new(tx),
             sources: Some(vec![
                 SourceAdapter::new(BinanceSource::new()),
+                SourceAdapter::new(ByBitSource::new()),
                 SourceAdapter::new(CoinbaseSource::new()),
                 SourceAdapter::new(MaestroSource::new()?),
                 SourceAdapter::new(SundaeSwapSource::new()?),

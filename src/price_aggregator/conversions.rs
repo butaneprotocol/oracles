@@ -4,7 +4,7 @@ use rust_decimal::Decimal;
 
 use crate::{apis::source::PriceInfo, config::Config};
 
-#[derive(Eq, Hash, PartialEq)]
+#[derive(Debug, Eq, Hash, PartialEq)]
 struct CurrencyPair<'a>(&'a str, &'a str);
 pub struct ConversionLookup<'a> {
     conversions: HashMap<CurrencyPair<'a>, Decimal>,

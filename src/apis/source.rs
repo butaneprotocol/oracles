@@ -6,6 +6,7 @@ use tokio::sync::mpsc;
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum Origin {
     Binance,
+    ByBit,
     Coinbase,
     Maestro,
     SundaeSwap,
