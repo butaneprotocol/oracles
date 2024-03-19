@@ -6,7 +6,7 @@ use std::{env, sync::Arc, time::Duration};
 use tokio::{task::JoinSet, time::sleep};
 use tracing::warn;
 
-use crate::apis::source::{Origin, PriceInfo, PriceSink};
+use crate::apis::source::{PriceInfo, PriceSink};
 
 use super::source::Source;
 
@@ -27,8 +27,8 @@ pub struct MaestroSource {
 }
 
 impl Source for MaestroSource {
-    fn origin(&self) -> Origin {
-        Origin::Maestro
+    fn name(&self) -> String {
+        "Maestro".into()
     }
 
     fn tokens(&self) -> Vec<String> {

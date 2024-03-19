@@ -7,7 +7,7 @@ use serde::Deserialize;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{trace, warn};
 
-use crate::apis::source::{Origin, PriceInfo, PriceSink};
+use crate::apis::source::{PriceInfo, PriceSink};
 
 use super::source::Source;
 
@@ -18,8 +18,8 @@ const URL: &str = "wss://fstream.binance.com/stream?streams=btcusdt@markPrice/ad
 pub struct BinanceSource;
 
 impl Source for BinanceSource {
-    fn origin(&self) -> Origin {
-        Origin::Binance
+    fn name(&self) -> String {
+        "Binance".into()
     }
 
     fn tokens(&self) -> Vec<String> {

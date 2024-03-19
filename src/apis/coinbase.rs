@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{trace, warn};
 
-use super::source::{Origin, PriceInfo, PriceSink, Source};
+use super::source::{PriceInfo, PriceSink, Source};
 
 const URL: &str = "wss://ws-feed.exchange.coinbase.com";
 
@@ -15,8 +15,8 @@ const URL: &str = "wss://ws-feed.exchange.coinbase.com";
 pub struct CoinbaseSource;
 
 impl Source for CoinbaseSource {
-    fn origin(&self) -> Origin {
-        Origin::Coinbase
+    fn name(&self) -> String {
+        "Coinbase".into()
     }
 
     fn tokens(&self) -> Vec<String> {

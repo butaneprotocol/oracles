@@ -7,8 +7,6 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
 
-use crate::apis::source::Origin;
-
 use super::source::{PriceInfo, PriceSink, Source};
 
 const TOKENS: [&str; 5] = ["DJED", "ENCS", "LENFI", "MIN", "SNEK"];
@@ -18,8 +16,8 @@ pub struct SundaeSwapSource {
 }
 
 impl Source for SundaeSwapSource {
-    fn origin(&self) -> super::source::Origin {
-        Origin::SundaeSwap
+    fn name(&self) -> String {
+        "SundaeSwap".into()
     }
 
     fn tokens(&self) -> Vec<String> {

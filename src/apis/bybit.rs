@@ -10,7 +10,7 @@ use tokio::{
 };
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
-use super::source::{Origin, PriceInfo, PriceSink, Source};
+use super::source::{PriceInfo, PriceSink, Source};
 
 const URL: &str = "wss://stream.bybit.com/v5/public/linear";
 
@@ -18,8 +18,8 @@ const URL: &str = "wss://stream.bybit.com/v5/public/linear";
 pub struct ByBitSource;
 
 impl Source for ByBitSource {
-    fn origin(&self) -> super::source::Origin {
-        Origin::ByBit
+    fn name(&self) -> String {
+        "ByBit".into()
     }
 
     fn tokens(&self) -> Vec<String> {

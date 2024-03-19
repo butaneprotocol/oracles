@@ -6,9 +6,9 @@ use tide::Response;
 use tokio::{sync::mpsc, task::JoinSet};
 use tracing::{info, warn};
 
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum Origin {
-    Source(crate::apis::source::Origin),
+    Source(String),
 }
 
 pub struct HealthInfo {
@@ -28,7 +28,10 @@ type HealthMap = Arc<DashMap<Origin, HealthStatus>>;
 pub struct HealthSink(mpsc::UnboundedSender<HealthInfo>);
 impl HealthSink {
     pub fn update(&self, origin: Origin, status: HealthStatus) {
-        let result = self.0.send(HealthInfo { origin, status });
+        let result = self.0.send(HealthInfo {
+            origin: origin.clone(),
+            status,
+        });
         if let Err(err) = result {
             warn!("Could not update health for {:?}: {}", origin, err);
         }

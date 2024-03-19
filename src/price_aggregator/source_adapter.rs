@@ -9,12 +9,12 @@ use tokio::{
 use tracing::warn;
 
 use crate::{
-    apis::source::{Origin, PriceInfo, Source},
-    health::{HealthSink, HealthStatus},
+    apis::source::{PriceInfo, Source},
+    health::{HealthSink, HealthStatus, Origin},
 };
 
 pub struct SourceAdapter {
-    origin: Origin,
+    name: String,
     source: Box<dyn Source + Send + Sync>,
     prices: Arc<DashMap<String, PriceInfo>>,
 }
@@ -22,7 +22,7 @@ pub struct SourceAdapter {
 impl SourceAdapter {
     pub fn new<T: Source + Send + Sync + 'static>(source: T) -> Self {
         Self {
-            origin: source.origin(),
+            name: source.name(),
             source: Box::new(source),
             prices: Arc::new(DashMap::new()),
         }
@@ -44,13 +44,14 @@ impl SourceAdapter {
         }
 
         let source = self.source;
+        let name = self.name.clone();
         set.spawn(async move {
             // read values from the source
             loop {
                 if let Err(error) = source.query(&tx).await {
                     warn!(
                         "Error occurred while querying {:?}, retrying: {}",
-                        self.origin, error
+                        name, error
                     );
                     sleep(Duration::from_secs(1)).await;
                 }
@@ -69,6 +70,7 @@ impl SourceAdapter {
 
         // Check how long it's been since we updated prices
         // Mark ourself as unhealthy if any prices are too old.
+        let name = self.name.clone();
         set.spawn(async move {
             loop {
                 sleep(Duration::from_secs(30)).await;
@@ -91,7 +93,7 @@ impl SourceAdapter {
                         missing_updates
                     ))
                 };
-                health.update(crate::health::Origin::Source(self.origin), status);
+                health.update(Origin::Source(name.clone()), status);
             }
         });
 
