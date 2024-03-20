@@ -2,9 +2,8 @@ use std::{env, time::Duration};
 
 use anyhow::Result;
 use minicbor::Encoder;
-use num_bigint::BigUint;
 use pallas_crypto::key::ed25519::SecretKey;
-use pallas_primitives::conway::{BigInt, Constr, PlutusData};
+use pallas_primitives::conway::PlutusData;
 use rust_decimal::prelude::ToPrimitive;
 use serde::Serialize;
 use tokio::{
@@ -13,21 +12,19 @@ use tokio::{
 };
 use tracing::warn;
 
-use crate::price_aggregator::PriceFeed;
-
-const CBOR_VARIANT_0: u64 = 121;
+use crate::price_feed::{PriceFeedEntry, SignedPriceFeed};
 
 #[derive(Clone)]
 pub struct SingleSignatureAggregator {
     key: SecretKey,
-    price_feed: Receiver<Vec<PriceFeed>>,
+    price_feed: Receiver<Vec<PriceFeedEntry>>,
     leader_feed: Receiver<bool>,
     payload_sink: Sender<String>,
 }
 
 impl SingleSignatureAggregator {
     pub fn new(
-        price_rx: Receiver<Vec<PriceFeed>>,
+        price_rx: Receiver<Vec<PriceFeedEntry>>,
         leader_rx: Receiver<bool>,
         tx: Sender<String>,
     ) -> Result<Self> {
@@ -46,9 +43,12 @@ impl SingleSignatureAggregator {
                 continue;
             }
 
-            let price_feed: Vec<PriceFeed> = {
+            let price_feed: Vec<PriceFeedEntry> = {
                 let price_feed_ref = self.price_feed.borrow_and_update();
-                price_feed_ref.iter().cloned().collect::<Vec<PriceFeed>>()
+                price_feed_ref
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<PriceFeedEntry>>()
             };
 
             let payload = match self.serialize_payload(price_feed) {
@@ -64,47 +64,30 @@ impl SingleSignatureAggregator {
         }
     }
 
-    fn serialize_payload(&self, data: Vec<PriceFeed>) -> Result<String> {
+    fn serialize_payload(&self, data: Vec<PriceFeedEntry>) -> Result<String> {
         let mut results = vec![];
         for datum in data {
-            let price_feed = encode_struct(vec![
-                // collateral_prices
-                PlutusData::Array(datum.collateral_prices.iter().map(encode_bigint).collect()),
-                // synthetic
-                PlutusData::BoundedBytes(datum.synthetic.as_bytes().to_vec().into()),
-                // denominator
-                encode_bigint(&datum.denominator),
-                // validity
-                Validity {
-                    lower_bound: IntervalBound {
-                        bound_type: IntervalBoundType::NegativeInfinity,
-                        is_inclusive: false,
-                    },
-                    upper_bound: IntervalBound {
-                        bound_type: IntervalBoundType::PositiveInfinity,
-                        is_inclusive: false,
-                    },
-                }
-                .into(),
-            ]);
+            let synthetic = datum.data.synthetic.clone();
+            let price_feed: PlutusData = datum.data.into();
             let price_feed_bytes = {
                 let mut encoder = Encoder::new(vec![]);
                 encoder.encode(&price_feed)?;
                 encoder.into_writer()
             };
             let signature = self.key.sign(&price_feed_bytes);
+            let signed_price_feed = SignedPriceFeed {
+                data: price_feed,
+                signature: signature.as_ref().to_vec(),
+            };
             let payload = {
-                let data = PlutusData::Array(vec![encode_struct(vec![
-                    price_feed,
-                    PlutusData::BoundedBytes(signature.as_ref().to_vec().into()),
-                ])]);
+                let data = PlutusData::Array(vec![signed_price_feed.into()]);
                 let mut encoder = Encoder::new(vec![]);
                 encoder.encode(data)?;
                 encoder.into_writer()
             };
 
             let top_level_payload = TopLevelPayload {
-                synthetic: datum.synthetic,
+                synthetic,
                 price: datum.price.to_f64().expect("Count not convert decimal"),
                 payload: hex::encode(payload),
             };
@@ -112,33 +95,6 @@ impl SingleSignatureAggregator {
         }
         Ok(serde_json::to_string(&results)?)
     }
-}
-
-fn encode_bigint(value: &BigUint) -> PlutusData {
-    PlutusData::BigInt(match value.to_i64() {
-        Some(val) => BigInt::Int(val.into()),
-        None => BigInt::BigUInt(value.to_bytes_be().into()),
-    })
-}
-
-fn encode_struct(fields: Vec<PlutusData>) -> PlutusData {
-    PlutusData::Constr(Constr {
-        tag: CBOR_VARIANT_0,
-        any_constructor: None,
-        fields,
-    })
-}
-
-fn encode_enum(variant: u64, value: Option<PlutusData>) -> PlutusData {
-    PlutusData::Constr(Constr {
-        tag: CBOR_VARIANT_0 + variant,
-        any_constructor: None,
-        fields: if let Some(val) = value {
-            vec![val]
-        } else {
-            vec![]
-        },
-    })
 }
 
 fn decode_key() -> Result<SecretKey> {
@@ -154,46 +110,4 @@ struct TopLevelPayload {
     pub synthetic: String,
     pub price: f64,
     pub payload: String,
-}
-
-#[derive(Clone, Copy)]
-struct Validity {
-    lower_bound: IntervalBound,
-    upper_bound: IntervalBound,
-}
-impl From<Validity> for PlutusData {
-    fn from(val: Validity) -> Self {
-        encode_struct(vec![val.lower_bound.into(), val.upper_bound.into()])
-    }
-}
-
-#[derive(Clone, Copy)]
-struct IntervalBound {
-    bound_type: IntervalBoundType,
-    is_inclusive: bool,
-}
-impl From<IntervalBound> for PlutusData {
-    fn from(val: IntervalBound) -> Self {
-        encode_struct(vec![
-            val.bound_type.into(),
-            encode_enum(if val.is_inclusive { 1 } else { 0 }, None),
-        ])
-    }
-}
-
-#[derive(Clone, Copy)]
-enum IntervalBoundType {
-    NegativeInfinity,
-    #[allow(unused)]
-    Finite(u64),
-    PositiveInfinity,
-}
-impl From<IntervalBoundType> for PlutusData {
-    fn from(val: IntervalBoundType) -> Self {
-        match val {
-            IntervalBoundType::NegativeInfinity => encode_enum(0, None),
-            IntervalBoundType::Finite(val) => encode_enum(1, Some(encode_bigint(&val.into()))),
-            IntervalBoundType::PositiveInfinity => encode_enum(2, None),
-        }
-    }
 }

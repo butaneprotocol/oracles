@@ -23,6 +23,7 @@ pub mod frost;
 pub mod health;
 pub mod networking;
 pub mod price_aggregator;
+pub mod price_feed;
 pub mod publisher;
 pub mod raft;
 pub mod signature_aggregator;

@@ -15,6 +15,7 @@ use crate::{
     },
     config::{CollateralConfig, Config, SyntheticConfig},
     health::HealthSink,
+    price_feed::{PriceFeed, PriceFeedEntry, Validity},
 };
 
 use self::{conversions::ConversionLookup, source_adapter::SourceAdapter};
@@ -23,13 +24,13 @@ mod conversions;
 mod source_adapter;
 
 pub struct PriceAggregator {
-    tx: Arc<Sender<Vec<PriceFeed>>>,
+    tx: Arc<Sender<Vec<PriceFeedEntry>>>,
     sources: Option<Vec<SourceAdapter>>,
     config: Arc<Config>,
 }
 
 impl PriceAggregator {
-    pub fn new(tx: Sender<Vec<PriceFeed>>, config: Arc<Config>) -> Result<Self> {
+    pub fn new(tx: Sender<Vec<PriceFeedEntry>>, config: Arc<Config>) -> Result<Self> {
         Ok(Self {
             tx: Arc::new(tx),
             sources: Some(vec![
@@ -94,7 +95,7 @@ impl PriceAggregator {
         &self,
         synth: &SyntheticConfig,
         conversions: &ConversionLookup,
-    ) -> PriceFeed {
+    ) -> PriceFeedEntry {
         let prices: Vec<_> = synth
             .collateral
             .iter()
@@ -108,11 +109,15 @@ impl PriceAggregator {
             .collect();
         let price = conversions.value_in_usd(&synth.name);
         let (collateral_prices, denominator) = normalize(&prices, price);
-        PriceFeed {
-            collateral_prices,
+        PriceFeedEntry {
             price,
-            synthetic: synth.name.clone(),
-            denominator,
+            data: PriceFeed {
+                collateral_prices,
+                synthetic: synth.name.clone(),
+                denominator,
+                // TODO: limit validity
+                validity: Validity::default(),
+            },
         }
     }
 
@@ -122,14 +127,6 @@ impl PriceAggregator {
         };
         config
     }
-}
-
-#[derive(Clone, Debug)]
-pub struct PriceFeed {
-    pub collateral_prices: Vec<BigUint>,
-    pub synthetic: String,
-    pub price: Decimal,
-    pub denominator: BigUint,
 }
 
 fn normalize(prices: &[Decimal], denominator: Decimal) -> (Vec<BigUint>, BigUint) {
