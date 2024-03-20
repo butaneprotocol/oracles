@@ -45,6 +45,13 @@ pub enum RaftStatus {
     Leader,
 }
 
+#[derive(Eq, PartialEq, Clone)]
+pub enum RaftLeader {
+    Myself,
+    Other(String),
+    Unknown,
+}
+
 #[derive(Clone)]
 pub struct RaftState {
     pub id: String,
@@ -60,7 +67,7 @@ pub struct RaftState {
     pub status: RaftStatus,
     pub term: usize,
 
-    pub is_leader: Arc<Sender<bool>>,
+    pub leader: Arc<Sender<RaftLeader>>,
 }
 
 #[derive(Clone)]
@@ -78,7 +85,7 @@ impl RaftState {
         quorum: usize,
         heartbeat_freq: std::time::Duration,
         timeout_freq: std::time::Duration,
-        is_leader: Sender<bool>,
+        leader: Sender<RaftLeader>,
     ) -> Self {
         RaftState {
             id: id.to_string(),
@@ -94,7 +101,7 @@ impl RaftState {
                 voted_for: None,
             },
             term: 0,
-            is_leader: Arc::new(is_leader),
+            leader: Arc::new(leader),
         }
     }
 
@@ -143,10 +150,10 @@ impl RaftState {
                 let current_leader = self.leader();
                 if *term >= self.term {
                     self.term = *term;
-                    self.status = RaftStatus::Follower {
+                    self.set_status(RaftStatus::Follower {
                         leader: Some(leader.clone()),
                         voted_for: None,
-                    };
+                    });
                     if Some(leader.clone()) != current_leader {
                         info!(me = self.id, term = term, leader = leader, "New leader");
                     }
@@ -187,10 +194,10 @@ impl RaftState {
                                 RaftStatus::Leader => Some(self.id.clone()),
                                 RaftStatus::Candidate { .. } => None,
                             };
-                            self.status = RaftStatus::Follower {
+                            self.set_status(RaftStatus::Follower {
                                 leader: current_leader,
                                 voted_for: Some(from.clone()),
-                            };
+                            });
                             (true, "newer term with note vote")
                         } else {
                             (false, "old term")
@@ -198,10 +205,10 @@ impl RaftState {
                     }
                     RaftStatus::Candidate { .. } => {
                         if *requested_term > self.term {
-                            self.status = RaftStatus::Follower {
+                            self.set_status(RaftStatus::Follower {
                                 leader: None,
                                 voted_for: Some(from.clone()),
-                            };
+                            });
                             (true, "newer term with vote")
                         } else {
                             (false, "already voted for self")
@@ -249,7 +256,7 @@ impl RaftState {
                             quorum = self.quorum,
                             "Vote received"
                         );
-                        self.status = RaftStatus::Candidate { votes: new_votes };
+                        self.set_status(RaftStatus::Candidate { votes: new_votes });
                         if new_votes >= self.quorum {
                             info!(
                                 me = self.id,
@@ -258,9 +265,7 @@ impl RaftState {
                                 quorum = self.quorum,
                                 "Election won"
                             );
-                            self.status = RaftStatus::Leader;
-                            // sending this update is fire and forget
-                            let _ = self.is_leader.send(true);
+                            self.set_status(RaftStatus::Leader);
                             // Immediately send a heartbeat to make leader election stable
                             return self
                                 .peers
@@ -331,7 +336,7 @@ impl RaftState {
             self.jitter = std::time::Duration::from_millis((rand::random::<u8>() % 50 + 50) as u64);
 
             // Start an election
-            self.status = RaftStatus::Candidate { votes: 1 };
+            self.set_status(RaftStatus::Candidate { votes: 1 });
             self.term += 1;
             self.last_heartbeat = timestamp;
 
@@ -374,6 +379,25 @@ impl RaftState {
             vec![]
         }
     }
+
+    fn set_status(&mut self, status: RaftStatus) {
+        let leader = match &status {
+            RaftStatus::Leader => RaftLeader::Myself,
+            RaftStatus::Follower {
+                leader: Some(leader),
+                ..
+            } => RaftLeader::Other(leader.clone()),
+            _ => RaftLeader::Unknown,
+        };
+        self.status = status;
+        self.leader.send_if_modified(|old_leader| {
+            let changed = *old_leader != leader;
+            if changed {
+                *old_leader = leader;
+            }
+            changed
+        });
+    }
 }
 
 impl Raft {
@@ -385,7 +409,7 @@ impl Raft {
 
         incoming_messages: mpsc::Receiver<RaftMessage>,
         network: Network,
-        is_leader: Sender<bool>,
+        leader: Sender<RaftLeader>,
     ) -> Self {
         info!(
             me = id,
@@ -403,7 +427,7 @@ impl Raft {
                 quorum,
                 heartbeat_freq,
                 timeout_freq,
-                is_leader,
+                leader,
             ))),
         }
     }

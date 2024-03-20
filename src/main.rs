@@ -7,7 +7,7 @@ use health::{HealthServer, HealthSink};
 use networking::Network;
 use price_aggregator::PriceAggregator;
 use publisher::Publisher;
-use raft::Raft;
+use raft::{Raft, RaftLeader};
 use signature_aggregator::SingleSignatureAggregator;
 use tokio::{
     sync::{mpsc, watch},
@@ -72,7 +72,7 @@ impl Node {
 
         let price_aggregator = PriceAggregator::new(pa_tx, config.clone())?;
 
-        let (leader_tx, leader_rx) = watch::channel(false);
+        let (leader_tx, leader_rx) = watch::channel(RaftLeader::Unknown);
 
         let (result_tx, result_rx) = mpsc::channel(10);
 

@@ -12,20 +12,23 @@ use tokio::{
 };
 use tracing::warn;
 
-use crate::price_feed::{PriceFeedEntry, SignedPriceFeed};
+use crate::{
+    price_feed::{PriceFeedEntry, SignedPriceFeed},
+    raft::RaftLeader,
+};
 
 #[derive(Clone)]
 pub struct SingleSignatureAggregator {
     key: SecretKey,
     price_feed: Receiver<Vec<PriceFeedEntry>>,
-    leader_feed: Receiver<bool>,
+    leader_feed: Receiver<RaftLeader>,
     payload_sink: Sender<String>,
 }
 
 impl SingleSignatureAggregator {
     pub fn new(
         price_rx: Receiver<Vec<PriceFeedEntry>>,
-        leader_rx: Receiver<bool>,
+        leader_rx: Receiver<RaftLeader>,
         tx: Sender<String>,
     ) -> Result<Self> {
         Ok(Self {
@@ -39,7 +42,7 @@ impl SingleSignatureAggregator {
     pub async fn run(&mut self) {
         loop {
             sleep(Duration::from_secs(5)).await;
-            if !*self.leader_feed.borrow() {
+            if !matches!(*self.leader_feed.borrow(), RaftLeader::Myself) {
                 continue;
             }
 
