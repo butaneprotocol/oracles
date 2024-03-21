@@ -17,6 +17,8 @@ use crate::{
     raft::RaftLeader,
 };
 
+pub mod new;
+
 #[derive(Clone)]
 pub struct SingleSignatureAggregator {
     key: SecretKey,
