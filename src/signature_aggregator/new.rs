@@ -51,17 +51,22 @@ pub enum SignerEvent {
 enum LeaderState {
     Ready,
     CollectingCommitments {
+        round: String,
         commitments: Vec<Commitment>,
         my_nonces: Vec<SigningNonces>,
     },
     CollectingSignatures {
+        round: String,
         signatures: Vec<Signature>,
         packages: Vec<SigningPackage>,
     },
 }
 enum FollowerState {
     Ready,
-    Committed { nonces: Vec<SigningNonces> },
+    Committed {
+        round: String,
+        nonces: Vec<SigningNonces>,
+    },
 }
 enum SignerState {
     Leader(LeaderState),
@@ -91,7 +96,6 @@ pub struct Signer {
     message_sink: Sender<OutgoingMessage>,
     payload_sink: Sender<Vec<SignedPayloadEntry>>,
     state: SignerState,
-    current_round: Option<String>,
     rng: ThreadRng,
 }
 
@@ -114,7 +118,6 @@ impl Signer {
             message_sink,
             payload_sink,
             state: SignerState::Unknown,
-            current_round: None,
             rng: thread_rng(),
         }
     }
@@ -133,44 +136,33 @@ impl Signer {
                     self.request_commitments().await?;
                 }
             }
-            SignerEvent::Message(SignerMessage { round, data }) => {
-                if let SignerMessageData::RequestCommitment = data {
-                    if let SignerState::Follower(_, _) = self.state {
-                        self.current_round = Some(round);
-                    }
-                } else if !self.current_round.as_ref().is_some_and(|r| *r == round) {
-                    // message from a different round
-                    return Ok(());
+            SignerEvent::Message(SignerMessage { round, data }) => match data {
+                SignerMessageData::RequestCommitment => {
+                    self.send_commitment(round).await?;
                 }
-                match data {
-                    SignerMessageData::RequestCommitment => {
-                        self.send_commitment().await?;
-                    }
-                    SignerMessageData::Commit(commitment) => {
-                        self.process_commitment(commitment).await?;
-                    }
-                    SignerMessageData::RequestSignature(packages) => {
-                        self.send_signature(packages).await?;
-                    }
-                    SignerMessageData::Sign(signature) => {
-                        self.process_signature(signature).await?;
-                    }
+                SignerMessageData::Commit(commitment) => {
+                    self.process_commitment(round, commitment).await?;
                 }
-            }
+                SignerMessageData::RequestSignature(packages) => {
+                    self.send_signature(round, packages).await?;
+                }
+                SignerMessageData::Sign(signature) => {
+                    self.process_signature(round, signature).await?;
+                }
+            },
         }
         Ok(())
     }
 
     async fn request_commitments(&mut self) -> Result<()> {
         let round = Uuid::new_v4().to_string();
-        self.current_round = Some(round.clone());
 
         // request other folks commit
         self.message_sink
             .send(OutgoingMessage {
                 to: None, // broadcast this
                 message: SignerMessage {
-                    round,
+                    round: round.clone(),
                     data: SignerMessageData::RequestCommitment,
                 },
             })
@@ -180,6 +172,7 @@ impl Signer {
         // And commit ourself
         let (my_nonces, commitment) = self.commit();
         self.state = SignerState::Leader(LeaderState::CollectingCommitments {
+            round,
             commitments: vec![commitment],
             my_nonces,
         });
@@ -187,17 +180,12 @@ impl Signer {
         Ok(())
     }
 
-    async fn send_commitment(&mut self) -> Result<()> {
+    async fn send_commitment(&mut self, round: String) -> Result<()> {
         let SignerState::Follower(leader_id, _) = &self.state else {
             // we're not a follower ATM
             return Ok(());
         };
         let leader_id = leader_id.clone();
-        let Some(round) = &self.current_round else {
-            // we're not mid-round
-            return Ok(());
-        };
-        let round = round.clone();
 
         // Send our commitment
         let (nonces, commitment) = self.commit();
@@ -205,7 +193,7 @@ impl Signer {
             .send(OutgoingMessage {
                 to: Some(leader_id.clone()),
                 message: SignerMessage {
-                    round,
+                    round: round.clone(),
                     data: SignerMessageData::Commit(commitment),
                 },
             })
@@ -213,13 +201,17 @@ impl Signer {
             .context("Failed to commit")?;
 
         // And wait to be asked to sign
-        self.state = SignerState::Follower(leader_id.clone(), FollowerState::Committed { nonces });
+        self.state = SignerState::Follower(
+            leader_id.clone(),
+            FollowerState::Committed { round, nonces },
+        );
 
         Ok(())
     }
 
-    async fn process_commitment(&mut self, commitment: Commitment) -> Result<()> {
+    async fn process_commitment(&mut self, round: String, commitment: Commitment) -> Result<()> {
         let SignerState::Leader(LeaderState::CollectingCommitments {
+            round: curr_round,
             commitments,
             my_nonces,
         }) = &mut self.state
@@ -227,11 +219,10 @@ impl Signer {
             // we're not the leader ATM, or not waiting for commitments
             return Ok(());
         };
-        let Some(round) = &self.current_round else {
-            // we're not mid-round
+        if *curr_round != round {
+            // Commitment from a different round
             return Ok(());
-        };
-        let round = round.clone();
+        }
 
         if commitments
             .iter()
@@ -280,11 +271,12 @@ impl Signer {
                 .context(format!("Failed to request signature from {}", recipient))?;
         }
 
-        // And be sure ot sign the message ourself
+        // And be sure to sign the message ourself
         let nonces = my_nonces.clone();
         let my_signature = self.sign(&packages, &nonces)?;
 
         self.state = SignerState::Leader(LeaderState::CollectingSignatures {
+            round,
             signatures: vec![my_signature],
             packages,
         });
@@ -292,14 +284,20 @@ impl Signer {
         Ok(())
     }
 
-    async fn send_signature(&mut self, packages: Vec<SigningPackage>) -> Result<()> {
-        let SignerState::Follower(leader_id, FollowerState::Committed { nonces }) = &self.state
+    async fn send_signature(&mut self, round: String, packages: Vec<SigningPackage>) -> Result<()> {
+        let SignerState::Follower(
+            leader_id,
+            FollowerState::Committed {
+                round: curr_round,
+                nonces,
+            },
+        ) = &self.state
         else {
             // We're not a follower, or we aren't waiting to sign something
             return Ok(());
         };
-        let Some(round) = self.current_round.take() else {
-            // we're not mid-round
+        if *curr_round != round {
+            // Signature requested from a different round
             return Ok(());
         };
 
@@ -324,8 +322,9 @@ impl Signer {
         Ok(())
     }
 
-    async fn process_signature(&mut self, signature: Signature) -> Result<()> {
+    async fn process_signature(&mut self, round: String, signature: Signature) -> Result<()> {
         let SignerState::Leader(LeaderState::CollectingSignatures {
+            round: curr_round,
             signatures,
             packages,
         }) = &mut self.state
@@ -333,6 +332,10 @@ impl Signer {
             // We're not a leader, or we're not waiting for signatures
             return Ok(());
         };
+        if *curr_round != round {
+            // Signature from another round
+            return Ok(());
+        }
 
         if signatures
             .iter()
