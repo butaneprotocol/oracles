@@ -73,7 +73,7 @@ impl SingleSignatureAggregator {
         let mut results = vec![];
         for datum in data {
             let synthetic = datum.data.synthetic.clone();
-            let price_feed: PlutusData = datum.data.into();
+            let price_feed: PlutusData = (&datum.data).into();
             let price_feed_bytes = {
                 let mut encoder = Encoder::new(vec![]);
                 encoder.encode(&price_feed)?;
@@ -85,7 +85,7 @@ impl SingleSignatureAggregator {
                 signature: signature.as_ref().to_vec(),
             };
             let payload = {
-                let data = PlutusData::Array(vec![signed_price_feed.into()]);
+                let data = PlutusData::Array(vec![(&signed_price_feed).into()]);
                 let mut encoder = Encoder::new(vec![]);
                 encoder.encode(data)?;
                 encoder.into_writer()

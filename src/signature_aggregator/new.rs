@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use frost_ed25519::{
     aggregate,
     keys::{KeyPackage, PublicKeyPackage},
@@ -8,6 +8,8 @@ use frost_ed25519::{
     round2::{self, SignatureShare},
     Identifier, SigningPackage,
 };
+use minicbor::{Decoder, Encoder};
+use pallas_primitives::conway::PlutusData;
 use rand::{rngs::ThreadRng, thread_rng};
 use rust_decimal::Decimal;
 use tokio::sync::mpsc::Sender;
@@ -251,12 +253,15 @@ impl Signer {
         }
 
         // Request signatures from all the committees
-        // TODO: actually serialize the message
-        let messages: Vec<&str> = self.price_data.iter().map(|_| "Hello, world!").collect();
+        let messages: Vec<Vec<u8>> = self
+            .price_data
+            .iter()
+            .map(|e| serialize_price_feed(&e.data))
+            .collect();
         let packages: Vec<SigningPackage> = commitment_maps
             .into_iter()
             .zip(messages)
-            .map(|(c, m)| SigningPackage::new(c, m.as_bytes()))
+            .map(|(c, m)| SigningPackage::new(c, &m))
             .collect();
         for recipient in recipients {
             self.message_sink
@@ -301,7 +306,18 @@ impl Signer {
             return Ok(());
         };
 
-        // TODO: validate what we sign
+        // Make sure we are OK with signing this
+        if packages.len() != self.price_data.len() {
+            return Err(anyhow!(
+                "Mismatched price feed count. Is this server misconfigured?"
+            ));
+        }
+        for (package, my_feed) in packages.iter().zip(&self.price_data) {
+            let leader_feed = deserialize_price_feed(package.message())?;
+            if !should_sign(&leader_feed, &my_feed.data) {
+                return Err(anyhow!("Mismatched feed"));
+            }
+        }
 
         // Send our signature back to the leader
         let signature = self.sign(&packages, nonces)?;
@@ -416,6 +432,23 @@ impl Signer {
             signatures,
         })
     }
+}
+
+fn serialize_price_feed(price_feed: &PriceFeed) -> Vec<u8> {
+    let plutus: PlutusData = price_feed.into();
+    let mut encoder = Encoder::new(vec![]);
+    encoder.encode(&plutus).unwrap(); // this is infallible
+    encoder.into_writer()
+}
+
+fn deserialize_price_feed(bytes: &[u8]) -> Result<PriceFeed> {
+    let mut decoder = Decoder::new(bytes);
+    let result: PriceFeed = decoder.decode().context("Could not decode price_feed")?;
+    Ok(result)
+}
+
+fn should_sign(leader_feed: &PriceFeed, my_feed: &PriceFeed) -> bool {
+    leader_feed == my_feed
 }
 
 #[cfg(test)]
