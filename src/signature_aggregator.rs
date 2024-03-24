@@ -1,117 +1,125 @@
-use std::{env, time::Duration};
+pub mod consensus_aggregator;
+pub mod signer;
+pub mod single_aggregator;
+
+use std::path::Path;
 
 use anyhow::Result;
+pub use consensus_aggregator::ConsensusSignatureAggregator;
 use minicbor::Encoder;
-use pallas_crypto::key::ed25519::SecretKey;
 use pallas_primitives::conway::PlutusData;
 use rust_decimal::prelude::ToPrimitive;
 use serde::Serialize;
+pub use single_aggregator::SingleSignatureAggregator;
 use tokio::{
-    sync::{mpsc::Sender, watch::Receiver},
-    time::sleep,
+    select,
+    sync::{mpsc, watch::Receiver},
 };
 use tracing::warn;
 
 use crate::{
-    price_feed::{PriceFeedEntry, SignedPriceFeed},
+    networking::Network,
+    price_feed::{PriceFeedEntry, SignedPriceFeedEntry},
     raft::RaftLeader,
 };
 
-pub mod signer;
-
-#[derive(Clone)]
-pub struct SingleSignatureAggregator {
-    key: SecretKey,
-    price_feed: Receiver<Vec<PriceFeedEntry>>,
-    leader_feed: Receiver<RaftLeader>,
-    payload_sink: Sender<String>,
+pub struct SignatureAggregator {
+    implementation: SignatureAggregatorImplementation,
+    signed_price_source: mpsc::Receiver<Vec<SignedPriceFeedEntry>>,
+    payload_sink: mpsc::Sender<String>,
+}
+enum SignatureAggregatorImplementation {
+    Single(SingleSignatureAggregator),
+    Consensus(ConsensusSignatureAggregator),
 }
 
-impl SingleSignatureAggregator {
-    pub fn new(
-        price_rx: Receiver<Vec<PriceFeedEntry>>,
-        leader_rx: Receiver<RaftLeader>,
-        tx: Sender<String>,
+impl SignatureAggregator {
+    pub fn single(
+        price_source: Receiver<Vec<PriceFeedEntry>>,
+        leader_source: Receiver<RaftLeader>,
+        payload_sink: mpsc::Sender<String>,
     ) -> Result<Self> {
-        Ok(Self {
-            key: decode_key()?,
-            price_feed: price_rx,
-            leader_feed: leader_rx,
-            payload_sink: tx,
+        let (signed_price_sink, signed_price_source) = mpsc::channel(10);
+        let aggregator =
+            SingleSignatureAggregator::new(price_source, leader_source, signed_price_sink)?;
+        Ok(SignatureAggregator {
+            implementation: SignatureAggregatorImplementation::Single(aggregator),
+            signed_price_source,
+            payload_sink,
         })
     }
 
-    pub async fn run(&mut self) {
-        loop {
-            sleep(Duration::from_secs(5)).await;
-            if !matches!(*self.leader_feed.borrow(), RaftLeader::Myself) {
-                continue;
-            }
+    pub fn consensus(
+        id: String,
+        network: Network,
+        key_path: &Path,
+        public_key_path: &Path,
+        price_source: Receiver<Vec<PriceFeedEntry>>,
+        leader_source: Receiver<RaftLeader>,
+        payload_sink: mpsc::Sender<String>,
+    ) -> Result<Self> {
+        let (signed_price_sink, signed_price_source) = mpsc::channel(10);
+        let aggregator = ConsensusSignatureAggregator::new(
+            id,
+            network,
+            key_path,
+            public_key_path,
+            price_source,
+            leader_source,
+            signed_price_sink,
+        )?;
+        Ok(SignatureAggregator {
+            implementation: SignatureAggregatorImplementation::Consensus(aggregator),
+            signed_price_source,
+            payload_sink,
+        })
+    }
 
-            let price_feed: Vec<PriceFeedEntry> = {
-                let price_feed_ref = self.price_feed.borrow_and_update();
-                price_feed_ref
+    pub async fn run(self) {
+        let mut implementation = self.implementation;
+        let run_task = async move {
+            match &mut implementation {
+                SignatureAggregatorImplementation::Single(s) => s.run().await,
+                SignatureAggregatorImplementation::Consensus(c) => c.run().await,
+            }
+        };
+
+        let mut signed_price_source = self.signed_price_source;
+        let publish_task = async move {
+            while let Some(signed_prices) = signed_price_source.recv().await {
+                let serializable_response: Vec<_> = signed_prices
                     .iter()
-                    .cloned()
-                    .collect::<Vec<PriceFeedEntry>>()
-            };
-
-            let payload = match self.serialize_payload(price_feed) {
-                Ok(str) => str,
-                Err(error) => {
-                    warn!("Could not serialize payload: {}", error);
-                    continue;
+                    .map(|price| {
+                        let payload = {
+                            let data = PlutusData::Array(vec![(&price.data).into()]);
+                            let mut encoder = Encoder::new(vec![]);
+                            encoder.encode(data).expect("encoding is infallible");
+                            encoder.into_writer()
+                        };
+                        SerializablePayloadEntry {
+                            synthetic: price.data.data.synthetic.clone(),
+                            price: price.price.to_f64().expect("Could not convert decimal"),
+                            payload: hex::encode(payload),
+                        }
+                    })
+                    .collect();
+                let payload = serde_json::to_string(&serializable_response)
+                    .expect("serialization should be infallible");
+                if let Err(error) = self.payload_sink.send(payload).await {
+                    warn!("Could not send payload: {}", error);
                 }
-            };
-            if let Err(error) = self.payload_sink.send(payload).await {
-                warn!("Could not send payload: {}", error);
             }
+        };
+
+        select! {
+            res = run_task => res,
+            res = publish_task => res,
         }
     }
-
-    fn serialize_payload(&self, data: Vec<PriceFeedEntry>) -> Result<String> {
-        let mut results = vec![];
-        for datum in data {
-            let synthetic = datum.data.synthetic.clone();
-            let price_feed: PlutusData = (&datum.data).into();
-            let price_feed_bytes = {
-                let mut encoder = Encoder::new(vec![]);
-                encoder.encode(&price_feed)?;
-                encoder.into_writer()
-            };
-            let signature = self.key.sign(&price_feed_bytes);
-            let signed_price_feed = SignedPriceFeed {
-                data: price_feed,
-                signature: signature.as_ref().to_vec(),
-            };
-            let payload = {
-                let data = PlutusData::Array(vec![(&signed_price_feed).into()]);
-                let mut encoder = Encoder::new(vec![]);
-                encoder.encode(data)?;
-                encoder.into_writer()
-            };
-
-            let top_level_payload = TopLevelPayload {
-                synthetic,
-                price: datum.price.to_f64().expect("Count not convert decimal"),
-                payload: hex::encode(payload),
-            };
-            results.push(top_level_payload);
-        }
-        Ok(serde_json::to_string(&results)?)
-    }
-}
-
-fn decode_key() -> Result<SecretKey> {
-    let raw_key = env::var("ORACLE_KEY")?;
-    let (hrp, key) = bech32::decode(&raw_key)?;
-    assert_eq!(hrp.as_str(), "ed25519_sk");
-    let value: [u8; 32] = key.try_into().expect("Key was wrong size");
-    Ok(value.into())
 }
 
 #[derive(Serialize)]
-struct TopLevelPayload {
+struct SerializablePayloadEntry {
     pub synthetic: String,
     pub price: f64,
     pub payload: String,

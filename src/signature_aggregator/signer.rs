@@ -10,13 +10,12 @@ use frost_ed25519::{
 };
 use minicbor::{Decoder, Encoder};
 use pallas_primitives::conway::PlutusData;
-use rand::{rngs::ThreadRng, thread_rng};
-use rust_decimal::Decimal;
+use rand::thread_rng;
 use tokio::sync::{mpsc::Sender, watch::Receiver};
 use uuid::Uuid;
 
 use crate::{
-    price_feed::{PriceFeed, PriceFeedEntry},
+    price_feed::{PriceFeed, PriceFeedEntry, SignedPriceFeed, SignedPriceFeedEntry},
     raft::RaftLeader,
 };
 
@@ -83,46 +82,34 @@ pub struct OutgoingMessage {
     pub message: SignerMessage,
 }
 
-pub struct SignedPayloadEntry {
-    pub synthetic: String,
-    pub price: Decimal,
-    pub price_feed: PriceFeed,
-    pub signature: Vec<u8>,
-}
-
 const QUORUM_COUNT: usize = 2;
 pub struct Signer {
     id: String,
-    identifier: Identifier,
     key: KeyPackage,
     public_key: PublicKeyPackage,
-    price_data: Receiver<Vec<PriceFeedEntry>>,
+    price_source: Receiver<Vec<PriceFeedEntry>>,
     message_sink: Sender<OutgoingMessage>,
-    payload_sink: Sender<Vec<SignedPayloadEntry>>,
+    signed_price_sink: Sender<Vec<SignedPriceFeedEntry>>,
     state: SignerState,
-    rng: ThreadRng,
 }
 
 impl Signer {
     pub fn new(
         id: String,
-        identifier: Identifier,
         key: KeyPackage,
         public_key: PublicKeyPackage,
-        price_data: Receiver<Vec<PriceFeedEntry>>, // TODO: this should be dynamic
+        price_source: Receiver<Vec<PriceFeedEntry>>, // TODO: this should be dynamic
         message_sink: Sender<OutgoingMessage>,
-        payload_sink: Sender<Vec<SignedPayloadEntry>>,
+        signed_price_sink: Sender<Vec<SignedPriceFeedEntry>>,
     ) -> Self {
         Self {
             id,
-            identifier,
             key,
             public_key,
-            price_data,
+            price_source,
             message_sink,
-            payload_sink,
+            signed_price_sink,
             state: SignerState::Unknown,
-            rng: thread_rng(),
         }
     }
 
@@ -161,7 +148,7 @@ impl Signer {
     async fn request_commitments(&mut self) -> Result<()> {
         let round = Uuid::new_v4().to_string();
 
-        let price_data = self.price_data.borrow().clone();
+        let price_data = self.price_source.borrow().clone();
 
         // request other folks commit
         self.message_sink
@@ -195,7 +182,7 @@ impl Signer {
         let leader_id = leader_id.clone();
 
         // Send our commitment
-        let commitment_count = self.price_data.borrow().len();
+        let commitment_count = self.price_source.borrow().len();
         let (nonces, commitment) = self.commit(commitment_count);
         self.message_sink
             .send(OutgoingMessage {
@@ -314,7 +301,7 @@ impl Signer {
             return Ok(());
         };
 
-        let price_data = self.price_data.borrow();
+        let price_data = self.price_source.borrow();
 
         // Make sure we are OK with signing this
         if packages.len() != price_data.len() {
@@ -395,15 +382,16 @@ impl Signer {
         let payload = price_data
             .iter()
             .zip(signatures)
-            .map(|(price, sig)| SignedPayloadEntry {
-                synthetic: price.data.synthetic.clone(),
+            .map(|(price, sig)| SignedPriceFeedEntry {
                 price: price.price,
-                price_feed: price.data.clone(),
-                signature: sig.serialize().into(),
+                data: SignedPriceFeed {
+                    data: price.data.clone(),
+                    signature: sig.serialize().into(),
+                },
             })
             .collect();
 
-        self.payload_sink
+        self.signed_price_sink
             .send(payload)
             .await
             .context("Could not publish signed result")?;
@@ -414,17 +402,17 @@ impl Signer {
         Ok(())
     }
 
-    fn commit(&mut self, commitment_count: usize) -> (Vec<SigningNonces>, Commitment) {
+    fn commit(&self, commitment_count: usize) -> (Vec<SigningNonces>, Commitment) {
         let mut nonces = vec![];
         let mut commitments = vec![];
         for _ in 0..commitment_count {
-            let (nonce, commitment) = round1::commit(self.key.signing_share(), &mut self.rng);
+            let (nonce, commitment) = round1::commit(self.key.signing_share(), &mut thread_rng());
             nonces.push(nonce);
             commitments.push(commitment);
         }
         let commitment = Commitment {
             from: self.id.clone(),
-            identifier: self.identifier,
+            identifier: *self.key.identifier(),
             commitments,
         };
         (nonces, commitment)
@@ -438,7 +426,7 @@ impl Signer {
         }
         Ok(Signature {
             from: self.id.clone(),
-            identifier: self.identifier,
+            identifier: *self.key.identifier(),
             signatures,
         })
     }
@@ -511,13 +499,12 @@ mod tests {
         let mut signers: Vec<Signer> = shares
             .into_iter()
             .enumerate()
-            .map(|(idx, (identifier, share))| {
+            .map(|(idx, (_, share))| {
                 let id = idx.to_string();
                 let key = KeyPackage::try_from(share).unwrap();
                 let (_, price_data) = watch::channel(price_data.clone());
                 Signer::new(
                     id,
-                    identifier,
                     key,
                     public_key.clone(),
                     price_data,

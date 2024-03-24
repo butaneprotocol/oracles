@@ -8,7 +8,7 @@ use networking::Network;
 use price_aggregator::PriceAggregator;
 use publisher::Publisher;
 use raft::{Raft, RaftLeader};
-use signature_aggregator::SingleSignatureAggregator;
+use signature_aggregator::SignatureAggregator;
 use tokio::{
     sync::{mpsc, watch},
     task::{JoinError, JoinSet},
@@ -48,7 +48,7 @@ struct Node {
     network: Network,
     raft: Raft,
     price_aggregator: PriceAggregator,
-    signature_aggregator: SingleSignatureAggregator,
+    signature_aggregator: SignatureAggregator,
     publisher: Publisher,
 }
 
@@ -76,7 +76,7 @@ impl Node {
 
         let (result_tx, result_rx) = mpsc::channel(10);
 
-        let signature_aggregator = SingleSignatureAggregator::new(pa_rx, leader_rx, result_tx)?;
+        let signature_aggregator = SignatureAggregator::single(pa_rx, leader_rx, result_tx)?;
 
         let publisher = Publisher::new(result_rx)?;
 
@@ -115,8 +115,9 @@ impl Node {
             self.price_aggregator.run(&health).await;
         });
 
+        let signature_aggregator = self.signature_aggregator;
         set.spawn(async move {
-            self.signature_aggregator.run().await;
+            signature_aggregator.run().await;
         });
 
         set.spawn(async move {

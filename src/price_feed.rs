@@ -13,14 +13,21 @@ pub struct PriceFeedEntry {
 }
 
 #[derive(Debug)]
+pub struct SignedPriceFeedEntry {
+    pub price: Decimal,
+    pub data: SignedPriceFeed,
+}
+
+#[derive(Debug)]
 pub struct SignedPriceFeed {
-    pub data: PlutusData,
+    pub data: PriceFeed,
     pub signature: Vec<u8>,
 }
 impl From<&SignedPriceFeed> for PlutusData {
     fn from(value: &SignedPriceFeed) -> Self {
+        let encoded_data: PlutusData = (&value.data).into();
         encode_struct(vec![
-            value.data.clone(),
+            encoded_data,
             PlutusData::BoundedBytes(value.signature.clone().into()),
         ])
     }
