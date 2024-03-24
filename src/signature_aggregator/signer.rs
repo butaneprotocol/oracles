@@ -12,7 +12,7 @@ use minicbor::{Decoder, Encoder};
 use pallas_primitives::conway::PlutusData;
 use rand::{rngs::ThreadRng, thread_rng};
 use rust_decimal::Decimal;
-use tokio::sync::mpsc::Sender;
+use tokio::sync::{mpsc::Sender, watch::Receiver};
 use uuid::Uuid;
 
 use crate::{
@@ -54,11 +54,13 @@ enum LeaderState {
     Ready,
     CollectingCommitments {
         round: String,
+        price_data: Vec<PriceFeedEntry>,
         commitments: Vec<Commitment>,
         my_nonces: Vec<SigningNonces>,
     },
     CollectingSignatures {
         round: String,
+        price_data: Vec<PriceFeedEntry>,
         signatures: Vec<Signature>,
         packages: Vec<SigningPackage>,
     },
@@ -94,7 +96,7 @@ pub struct Signer {
     identifier: Identifier,
     key: KeyPackage,
     public_key: PublicKeyPackage,
-    price_data: Vec<PriceFeedEntry>,
+    price_data: Receiver<Vec<PriceFeedEntry>>,
     message_sink: Sender<OutgoingMessage>,
     payload_sink: Sender<Vec<SignedPayloadEntry>>,
     state: SignerState,
@@ -107,7 +109,7 @@ impl Signer {
         identifier: Identifier,
         key: KeyPackage,
         public_key: PublicKeyPackage,
-        price_data: Vec<PriceFeedEntry>, // TODO: this should be dynamic
+        price_data: Receiver<Vec<PriceFeedEntry>>, // TODO: this should be dynamic
         message_sink: Sender<OutgoingMessage>,
         payload_sink: Sender<Vec<SignedPayloadEntry>>,
     ) -> Self {
@@ -159,6 +161,8 @@ impl Signer {
     async fn request_commitments(&mut self) -> Result<()> {
         let round = Uuid::new_v4().to_string();
 
+        let price_data = self.price_data.borrow().clone();
+
         // request other folks commit
         self.message_sink
             .send(OutgoingMessage {
@@ -172,9 +176,10 @@ impl Signer {
             .context("Failed to request commitments")?;
 
         // And commit ourself
-        let (my_nonces, commitment) = self.commit();
+        let (my_nonces, commitment) = self.commit(price_data.len());
         self.state = SignerState::Leader(LeaderState::CollectingCommitments {
             round,
+            price_data,
             commitments: vec![commitment],
             my_nonces,
         });
@@ -190,7 +195,8 @@ impl Signer {
         let leader_id = leader_id.clone();
 
         // Send our commitment
-        let (nonces, commitment) = self.commit();
+        let commitment_count = self.price_data.borrow().len();
+        let (nonces, commitment) = self.commit(commitment_count);
         self.message_sink
             .send(OutgoingMessage {
                 to: Some(leader_id.clone()),
@@ -214,6 +220,7 @@ impl Signer {
     async fn process_commitment(&mut self, round: String, commitment: Commitment) -> Result<()> {
         let SignerState::Leader(LeaderState::CollectingCommitments {
             round: curr_round,
+            price_data,
             commitments,
             my_nonces,
         }) = &mut self.state
@@ -240,7 +247,7 @@ impl Signer {
             return Ok(());
         }
 
-        let mut commitment_maps = vec![BTreeMap::new(); self.price_data.len()];
+        let mut commitment_maps = vec![BTreeMap::new(); price_data.len()];
         let mut recipients = vec![];
         // time to transition to signing
         for commitment in commitments {
@@ -252,9 +259,9 @@ impl Signer {
             }
         }
 
+        let price_data = price_data.clone();
         // Request signatures from all the committees
-        let messages: Vec<Vec<u8>> = self
-            .price_data
+        let messages: Vec<Vec<u8>> = price_data
             .iter()
             .map(|e| serialize_price_feed(&e.data))
             .collect();
@@ -282,6 +289,7 @@ impl Signer {
 
         self.state = SignerState::Leader(LeaderState::CollectingSignatures {
             round,
+            price_data,
             signatures: vec![my_signature],
             packages,
         });
@@ -306,13 +314,15 @@ impl Signer {
             return Ok(());
         };
 
+        let price_data = self.price_data.borrow();
+
         // Make sure we are OK with signing this
-        if packages.len() != self.price_data.len() {
+        if packages.len() != price_data.len() {
             return Err(anyhow!(
                 "Mismatched price feed count. Is this server misconfigured?"
             ));
         }
-        for (package, my_feed) in packages.iter().zip(&self.price_data) {
+        for (package, my_feed) in packages.iter().zip(price_data.iter()) {
             let leader_feed = deserialize_price_feed(package.message())?;
             if !should_sign(&leader_feed, &my_feed.data) {
                 return Err(anyhow!("Mismatched feed"));
@@ -341,6 +351,7 @@ impl Signer {
     async fn process_signature(&mut self, round: String, signature: Signature) -> Result<()> {
         let SignerState::Leader(LeaderState::CollectingSignatures {
             round: curr_round,
+            price_data,
             signatures,
             packages,
         }) = &mut self.state
@@ -368,7 +379,7 @@ impl Signer {
         }
 
         // We've finally collected all the signatures we need! Now just aggregate them
-        let mut signature_maps = vec![BTreeMap::new(); self.price_data.len()];
+        let mut signature_maps = vec![BTreeMap::new(); price_data.len()];
         for signature in signatures {
             for (index, s) in signature.signatures.iter().enumerate() {
                 signature_maps[index].insert(signature.identifier, *s);
@@ -381,8 +392,7 @@ impl Signer {
             signatures.push(signature);
         }
 
-        let payload = self
-            .price_data
+        let payload = price_data
             .iter()
             .zip(signatures)
             .map(|(price, sig)| SignedPayloadEntry {
@@ -404,10 +414,10 @@ impl Signer {
         Ok(())
     }
 
-    fn commit(&mut self) -> (Vec<SigningNonces>, Commitment) {
+    fn commit(&mut self, commitment_count: usize) -> (Vec<SigningNonces>, Commitment) {
         let mut nonces = vec![];
         let mut commitments = vec![];
-        for _ in 0..self.price_data.len() {
+        for _ in 0..commitment_count {
             let (nonce, commitment) = round1::commit(self.key.signing_share(), &mut self.rng);
             nonces.push(nonce);
             commitments.push(commitment);
@@ -458,12 +468,12 @@ mod tests {
     use num_bigint::BigUint;
     use rand::thread_rng;
     use rust_decimal::Decimal;
-    use tokio::sync::mpsc;
+    use tokio::sync::{mpsc, watch};
 
     use crate::{
         price_feed::{PriceFeed, PriceFeedEntry, Validity},
         raft::RaftLeader,
-        signature_aggregator::new::{OutgoingMessage, SignerMessage, SignerMessageData},
+        signature_aggregator::signer::{OutgoingMessage, SignerMessage, SignerMessageData},
     };
 
     use super::{Signer, SignerEvent};
@@ -504,12 +514,13 @@ mod tests {
             .map(|(idx, (identifier, share))| {
                 let id = idx.to_string();
                 let key = KeyPackage::try_from(share).unwrap();
+                let (_, price_data) = watch::channel(price_data.clone());
                 Signer::new(
                     id,
                     identifier,
                     key,
                     public_key.clone(),
-                    price_data.clone(),
+                    price_data,
                     message_sink.clone(),
                     payload_sink.clone(),
                 )

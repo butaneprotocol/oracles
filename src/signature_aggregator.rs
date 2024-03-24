@@ -17,7 +17,7 @@ use crate::{
     raft::RaftLeader,
 };
 
-pub mod new;
+pub mod signer;
 
 #[derive(Clone)]
 pub struct SingleSignatureAggregator {
