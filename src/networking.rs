@@ -13,7 +13,7 @@ use tokio_serde::{formats::Cbor, Framed};
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use tracing::{info, trace, warn};
 
-use crate::raft::RaftMessage;
+use crate::{raft::RaftMessage, signature_aggregator::signer::SignerMessage};
 
 type WrappedStream = FramedRead<OwnedReadHalf, LengthDelimitedCodec>;
 type WrappedSink = FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>;
@@ -21,10 +21,11 @@ type WrappedSink = FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>;
 type SerStream = Framed<WrappedStream, Message, (), Cbor<Message, ()>>;
 type DeSink = Framed<WrappedSink, (), Message, Cbor<(), Message>>;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum Message {
     Hello(String),
     Raft(RaftMessage),
+    Signer(SignerMessage),
 }
 
 /// A network is a fully connected set of peers
@@ -34,6 +35,7 @@ pub struct Network {
 
     // An MPSC channel that can dispatch messages to the raft state machine
     raft_messages: Arc<tokio::sync::mpsc::Sender<RaftMessage>>,
+    signer_messages: Arc<tokio::sync::mpsc::Sender<SignerMessage>>,
 
     // Instead of trying to handle the crossing-paths problem, we just maintain one incoming and one outgoing connection for each peer
     // A set of incoming connections
@@ -43,10 +45,15 @@ pub struct Network {
 }
 
 impl Network {
-    pub fn new(id: String, raft_messages: Arc<tokio::sync::mpsc::Sender<RaftMessage>>) -> Self {
+    pub fn new(
+        id: String,
+        raft_messages: Arc<tokio::sync::mpsc::Sender<RaftMessage>>,
+        signer_messages: Arc<tokio::sync::mpsc::Sender<SignerMessage>>,
+    ) -> Self {
         Network {
             id,
             raft_messages,
+            signer_messages,
             incoming_connections: Arc::new(dashmap::DashMap::new()),
             outgoing_connections: Arc::new(dashmap::DashMap::new()),
         }
@@ -177,6 +184,17 @@ impl Network {
                             me = self.id,
                             them = them,
                             "Failed to send raft message: {}",
+                            e
+                        );
+                        break;
+                    }
+                }
+                Ok(Message::Signer(signer)) => {
+                    if let Err(e) = self.signer_messages.send(signer).await {
+                        warn!(
+                            me = self.id,
+                            them = them,
+                            "Failed to send signer message: {}",
                             e
                         );
                         break;
@@ -348,6 +366,22 @@ impl Network {
                 message
             );
             Err(tokio::sync::mpsc::error::SendError(message))
+        }
+    }
+
+    pub async fn broadcast(&self, message: Message) {
+        for kvp in self.outgoing_connections.iter() {
+            let peer = kvp.key();
+            let sender = kvp.value();
+            if let Err(e) = sender.send(message.clone()).await {
+                warn!(
+                    me = self.id,
+                    them = peer,
+                    "No connection to peer to broadcast {:?}: {}",
+                    message,
+                    e
+                );
+            };
         }
     }
 }

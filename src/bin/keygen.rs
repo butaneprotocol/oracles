@@ -2,7 +2,7 @@ use std::{env::current_dir, fs};
 
 use anyhow::Result;
 use clap::Parser;
-use frost_ed25519::keys::{self, IdentifierList};
+use frost_ed25519::keys::{self, IdentifierList, KeyPackage};
 use rand::thread_rng;
 
 #[derive(Parser, Debug)]
@@ -32,9 +32,10 @@ pub fn main() -> Result<()> {
     let pubkey_path = keys_path.join("public");
     fs::write(pubkey_path, pubkey_package.serialize()?)?;
 
-    for (index, share) in shares.values().enumerate() {
+    for (index, share) in shares.into_values().enumerate() {
         let privkey_path = keys_path.join(format!("private_{}", index));
-        fs::write(privkey_path, share.serialize()?)?;
+        let privkey_package: KeyPackage = share.try_into()?;
+        fs::write(privkey_path, privkey_package.serialize()?)?;
     }
 
     Ok(())

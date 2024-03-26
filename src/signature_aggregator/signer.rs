@@ -11,6 +11,7 @@ use frost_ed25519::{
 use minicbor::{Decoder, Encoder};
 use pallas_primitives::conway::PlutusData;
 use rand::thread_rng;
+use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc::Sender, watch::Receiver};
 use uuid::Uuid;
 
@@ -19,11 +20,13 @@ use crate::{
     raft::RaftLeader,
 };
 
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SignerMessage {
     pub round: String,
     pub data: SignerMessageData,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum SignerMessageData {
     RequestCommitment,
     Commit(Commitment),
@@ -31,12 +34,14 @@ pub enum SignerMessageData {
     Sign(Signature),
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Commitment {
     pub from: String,
     pub identifier: Identifier,
     pub commitments: Vec<SigningCommitments>,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Signature {
     pub from: String,
     pub identifier: Identifier,
@@ -82,7 +87,6 @@ pub struct OutgoingMessage {
     pub message: SignerMessage,
 }
 
-const QUORUM_COUNT: usize = 2;
 pub struct Signer {
     id: String,
     key: KeyPackage,
@@ -229,7 +233,7 @@ impl Signer {
         }
         commitments.push(commitment);
 
-        if commitments.len() < QUORUM_COUNT {
+        if commitments.len() < (*self.key.min_signers() as usize) {
             // still collecting
             return Ok(());
         }
@@ -301,7 +305,7 @@ impl Signer {
             return Ok(());
         };
 
-        let price_data = self.price_source.borrow();
+        let price_data = self.price_source.borrow().clone();
 
         // Make sure we are OK with signing this
         if packages.len() != price_data.len() {
@@ -312,7 +316,11 @@ impl Signer {
         for (package, my_feed) in packages.iter().zip(price_data.iter()) {
             let leader_feed = deserialize_price_feed(package.message())?;
             if !should_sign(&leader_feed, &my_feed.data) {
-                return Err(anyhow!("Mismatched feed"));
+                return Err(anyhow!(
+                    "Mismatched feed {:?} {:?}",
+                    leader_feed,
+                    my_feed.data
+                ));
             }
         }
 
@@ -360,7 +368,7 @@ impl Signer {
         }
         signatures.push(signature);
 
-        if signatures.len() < QUORUM_COUNT {
+        if signatures.len() < (*self.key.min_signers() as usize) {
             // still collecting
             return Ok(());
         }
@@ -446,7 +454,18 @@ fn deserialize_price_feed(bytes: &[u8]) -> Result<PriceFeed> {
 }
 
 fn should_sign(leader_feed: &PriceFeed, my_feed: &PriceFeed) -> bool {
-    leader_feed == my_feed
+    if leader_feed.synthetic != my_feed.synthetic {
+        return false;
+    }
+    if leader_feed.validity != my_feed.validity {
+        // TODO: need "close enough" date range logic here
+        return false;
+    }
+    if leader_feed.collateral_prices.len() != my_feed.collateral_prices.len() {
+        return false;
+    }
+    // TODO: need to decide when prices are close enough
+    true
 }
 
 #[cfg(test)]

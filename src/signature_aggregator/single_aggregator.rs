@@ -37,7 +37,7 @@ impl SingleSignatureAggregator {
         })
     }
 
-    pub async fn run(&mut self) {
+    pub async fn run(mut self) {
         loop {
             sleep(Duration::from_secs(5)).await;
             if !matches!(*self.leader_source.borrow(), RaftLeader::Myself) {

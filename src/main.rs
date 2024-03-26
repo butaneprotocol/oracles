@@ -36,9 +36,12 @@ struct Args {
 
     #[clap(short, long)]
     port: u16,
-    // A list of peers to connect to
+    /// A list of peers to connect to
     #[clap(long)]
     peers: Vec<String>,
+    #[clap(short, long, default_value_t = false)]
+    /// Use consensus algorithm to sign packages
+    consensus: bool,
 }
 
 struct Node {
@@ -58,15 +61,17 @@ impl Node {
         quorum: usize,
         heartbeat: std::time::Duration,
         timeout: std::time::Duration,
+        consensus: bool,
         config: &Arc<Config>,
     ) -> Result<Self> {
         let (health_server, health_sink) = HealthServer::new();
 
         // Construct mpsc channels for each of our abstract state machines
         let (raft_tx, raft_rx) = mpsc::channel(10);
+        let (signer_tx, signer_rx) = mpsc::channel(10);
 
         // Construct a peer-to-peer network that can connect to peers, and dispatch messages to the correct state machine
-        let network = Network::new(id.to_string(), Arc::new(raft_tx));
+        let network = Network::new(id.to_string(), Arc::new(raft_tx), Arc::new(signer_tx));
 
         let (pa_tx, pa_rx) = watch::channel(vec![]);
 
@@ -76,7 +81,18 @@ impl Node {
 
         let (result_tx, result_rx) = mpsc::channel(10);
 
-        let signature_aggregator = SignatureAggregator::single(pa_rx, leader_rx, result_tx)?;
+        let signature_aggregator = if consensus {
+            SignatureAggregator::consensus(
+                id.to_string(),
+                network.clone(),
+                signer_rx,
+                pa_rx,
+                leader_rx,
+                result_tx,
+            )?
+        } else {
+            SignatureAggregator::single(pa_rx, leader_rx, result_tx)?
+        };
 
         let publisher = Publisher::new(result_rx)?;
 
@@ -206,6 +222,7 @@ async fn main() -> Result<()> {
             (num_nodes / 2) + 1,
             std::time::Duration::from_millis(100 * if debug { 10 } else { 1 }),
             timeout,
+            args.consensus,
             &config,
         )
     };

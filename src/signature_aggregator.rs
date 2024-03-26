@@ -2,10 +2,8 @@ pub mod consensus_aggregator;
 pub mod signer;
 pub mod single_aggregator;
 
-use std::path::Path;
-
 use anyhow::Result;
-pub use consensus_aggregator::ConsensusSignatureAggregator;
+use consensus_aggregator::ConsensusSignatureAggregator;
 use minicbor::Encoder;
 use pallas_primitives::conway::PlutusData;
 use rust_decimal::prelude::ToPrimitive;
@@ -22,6 +20,8 @@ use crate::{
     price_feed::{PriceFeedEntry, SignedPriceFeedEntry},
     raft::RaftLeader,
 };
+
+use self::signer::SignerMessage;
 
 pub struct SignatureAggregator {
     implementation: SignatureAggregatorImplementation,
@@ -52,8 +52,7 @@ impl SignatureAggregator {
     pub fn consensus(
         id: String,
         network: Network,
-        key_path: &Path,
-        public_key_path: &Path,
+        message_source: mpsc::Receiver<SignerMessage>,
         price_source: Receiver<Vec<PriceFeedEntry>>,
         leader_source: Receiver<RaftLeader>,
         payload_sink: mpsc::Sender<String>,
@@ -62,8 +61,7 @@ impl SignatureAggregator {
         let aggregator = ConsensusSignatureAggregator::new(
             id,
             network,
-            key_path,
-            public_key_path,
+            message_source,
             price_source,
             leader_source,
             signed_price_sink,
@@ -76,9 +74,9 @@ impl SignatureAggregator {
     }
 
     pub async fn run(self) {
-        let mut implementation = self.implementation;
+        let implementation = self.implementation;
         let run_task = async move {
-            match &mut implementation {
+            match implementation {
                 SignatureAggregatorImplementation::Single(s) => s.run().await,
                 SignatureAggregatorImplementation::Consensus(c) => c.run().await,
             }
