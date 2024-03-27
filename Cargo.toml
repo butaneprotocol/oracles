@@ -7,33 +7,33 @@ default-run = "oracles-offchain"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tokio = { version = "1.36.0", features = ["full"] }
 almost-raft = "0.3.0"
+anyhow = "1.0.80"
 async-trait = "0.1.77"
-uuid = { version = "1.7.0", features = ["v4"] }
-clap = { version = "4.5.1", features = ["derive"] }
-serde = "1.0.197"
-serde_json = "1.0.114"
-serde_cbor = "0.11"
-serde_yaml = "0.9"
-hex = "0.4.3"
-tide = "0.16"
-tokio-serde = {version ="0.9", features = ["json", "cbor"] }
-tokio-util = { version = "0.7", features = ["full"] }
-futures = "0.3"
-tracing = "0.1.40"
-tracing-subscriber = "0.3.18"
 bech32 = "0.11"
-pallas-crypto = "0.24"
-pallas-primitives = "0.24"
+cynic = "3.4"
+clap = { version = "4.5.1", features = ["derive"] }
+config = "0.14"
 dashmap = "5.5.3"
+frost-ed25519 = { version = "1.0.0", features = ["serde"] }
+futures = "0.3"
+hex = "0.4.3"
 minicbor = { version = "0.20", features = ["std"] }
 num-bigint = "0.4"
 num-integer = "0.1"
-rust_decimal = "1.34.3"
+pallas-crypto = "0.24"
+pallas-primitives = "0.24"
 rand = "0.8.5"
 reqwest = "0.11.24"
-anyhow = "1.0.80"
-cynic = "3.4"
+rust_decimal = "1.34.3"
+serde = "1.0.197"
+serde_cbor = "0.11"
+serde_json = "1.0.114"
+tide = "0.16"
+tokio = { version = "1.36.0", features = ["full"] }
+tokio-serde = {version ="0.9", features = ["json", "cbor"] }
 tokio-tungstenite = { version = "0.21.0", features = ["native-tls"] }
-frost-ed25519 = { version = "1.0.0", features = ["serde"] }
+tokio-util = { version = "0.7", features = ["full"] }
+tracing = "0.1.40"
+tracing-subscriber = "0.3.18"
+uuid = { version = "1.7.0", features = ["v4"] }

@@ -13,7 +13,7 @@ use crate::{
         binance::BinanceSource, bybit::ByBitSource, coinbase::CoinbaseSource,
         maestro::MaestroSource, source::PriceInfo, sundaeswap::SundaeSwapSource,
     },
-    config::{CollateralConfig, Config, SyntheticConfig},
+    config::{CollateralConfig, OracleConfig, SyntheticConfig},
     health::HealthSink,
     price_feed::{PriceFeed, PriceFeedEntry, Validity},
 };
@@ -26,11 +26,11 @@ mod source_adapter;
 pub struct PriceAggregator {
     tx: Arc<Sender<Vec<PriceFeedEntry>>>,
     sources: Option<Vec<SourceAdapter>>,
-    config: Arc<Config>,
+    config: Arc<OracleConfig>,
 }
 
 impl PriceAggregator {
-    pub fn new(tx: Sender<Vec<PriceFeedEntry>>, config: Arc<Config>) -> Result<Self> {
+    pub fn new(tx: Sender<Vec<PriceFeedEntry>>, config: Arc<OracleConfig>) -> Result<Self> {
         Ok(Self {
             tx: Arc::new(tx),
             sources: Some(vec![
@@ -81,7 +81,8 @@ impl PriceAggregator {
             }
         }
 
-        let conversions = ConversionLookup::new(&prices, &self.config);
+        let conversions =
+            ConversionLookup::new(&prices, &self.config.synthetics, &self.config.collateral);
         let payloads = self
             .config
             .synthetics

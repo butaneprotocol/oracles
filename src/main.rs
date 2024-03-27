@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use anyhow::Result;
 use clap::Parser;
-use config::{load_config, Config};
+use config::{load_config, OracleConfig};
 use health::{HealthServer, HealthSink};
 use networking::Network;
 use price_aggregator::PriceAggregator;
@@ -33,15 +33,10 @@ pub mod signature_aggregator;
 struct Args {
     #[clap(short, long)]
     id: Option<String>,
-
-    #[clap(short, long)]
-    port: u16,
-    /// A list of peers to connect to
-    #[clap(long)]
-    peers: Vec<String>,
-    #[clap(short, long, default_value_t = false)]
-    /// Use consensus algorithm to sign packages
-    consensus: bool,
+    #[clap(long, default_value_t = false)]
+    debug: bool,
+    #[clap(short, long, default_value_t = String::from("config.yaml"))]
+    config_file: String,
 }
 
 struct Node {
@@ -53,17 +48,16 @@ struct Node {
     price_aggregator: PriceAggregator,
     signature_aggregator: SignatureAggregator,
     publisher: Publisher,
+    config: Arc<OracleConfig>,
 }
 
 impl Node {
-    pub fn new(
-        id: &str,
-        quorum: usize,
-        heartbeat: std::time::Duration,
-        timeout: std::time::Duration,
-        consensus: bool,
-        config: &Arc<Config>,
-    ) -> Result<Self> {
+    pub fn new(id: &str, config: Arc<OracleConfig>) -> Result<Self> {
+        // quorum is set to a majority of expected nodes (which includes ourself!)
+        let quorum = ((config.peers.len() + 1) / 2) + 1;
+        let heartbeat = config.heartbeat();
+        let timeout = config.timeout();
+
         let (health_server, health_sink) = HealthServer::new();
 
         // Construct mpsc channels for each of our abstract state machines
@@ -81,7 +75,7 @@ impl Node {
 
         let (result_tx, result_rx) = mpsc::channel(10);
 
-        let signature_aggregator = if consensus {
+        let signature_aggregator = if config.consensus {
             SignatureAggregator::consensus(
                 id.to_string(),
                 network.clone(),
@@ -105,15 +99,17 @@ impl Node {
             price_aggregator,
             signature_aggregator,
             publisher,
+            config,
         })
     }
 
-    pub async fn start(mut self, port: u16, peers: Vec<String>) -> Result<(), JoinError> {
+    pub async fn start(mut self) -> Result<(), JoinError> {
         let mut set = JoinSet::new();
 
         // Start up the health server
+        let health_port = self.config.health_port;
         set.spawn(async move {
-            self.health_server.run(port + 10000).await;
+            self.health_server.run(health_port).await;
         });
 
         // Spawn the abstract raft state machine, which internally uses network to maintain a Raft consensus
@@ -122,6 +118,8 @@ impl Node {
         });
 
         // Then spawn the peer to peer network, which will maintain a connection to each peer, and dispatch messages to the correct state machine
+        let port = self.config.port;
+        let peers = self.config.peers.clone();
         set.spawn(async move {
             self.network.handle_network(port, peers).await.unwrap();
         });
@@ -149,21 +147,16 @@ impl Node {
     }
 }
 
-async fn run<F>(node_factory: F, port: u16, peers: Vec<String>) -> Result<()>
+async fn run<F>(node_factory: F) -> Result<()>
 where
     F: Fn() -> Result<Node>,
 {
     let node = node_factory()?;
-    node.start(port, peers).await?;
+    node.start().await?;
     Ok(())
 }
 
-async fn run_debug<F>(
-    node_factory: F,
-    port: u16,
-    peers: Vec<String>,
-    restart_after: Duration,
-) -> Result<()>
+async fn run_debug<F>(node_factory: F, restart_after: Duration) -> Result<()>
 where
     F: Fn() -> Result<Node>,
 {
@@ -172,10 +165,9 @@ where
 
         let node = node_factory()?;
         let id = node.id.clone();
-        let peers = peers.clone();
         set.spawn(async move {
             // Runs forever
-            node.start(port, peers).await.unwrap();
+            node.start().await.unwrap();
         });
 
         set.spawn_blocking(|| {
@@ -196,9 +188,11 @@ where
 async fn main() -> Result<()> {
     let args = Args::parse();
 
-    let config = Arc::new(load_config().await?);
+    // Let us specify an ID on the command line, for easier debugging, otherwise generate a UUID
+    let id = args.id.unwrap_or(uuid::Uuid::new_v4().to_string());
+    let debug = args.debug;
 
-    let debug = false;
+    let config = Arc::new(load_config(&args.config_file)?);
 
     let subscriber = FmtSubscriber::builder()
         .with_max_level(if debug { Level::DEBUG } else { Level::INFO })
@@ -207,32 +201,16 @@ async fn main() -> Result<()> {
 
     frost::frost_poc().await;
 
-    // Let us specify an ID on the command line, for easier debugging, otherwise generate a UUID
-    let id = args.id.unwrap_or(uuid::Uuid::new_v4().to_string());
-
     info!(me = id, "Node starting...");
 
-    let timeout = std::time::Duration::from_millis(if debug { 5000 } else { 500 });
-
-    // Construct a new node; quorum is set to a majority of expected nodes (which includes ourself!)
-    let num_nodes = args.peers.len() + 1;
-    let node_factory = || {
-        Node::new(
-            &id,
-            (num_nodes / 2) + 1,
-            std::time::Duration::from_millis(100 * if debug { 10 } else { 1 }),
-            timeout,
-            args.consensus,
-            &config,
-        )
-    };
+    let node_factory = || Node::new(&id, config.clone());
 
     // Start the node, which will spawn a bunch of threads and infinite loop
     if debug {
-        let restart_after = timeout + Duration::from_secs(1);
-        run_debug(node_factory, args.port, args.peers, restart_after).await?;
+        let restart_after = config.timeout() + Duration::from_secs(1);
+        run_debug(node_factory, restart_after).await?;
     } else {
-        run(node_factory, args.port, args.peers).await.unwrap();
+        run(node_factory).await?;
     }
     Ok(())
 }

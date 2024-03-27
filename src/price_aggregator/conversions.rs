@@ -1,8 +1,11 @@
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use rust_decimal::Decimal;
 
-use crate::{apis::source::PriceInfo, config::Config};
+use crate::{
+    apis::source::PriceInfo,
+    config::{CollateralConfig, SyntheticConfig},
+};
 
 #[derive(Debug, Eq, Hash, PartialEq)]
 struct CurrencyPair<'a>(&'a str, &'a str);
@@ -12,15 +15,19 @@ pub struct ConversionLookup<'a> {
 }
 
 impl<'a> ConversionLookup<'a> {
-    pub fn new(prices: &'a [PriceInfo], config: &'a Arc<Config>) -> Self {
+    pub fn new(
+        prices: &'a [PriceInfo],
+        synthetics: &'a [SyntheticConfig],
+        collateral: &'a [CollateralConfig],
+    ) -> Self {
         let mut conversions = HashMap::new();
 
         // Set our default prices
         let mut defaults = HashMap::new();
-        for synth in &config.synthetics {
+        for synth in synthetics {
             defaults.insert(synth.name.as_str(), synth.price);
         }
-        for coll in &config.collateral {
+        for coll in collateral {
             defaults.insert(coll.name.as_str(), coll.price);
         }
 
@@ -71,73 +78,70 @@ impl<'a> ConversionLookup<'a> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use rust_decimal::Decimal;
 
     use crate::{
         apis::source::PriceInfo,
-        config::{CollateralConfig, Config, SyntheticConfig},
+        config::{CollateralConfig, SyntheticConfig},
     };
 
     use super::ConversionLookup;
 
-    fn make_config() -> Arc<Config> {
-        Arc::new(Config {
-            synthetics: vec![
-                SyntheticConfig {
-                    name: "USDb".into(),
-                    price: Decimal::ONE,
-                    digits: 6,
-                    collateral: vec![],
-                },
-                SyntheticConfig {
-                    name: "BTCb".into(),
-                    price: Decimal::new(50000, 0),
-                    digits: 8,
-                    collateral: vec![],
-                },
-            ],
-            collateral: vec![
-                CollateralConfig {
-                    name: "ADA".into(),
-                    price: Decimal::new(6, 1),
-                    digits: 6,
-                },
-                CollateralConfig {
-                    name: "LENFI".into(),
-                    price: Decimal::new(379, 2),
-                    digits: 6,
-                },
-            ],
-        })
+    fn make_config() -> (Vec<SyntheticConfig>, Vec<CollateralConfig>) {
+        let synthetics = vec![
+            SyntheticConfig {
+                name: "USDb".into(),
+                price: Decimal::ONE,
+                digits: 6,
+                collateral: vec![],
+            },
+            SyntheticConfig {
+                name: "BTCb".into(),
+                price: Decimal::new(50000, 0),
+                digits: 8,
+                collateral: vec![],
+            },
+        ];
+        let collateral = vec![
+            CollateralConfig {
+                name: "ADA".into(),
+                price: Decimal::new(6, 1),
+                digits: 6,
+            },
+            CollateralConfig {
+                name: "LENFI".into(),
+                price: Decimal::new(379, 2),
+                digits: 6,
+            },
+        ];
+        (synthetics, collateral)
     }
 
     #[test]
     fn value_in_usd_should_return_defaults() {
-        let config = make_config();
+        let (synthetics, collateral) = make_config();
         let prices = vec![];
-        let lookup = ConversionLookup::new(&prices, &config);
+        let lookup = ConversionLookup::new(&prices, &synthetics, &collateral);
 
         assert_eq!(lookup.value_in_usd("ADA"), Decimal::new(6, 1));
     }
 
     #[test]
     fn value_in_usd_should_return_value_from_source() {
-        let config = make_config();
+        let (synthetics, collateral) = make_config();
         let prices = vec![PriceInfo {
             token: "BTCb".into(),
             unit: "USD".into(),
             value: Decimal::new(60000, 0),
         }];
-        let lookup = ConversionLookup::new(&prices, &config);
+        let lookup = ConversionLookup::new(&prices, &synthetics, &collateral);
 
         assert_eq!(lookup.value_in_usd("BTCb"), Decimal::new(60000, 0));
     }
 
     #[test]
     fn value_in_usd_should_average_prices() {
-        let config = make_config();
+        let (synthetics, collateral) = make_config();
         let prices = vec![
             PriceInfo {
                 token: "BTCb".into(),
@@ -150,27 +154,27 @@ mod tests {
                 value: Decimal::new(80000, 0),
             },
         ];
-        let lookup = ConversionLookup::new(&prices, &config);
+        let lookup = ConversionLookup::new(&prices, &synthetics, &collateral);
 
         assert_eq!(lookup.value_in_usd("BTCb"), Decimal::new(75000, 0));
     }
 
     #[test]
     fn value_in_usd_should_convert_prices_in_ada_using_default_ada_price() {
-        let config = make_config();
+        let (synthetics, collateral) = make_config();
         let prices = vec![PriceInfo {
             token: "LENFI".into(),
             unit: "ADA".into(),
             value: Decimal::new(10000, 0),
         }];
-        let lookup = ConversionLookup::new(&prices, &config);
+        let lookup = ConversionLookup::new(&prices, &synthetics, &collateral);
 
         assert_eq!(lookup.value_in_usd("LENFI"), Decimal::new(6000, 0));
     }
 
     #[test]
     fn value_in_usd_should_convert_prices_in_ada_using_ada_price_from_api() {
-        let config = make_config();
+        let (synthetics, collateral) = make_config();
         let prices = vec![
             PriceInfo {
                 token: "ADA".into(),
@@ -183,7 +187,7 @@ mod tests {
                 value: Decimal::new(10000, 0),
             },
         ];
-        let lookup = ConversionLookup::new(&prices, &config);
+        let lookup = ConversionLookup::new(&prices, &synthetics, &collateral);
 
         assert_eq!(lookup.value_in_usd("LENFI"), Decimal::new(3000, 0));
     }

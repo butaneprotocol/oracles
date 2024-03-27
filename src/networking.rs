@@ -13,7 +13,7 @@ use tokio_serde::{formats::Cbor, Framed};
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use tracing::{info, trace, warn};
 
-use crate::{raft::RaftMessage, signature_aggregator::signer::SignerMessage};
+use crate::{config::PeerConfig, raft::RaftMessage, signature_aggregator::signer::SignerMessage};
 
 type WrappedStream = FramedRead<OwnedReadHalf, LengthDelimitedCodec>;
 type WrappedSink = FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>;
@@ -60,7 +60,11 @@ impl Network {
     }
 
     /// Spawn threads to listen for new connections, and connect to each other peer (with retry)
-    pub async fn handle_network(self, port: u16, peers: Vec<String>) -> Result<Self, JoinError> {
+    pub async fn handle_network(
+        self,
+        port: u16,
+        peers: Vec<PeerConfig>,
+    ) -> Result<Self, JoinError> {
         let mut set = JoinSet::new();
 
         // Start a listener for incoming connections on the given port
@@ -79,7 +83,7 @@ impl Network {
         for peer in peers {
             let network = self.clone();
             set.spawn(async move {
-                network.connect_to(peer.as_str()).await.unwrap();
+                network.connect_to(&peer.address).await.unwrap();
             });
         }
 
