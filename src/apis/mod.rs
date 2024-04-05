@@ -4,3 +4,4 @@ pub mod coinbase;
 pub mod maestro;
 pub mod source;
 pub mod sundaeswap;
+pub mod sundaeswap_kupo;

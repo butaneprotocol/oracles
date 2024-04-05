@@ -12,6 +12,7 @@ use crate::{
     apis::{
         binance::BinanceSource, bybit::ByBitSource, coinbase::CoinbaseSource,
         maestro::MaestroSource, source::PriceInfo, sundaeswap::SundaeSwapSource,
+        sundaeswap_kupo::KupoSource,
     },
     config::{CollateralConfig, OracleConfig, SyntheticConfig},
     health::HealthSink,
@@ -37,6 +38,7 @@ impl PriceAggregator {
                 SourceAdapter::new(BinanceSource::new()),
                 SourceAdapter::new(ByBitSource::new()),
                 SourceAdapter::new(CoinbaseSource::new()),
+                SourceAdapter::new(KupoSource::new(&config.sundaeswap_kupo)?),
                 SourceAdapter::new(MaestroSource::new()?),
                 SourceAdapter::new(SundaeSwapSource::new()?),
             ]),

@@ -15,6 +15,7 @@ pub struct OracleConfig {
     pub timeout_ms: u64,
     pub synthetics: Vec<SyntheticConfig>,
     pub collateral: Vec<CollateralConfig>,
+    pub sundaeswap_kupo: SundaeSwapKupoConfig,
 }
 
 impl OracleConfig {
@@ -45,6 +46,21 @@ pub struct CollateralConfig {
     pub name: String,
     pub price: Decimal,
     pub digits: u32,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct SundaeSwapKupoConfig {
+    pub address: String,
+    pub policy_id: String,
+    pub pools: Vec<SundaeSwapPool>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct SundaeSwapPool {
+    pub token: String,
+    pub unit: String,
+    pub unit_asset_id: Option<String>,
+    pub pool_asset_id: String,
 }
 
 pub fn load_config(config_file: &str) -> Result<OracleConfig> {

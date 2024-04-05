@@ -112,3 +112,22 @@ collateral:
   - name: USDs
     price: 1
     digits: 6
+sundaeswap_kupo:
+  address: addr1w9qzpelu9hn45pefc0xr4ac4kdxeswq7pndul2vuj59u8tqaxdznu
+  policy_id: 0029cb7c88c7567b63d1a512c0ed626aa169688ec980730c0473b913
+  pools:
+    - token: DJED
+      unit: ADA
+      pool_asset_id: 0029cb7c88c7567b63d1a512c0ed626aa169688ec980730c0473b913.7020f803
+    - token: ENCS
+      unit: ADA
+      pool_asset_id: 0029cb7c88c7567b63d1a512c0ed626aa169688ec980730c0473b913.70200d04
+    - token: LENFI
+      unit: ADA
+      pool_asset_id: 0029cb7c88c7567b63d1a512c0ed626aa169688ec980730c0473b913.70201401
+    - token: MIN
+      unit: ADA
+      pool_asset_id: 0029cb7c88c7567b63d1a512c0ed626aa169688ec980730c0473b913.702018
+    - token: SNEK
+      unit: ADA
+      pool_asset_id: 0029cb7c88c7567b63d1a512c0ed626aa169688ec980730c0473b913.70201f04
