@@ -1,15 +1,15 @@
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use dashmap::DashMap;
 use futures::{future::BoxFuture, FutureExt};
-use kupon::{Match, MatchOptions};
+use kupon::{AssetId, MatchOptions};
 use rust_decimal::Decimal;
 use tokio::time::sleep;
 
 use crate::{
     apis::source::PriceInfo,
-    config::{SundaeSwapKupoConfig, SundaeSwapPool},
+    config::{HydratedPool, OracleConfig, SundaeSwapKupoConfig},
 };
 
 use super::source::{PriceSink, Source};
@@ -18,7 +18,7 @@ use super::source::{PriceSink, Source};
 pub struct SundaeSwapKupoSource {
     client: Arc<kupon::Client>,
     config: Arc<SundaeSwapKupoConfig>,
-    pools: DashMap<String, SundaeSwapPool>,
+    pools: DashMap<AssetId, HydratedPool>,
 }
 
 impl Source for SundaeSwapKupoSource {
@@ -27,7 +27,7 @@ impl Source for SundaeSwapKupoSource {
     }
 
     fn tokens(&self) -> Vec<String> {
-        self.pools.iter().map(|e| e.key().to_string()).collect()
+        self.pools.iter().map(|e| e.pool.token.clone()).collect()
     }
 
     fn query<'a>(&'a self, sink: &'a PriceSink) -> BoxFuture<Result<()>> {
@@ -36,15 +36,16 @@ impl Source for SundaeSwapKupoSource {
 }
 
 impl SundaeSwapKupoSource {
-    pub fn new(config: &SundaeSwapKupoConfig) -> Result<Self> {
-        let client = kupon::Builder::with_endpoint(&config.kupo_address).build()?;
+    pub fn new(config: &OracleConfig) -> Result<Self> {
+        let sundae_config = &config.sundaeswap_kupo;
+        let client = kupon::Builder::with_endpoint(&sundae_config.kupo_address).build()?;
         Ok(Self {
             client: Arc::new(client),
-            config: Arc::new(config.clone()),
+            config: Arc::new(sundae_config.clone()),
             pools: config
-                .pools
-                .iter()
-                .map(|t| (t.pool_asset_id.clone(), t.clone()))
+                .hydrate_pools(&sundae_config.pools)
+                .into_iter()
+                .map(|t| (AssetId::from_hex(&t.pool.asset_id), t))
                 .collect(),
         })
     }
@@ -53,66 +54,37 @@ impl SundaeSwapKupoSource {
         let options = MatchOptions::default()
             .address(&self.config.address)
             .only_unspent();
-        for mut pool in self
-            .client
-            .matches(&options)
-            .await?
-            .into_iter()
-            .flat_map(|m| self.parse_pool(m))
-        {
-            let Some(config) = self.pools.get(&pool.pool_asset_id) else {
+        for matc in self.client.matches(&options).await? {
+            let Some(pool_asset_id) = matc
+                .value
+                .assets
+                .keys()
+                .find(|aid| aid.policy_id == self.config.policy_id)
+            else {
+                continue;
+            };
+            let Some(pool) = self.pools.get(pool_asset_id) else {
                 continue;
             };
 
-            let Some(unit_value) = pool.assets.remove(&config.unit_asset_id) else {
-                return Err(anyhow!(
-                    "Couldn't find quantity of {} in SundaeSwap pool {}",
-                    config.unit,
-                    pool.pool_asset_id
-                ));
+            let token_value = match &pool.token_asset_id {
+                Some(token) => matc.value.assets[token],
+                None => matc.value.coins,
             };
 
-            let Some(token_value) = pool.assets.into_values().next() else {
-                return Err(anyhow!("Couldn't find price for {}", config.token));
+            let unit_value = match &pool.unit_asset_id {
+                Some(token) => matc.value.assets[token],
+                None => matc.value.coins,
             };
 
             let value = Decimal::new(unit_value as i64, 0) / Decimal::new(token_value as i64, 0);
             sink.send(PriceInfo {
-                token: config.token.clone(),
-                unit: config.unit.clone(),
+                token: pool.pool.token.clone(),
+                unit: pool.pool.unit.clone(),
                 value,
             })?;
         }
         sleep(Duration::from_secs(3)).await;
         Ok(())
     }
-
-    fn parse_pool(&self, matc: Match) -> Option<SundaePool> {
-        let mut pool_asset_id = None;
-        let mut assets = HashMap::new();
-        assets.insert(None, matc.value.coins);
-        for (asset_id, value) in matc.value.assets {
-            if asset_id.policy_id == self.config.policy_id {
-                pool_asset_id = Some(asset_id.to_hex())
-            } else {
-                assets.insert(Some(asset_id.to_hex()), value);
-            }
-        }
-
-        // exotic pools have two tokens as well as a little ada, and we should ignore the ada
-        if assets.len() > 2 {
-            assets.remove(&None);
-        }
-
-        pool_asset_id.map(|pool_asset_id| SundaePool {
-            pool_asset_id,
-            assets,
-        })
-    }
-}
-
-#[derive(Debug)]
-struct SundaePool {
-    pool_asset_id: String,
-    assets: HashMap<Option<String>, u64>,
 }

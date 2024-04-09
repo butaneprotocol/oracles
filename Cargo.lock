@@ -2009,7 +2009,7 @@ dependencies = [
 [[package]]
 name = "kupon"
 version = "0.1.0"
-source = "git+https://github.com/SundaeSwap-finance/kupon#78760b3444fc51c676c42ed7864870b11428d402"
+source = "git+https://github.com/SundaeSwap-finance/kupon#bf871825f4fe6b38096c1c75db48513dee5c9254"
 dependencies = [
  "reqwest",
  "serde",

@@ -92,7 +92,7 @@ pub struct SundaeSwapKupoConfig {
     pub kupo_address: String,
     pub address: String,
     pub policy_id: String,
-    pub pools: Vec<SundaeSwapPool>,
+    pub pools: Vec<Pool>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -102,18 +102,11 @@ pub struct Pool {
     pub asset_id: String,
 }
 
+#[derive(Debug, Clone)]
 pub struct HydratedPool {
     pub pool: Pool,
     pub token_asset_id: Option<AssetId>,
     pub unit_asset_id: Option<AssetId>,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-pub struct SundaeSwapPool {
-    pub token: String,
-    pub unit: String,
-    pub unit_asset_id: Option<String>,
-    pub pool_asset_id: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]

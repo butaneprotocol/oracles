@@ -126,19 +126,19 @@ sundaeswap_kupo:
   pools:
     - token: DJED
       unit: ADA
-      pool_asset_id: 0029cb7c88c7567b63d1a512c0ed626aa169688ec980730c0473b913.7020f803
+      asset_id: 0029cb7c88c7567b63d1a512c0ed626aa169688ec980730c0473b913.7020f803
     - token: ENCS
       unit: ADA
-      pool_asset_id: 0029cb7c88c7567b63d1a512c0ed626aa169688ec980730c0473b913.70200d04
+      asset_id: 0029cb7c88c7567b63d1a512c0ed626aa169688ec980730c0473b913.70200d04
     - token: LENFI
       unit: ADA
-      pool_asset_id: 0029cb7c88c7567b63d1a512c0ed626aa169688ec980730c0473b913.70201401
+      asset_id: 0029cb7c88c7567b63d1a512c0ed626aa169688ec980730c0473b913.70201401
     - token: MIN
       unit: ADA
-      pool_asset_id: 0029cb7c88c7567b63d1a512c0ed626aa169688ec980730c0473b913.702018
+      asset_id: 0029cb7c88c7567b63d1a512c0ed626aa169688ec980730c0473b913.702018
     - token: SNEK
       unit: ADA
-      pool_asset_id: 0029cb7c88c7567b63d1a512c0ed626aa169688ec980730c0473b913.70201f04
+      asset_id: 0029cb7c88c7567b63d1a512c0ed626aa169688ec980730c0473b913.70201f04
 minswap:
   kupo_address: http://localhost:1442
   credential: e1317b152faac13426e6a83e06ff88a4d62cce3c1634ab0a5ec13309/*
