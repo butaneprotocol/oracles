@@ -105,11 +105,15 @@ mod tests {
         let collateral = vec![
             CollateralConfig {
                 name: "ADA".into(),
+                asset_id: None,
                 price: Decimal::new(6, 1),
                 digits: 6,
             },
             CollateralConfig {
                 name: "LENFI".into(),
+                asset_id: Some(
+                    "8fef2d34078659493ce161a6c7fba4b56afefa8535296a5743f69587.41414441".into(),
+                ),
                 price: Decimal::new(379, 2),
                 digits: 6,
             },

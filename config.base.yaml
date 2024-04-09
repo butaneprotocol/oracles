@@ -86,24 +86,31 @@ collateral:
     price: 1.001
     digits: 6
   - name: DJED
+    asset_id: 8db269c3ec630e06ae29f74bc39edd1f87c819f1056206e879a1cd61.446a65644d6963726f555344
     price: 1
     digits: 6
   - name: ENCS
+    asset_id: 9abf0afd2f236a19f2842d502d0450cbcd9c79f123a9708f96fd9b96.454e4353
     price: 0.5923
     digits: 6
   - name: iUSD
+    asset_id: f66d78b4a3cb3d37afa0ec36461e51ecbde00f26c8f0a68f94b69880.69555344
     price: 0.79
     digits: 6
   - name: LENFI
+    asset_id: 8fef2d34078659493ce161a6c7fba4b56afefa8535296a5743f69587.41414441
     price: 3.79
     digits: 6
   - name: MIN
+    asset_id: 29d222ce763455e3d7a09a665ce554f00ac89d2e99a1a83d267170c6.4d494e
     price: 0.03457
     digits: 6
   - name: myUSD
+    asset_id: 92776616f1f32c65a173392e4410a3d8c39dcf6ef768c73af164779c.4d79555344
     price: 1
     digits: 6
   - name: SNEK
+    asset_id: 279c909f348e533da5808898f87f9a14bb2c3dfbbacccd631d927a3f.534e454b
     price: 0.001194
     digits: 0
   - name: USDb
@@ -113,6 +120,7 @@ collateral:
     price: 1
     digits: 6
 sundaeswap_kupo:
+  kupo_address: http://localhost:1442
   address: addr1w9qzpelu9hn45pefc0xr4ac4kdxeswq7pndul2vuj59u8tqaxdznu
   policy_id: 0029cb7c88c7567b63d1a512c0ed626aa169688ec980730c0473b913
   pools:
@@ -131,3 +139,28 @@ sundaeswap_kupo:
     - token: SNEK
       unit: ADA
       pool_asset_id: 0029cb7c88c7567b63d1a512c0ed626aa169688ec980730c0473b913.70201f04
+minswap:
+  kupo_address: http://localhost:1442
+  credential: e1317b152faac13426e6a83e06ff88a4d62cce3c1634ab0a5ec13309/*
+  pools:
+    - token: DJED
+      unit: ADA
+      asset_id: 0be55d262b29f564998ff81efe21bdc0022621c12f15af08d0f2ddb1.d944eda9d4fd8c26171a4362539bfd4ccf35f5a4d0cc7525b22327b997a4f4b9
+    - token: ENCS
+      unit: ADA
+      asset_id: 0be55d262b29f564998ff81efe21bdc0022621c12f15af08d0f2ddb1.2324756b8e7e74da8feb879e2f053789363d045e554eaa17d365d1b52f4a9f8c
+    - token: iUSD
+      unit: ADA
+      asset_id: 0be55d262b29f564998ff81efe21bdc0022621c12f15af08d0f2ddb1.8fde43a3f0b9f0e6f63bec7335e0b855c6b62a4dc51f1b762ccb6dfbbafcfe47
+    - token: LENFI
+      unit: ADA
+      asset_id: 0be55d262b29f564998ff81efe21bdc0022621c12f15af08d0f2ddb1.39b9b709ac8605fc82116a2efc308181ba297c11950f0f350001e28f0e50868b
+    - token: MIN
+      unit: ADA
+      asset_id: 0be55d262b29f564998ff81efe21bdc0022621c12f15af08d0f2ddb1.6aa2153e1ae896a95539c9d62f76cedcdabdcdf144e564b8955f609d660cf6a2
+    - token: myUSD
+      unit: ADA
+      asset_id: 0be55d262b29f564998ff81efe21bdc0022621c12f15af08d0f2ddb1.1aa8961f4c11d8cebb43c8306a1ecdbebf0103ae2d30bf31b3676445a954ae05
+    - token: SNEK
+      unit: ADA
+      asset_id: 0be55d262b29f564998ff81efe21bdc0022621c12f15af08d0f2ddb1.63f2cbfa5bf8b68828839a2575c8c70f14a32f50ebbfa7c654043269793be896

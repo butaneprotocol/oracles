@@ -15,15 +15,15 @@ use crate::{
 use super::source::{PriceSink, Source};
 
 #[derive(Clone)]
-pub struct KupoSource {
+pub struct SundaeSwapKupoSource {
     client: Arc<kupon::Client>,
     config: Arc<SundaeSwapKupoConfig>,
     pools: DashMap<String, SundaeSwapPool>,
 }
 
-impl Source for KupoSource {
+impl Source for SundaeSwapKupoSource {
     fn name(&self) -> String {
-        "Kupo".into()
+        "SundaeSwap Kupo".into()
     }
 
     fn tokens(&self) -> Vec<String> {
@@ -35,9 +35,9 @@ impl Source for KupoSource {
     }
 }
 
-impl KupoSource {
+impl SundaeSwapKupoSource {
     pub fn new(config: &SundaeSwapKupoConfig) -> Result<Self> {
-        let client = kupon::Builder::with_endpoint("http://localhost:1442").build()?;
+        let client = kupon::Builder::with_endpoint(&config.kupo_address).build()?;
         Ok(Self {
             client: Arc::new(client),
             config: Arc::new(config.clone()),
