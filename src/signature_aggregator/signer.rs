@@ -102,7 +102,7 @@ impl Signer {
         id: String,
         key: KeyPackage,
         public_key: PublicKeyPackage,
-        price_source: Receiver<Vec<PriceFeedEntry>>, // TODO: this should be dynamic
+        price_source: Receiver<Vec<PriceFeedEntry>>,
         message_sink: Sender<OutgoingMessage>,
         signed_price_sink: Sender<Vec<SignedPriceFeedEntry>>,
     ) -> Self {
@@ -315,12 +315,8 @@ impl Signer {
         }
         for (package, my_feed) in packages.iter().zip(price_data.iter()) {
             let leader_feed = deserialize_price_feed(package.message())?;
-            if !should_sign(&leader_feed, &my_feed.data) {
-                return Err(anyhow!(
-                    "Mismatched feed {:?} {:?}",
-                    leader_feed,
-                    my_feed.data
-                ));
+            if let Err(mismatch) = should_sign(&leader_feed, &my_feed.data) {
+                return Err(anyhow!("Not signing payload: {}", mismatch));
             }
         }
 
@@ -453,19 +449,46 @@ fn deserialize_price_feed(bytes: &[u8]) -> Result<PriceFeed> {
     Ok(result)
 }
 
-fn should_sign(leader_feed: &PriceFeed, my_feed: &PriceFeed) -> bool {
+fn should_sign(leader_feed: &PriceFeed, my_feed: &PriceFeed) -> Result<(), String> {
     if leader_feed.synthetic != my_feed.synthetic {
-        return false;
+        return Err(format!(
+            "mismatched synthetics: leader has {}, we have {}",
+            leader_feed.synthetic, my_feed.synthetic
+        ));
     }
     if leader_feed.validity != my_feed.validity {
         // TODO: need "close enough" date range logic here
-        return false;
+        return Err(format!(
+            "mismatched validity: leader has {:?}, we have {:?}",
+            leader_feed.validity, my_feed.validity
+        ));
     }
     if leader_feed.collateral_prices.len() != my_feed.collateral_prices.len() {
-        return false;
+        return Err(format!(
+            "wrong number of collateral prices: leader has {}, we have {}",
+            leader_feed.collateral_prices.len(),
+            my_feed.collateral_prices.len()
+        ));
     }
-    // TODO: need to decide when prices are close enough
-    true
+    // If one price is >1% less than the other, they're too distant to trust
+    for (leader_price, my_price) in leader_feed
+        .collateral_prices
+        .iter()
+        .zip(my_feed.collateral_prices.iter())
+    {
+        let leader_value = leader_price * &my_feed.denominator;
+        let my_value = my_price * &leader_feed.denominator;
+        let max_value = leader_value.clone().max(my_value.clone());
+        let min_value = leader_value.min(my_value);
+        let difference = &max_value - min_value;
+        if difference * 100u32 > max_value {
+            return Err(format!(
+                "collateral prices are too distant: leader has {}/{}, we have {}/{}",
+                leader_price, leader_feed.denominator, my_price, my_feed.denominator
+            ));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -474,80 +497,128 @@ mod tests {
     use frost_ed25519::keys::{self, IdentifierList, KeyPackage};
     use num_bigint::BigUint;
     use rand::thread_rng;
-    use rust_decimal::Decimal;
+    use rust_decimal::{prelude::FromPrimitive, Decimal};
     use tokio::sync::{mpsc, watch};
 
     use crate::{
-        price_feed::{PriceFeed, PriceFeedEntry, Validity},
+        price_feed::{PriceFeed, PriceFeedEntry, SignedPriceFeedEntry, Validity},
         raft::RaftLeader,
         signature_aggregator::signer::{OutgoingMessage, SignerMessage, SignerMessageData},
     };
 
     use super::{Signer, SignerEvent};
 
-    #[tokio::test]
-    async fn should_sign_payload_with_quorum_of_two() -> Result<()> {
-        let price_data = vec![
-            PriceFeedEntry {
-                price: Decimal::new(350, 2),
-                data: PriceFeed {
-                    collateral_prices: vec![BigUint::from(3u8), BigUint::from(4u8)],
-                    synthetic: "ADA".into(),
-                    denominator: BigUint::from(1u8),
-                    validity: Validity::default(),
-                },
-            },
-            PriceFeedEntry {
-                price: Decimal::new(121, 2),
-                data: PriceFeed {
-                    collateral_prices: vec![BigUint::from(5u8), BigUint::from(8u8)],
-                    synthetic: "BTN".into(),
-                    denominator: BigUint::from(1u8),
-                    validity: Validity::default(),
-                },
-            },
-        ];
-
+    async fn construct_signers(
+        min: u16,
+        prices: Vec<Vec<PriceFeedEntry>>,
+    ) -> Result<(
+        Vec<Signer>,
+        mpsc::Receiver<OutgoingMessage>,
+        mpsc::Receiver<Vec<SignedPriceFeedEntry>>,
+    )> {
         let mut rng = thread_rng();
-        let (shares, public_key) =
-            keys::generate_with_dealer(3, 2, IdentifierList::Default, &mut rng)?;
+        let (shares, public_key) = keys::generate_with_dealer(
+            prices.len() as u16,
+            min,
+            IdentifierList::Default,
+            &mut rng,
+        )?;
 
-        let (message_sink, mut message_source) = mpsc::channel(10);
-        let (payload_sink, mut payload_source) = mpsc::channel(10);
+        let (message_sink, message_source) = mpsc::channel(10);
+        let (payload_sink, payload_source) = mpsc::channel(10);
 
-        let mut signers: Vec<Signer> = shares
+        let signers: Vec<Signer> = shares
             .into_iter()
+            .zip(prices.into_iter())
             .enumerate()
-            .map(|(idx, (_, share))| {
+            .map(|(idx, ((_, share), price_data))| {
                 let id = idx.to_string();
                 let key = KeyPackage::try_from(share).unwrap();
-                let (_, price_data) = watch::channel(price_data.clone());
+                let (_, price_source) = watch::channel(price_data);
                 Signer::new(
                     id,
                     key,
                     public_key.clone(),
-                    price_data,
+                    price_source,
                     message_sink.clone(),
                     payload_sink.clone(),
                 )
             })
             .collect();
 
-        // set everyone's roles
+        Ok((signers, message_source, payload_source))
+    }
+
+    // make the first signer the leader, and other signers followers.
+    // return the leader's id
+    async fn assign_roles(signers: &mut [Signer]) -> Result<String> {
         let leader_id = signers[0].id.clone();
         signers[0]
             .process(SignerEvent::LeaderChanged(RaftLeader::Myself))
             .await?;
-        signers[1]
-            .process(SignerEvent::LeaderChanged(RaftLeader::Other(
-                leader_id.clone(),
-            )))
-            .await?;
-        signers[2]
-            .process(SignerEvent::LeaderChanged(RaftLeader::Other(
-                leader_id.clone(),
-            )))
-            .await?;
+        for signer in signers.iter_mut().skip(1) {
+            signer
+                .process(SignerEvent::LeaderChanged(RaftLeader::Other(
+                    leader_id.clone(),
+                )))
+                .await?;
+        }
+        Ok(leader_id)
+    }
+
+    async fn run_round(
+        signers: &mut [Signer],
+        message_source: &mut mpsc::Receiver<OutgoingMessage>,
+    ) -> Result<()> {
+        signers[0].process(SignerEvent::RoundStarted).await?;
+        while let Ok(message) = message_source.try_recv() {
+            let to = message.to;
+            let message = message.message;
+            let receivers = signers
+                .iter_mut()
+                .filter(|s| to.is_none() || to.as_ref().unwrap() == &s.id);
+            for receiver in receivers {
+                receiver
+                    .process(SignerEvent::Message(message.clone()))
+                    .await?;
+            }
+        }
+        Ok(())
+    }
+
+    fn price_feed_entry(
+        synthetic: &str,
+        price: f64,
+        collateral_prices: &[u64],
+        denominator: u64,
+    ) -> PriceFeedEntry {
+        PriceFeedEntry {
+            price: Decimal::from_f64(price).unwrap(),
+            data: PriceFeed {
+                collateral_prices: collateral_prices
+                    .into_iter()
+                    .map(|&p| BigUint::from(p))
+                    .collect(),
+                synthetic: synthetic.into(),
+                denominator: BigUint::from(denominator),
+                validity: Validity::default(),
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn should_sign_payload_with_quorum_of_two() -> Result<()> {
+        let price_data = vec![
+            price_feed_entry("ADA", 3.50, &[3, 4], 1),
+            price_feed_entry("BTN", 1.21, &[5, 8], 1),
+        ];
+
+        let prices = vec![price_data.clone(); 3];
+        let (mut signers, mut message_source, mut payload_source) =
+            construct_signers(2, prices).await?;
+
+        // set everyone's roles
+        let leader_id = assign_roles(&mut signers).await?;
 
         // Start the round
         signers[0].process(SignerEvent::RoundStarted).await?;
@@ -645,6 +716,42 @@ mod tests {
 
         // leader should have published results
         assert!(payload_source.recv().await.is_some());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn should_sign_close_enough_collateral_prices() -> Result<()> {
+        let leader_prices = vec![price_feed_entry("TOKEN", 3.50, &[2], 1)];
+        let follower_prices = vec![price_feed_entry("TOKEN", 3.50, &[199], 100)];
+
+        let (mut signers, mut message_source, mut payload_source) =
+            construct_signers(2, vec![leader_prices, follower_prices]).await?;
+        assign_roles(&mut signers).await?;
+        run_round(&mut signers, &mut message_source).await?;
+
+        assert!(payload_source.recv().await.is_some());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn should_not_sign_distant_collateral_prices() -> Result<()> {
+        let leader_prices = vec![price_feed_entry("TOKEN", 3.50, &[2], 1)];
+        let follower_prices = vec![price_feed_entry("TOKEN", 3.50, &[3], 2)];
+
+        let (mut signers, mut message_source, mut payload_source) =
+            construct_signers(2, vec![leader_prices, follower_prices]).await?;
+        assign_roles(&mut signers).await?;
+        let err = run_round(&mut signers, &mut message_source)
+            .await
+            .expect_err("round should have failed");
+        assert_eq!(
+            err.to_string(),
+            "Not signing payload: collateral prices are too distant: leader has 2/1, we have 3/2"
+        );
+
+        assert!(payload_source.try_recv().is_err());
 
         Ok(())
     }
