@@ -9,7 +9,7 @@ use tokio::time::sleep;
 
 use crate::{
     apis::source::PriceInfo,
-    config::{HydratedPool, OracleConfig, SundaeSwapKupoConfig},
+    config::{HydratedPool, OracleConfig, SundaeSwapConfig},
 };
 
 use super::source::{PriceSink, Source};
@@ -17,7 +17,7 @@ use super::source::{PriceSink, Source};
 #[derive(Clone)]
 pub struct SundaeSwapKupoSource {
     client: Arc<kupon::Client>,
-    config: Arc<SundaeSwapKupoConfig>,
+    config: Arc<SundaeSwapConfig>,
     pools: DashMap<AssetId, HydratedPool>,
 }
 
@@ -37,7 +37,7 @@ impl Source for SundaeSwapKupoSource {
 
 impl SundaeSwapKupoSource {
     pub fn new(config: &OracleConfig) -> Result<Self> {
-        let sundae_config = &config.sundaeswap_kupo;
+        let sundae_config = &config.sundaeswap;
         let client = kupon::Builder::with_endpoint(&sundae_config.kupo_address).build()?;
         Ok(Self {
             client: Arc::new(client),

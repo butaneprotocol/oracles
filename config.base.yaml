@@ -119,7 +119,7 @@ collateral:
   - name: USDs
     price: 1
     digits: 6
-sundaeswap_kupo:
+sundaeswap:
   kupo_address: http://localhost:1442
   address: addr1w9qzpelu9hn45pefc0xr4ac4kdxeswq7pndul2vuj59u8tqaxdznu
   policy_id: 0029cb7c88c7567b63d1a512c0ed626aa169688ec980730c0473b913

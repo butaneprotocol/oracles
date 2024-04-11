@@ -43,7 +43,7 @@ impl PriceAggregator {
                 SourceAdapter::new(CoinbaseSource::new()),
                 SourceAdapter::new(MaestroSource::new()?),
                 SourceAdapter::new(MinswapSource::new(&config)?),
-                SourceAdapter::new(SundaeSwapSource::new()?),
+                SourceAdapter::new(SundaeSwapSource::new(&config)?),
                 SourceAdapter::new(SundaeSwapKupoSource::new(&config)?),
             ]),
             config,

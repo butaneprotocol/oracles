@@ -16,7 +16,7 @@ pub struct OracleConfig {
     pub timeout_ms: u64,
     pub synthetics: Vec<SyntheticConfig>,
     pub collateral: Vec<CollateralConfig>,
-    pub sundaeswap_kupo: SundaeSwapKupoConfig,
+    pub sundaeswap: SundaeSwapConfig,
     pub minswap: MinswapConfig,
 }
 
@@ -88,7 +88,7 @@ pub struct CollateralConfig {
 }
 
 #[derive(Debug, Deserialize, Clone)]
-pub struct SundaeSwapKupoConfig {
+pub struct SundaeSwapConfig {
     pub kupo_address: String,
     pub address: String,
     pub policy_id: String,

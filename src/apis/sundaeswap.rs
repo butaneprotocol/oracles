@@ -1,18 +1,25 @@
-use std::{str::FromStr, time::Duration};
+use std::{collections::HashMap, str::FromStr, time::Duration};
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use futures::{future::BoxFuture, FutureExt};
 use reqwest::Client;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
+use tracing::warn;
+
+use crate::config::OracleConfig;
 
 use super::source::{PriceInfo, PriceSink, Source};
 
-const TOKENS: [&str; 5] = ["DJED", "ENCS", "LENFI", "MIN", "SNEK"];
+struct SundaeSwapPool {
+    token: String,
+    id: String,
+}
 
 pub struct SundaeSwapSource {
     client: Client,
+    pools: Vec<SundaeSwapPool>,
 }
 
 impl Source for SundaeSwapSource {
@@ -21,7 +28,7 @@ impl Source for SundaeSwapSource {
     }
 
     fn tokens(&self) -> Vec<String> {
-        TOKENS.iter().map(|t| t.to_string()).collect()
+        self.pools.iter().map(|p| p.token.clone()).collect()
     }
 
     fn query<'a>(&'a self, sink: &'a PriceSink) -> BoxFuture<anyhow::Result<()>> {
@@ -32,9 +39,9 @@ impl Source for SundaeSwapSource {
 const URL: &str = "https://api.sundae.fi/graphql";
 const GQL_OPERATION_NAME: &str = "ButaneOracleQuery";
 const GQL_QUERY: &str = "\
-query ButaneOracleQuery {
+query ButaneOracleQuery($ids: [ID!]!) {
     pools {
-        byAsset(asset: \"ada.lovelace\") {
+        byIds(ids: $ids) {
             assetA {
                 ticker
                 decimals
@@ -56,61 +63,80 @@ query ButaneOracleQuery {
 }";
 
 impl SundaeSwapSource {
-    pub fn new() -> Result<Self> {
+    pub fn new(config: &OracleConfig) -> Result<Self> {
         let client = Client::builder().build()?;
-        Ok(Self { client })
+        let pools = config
+            .sundaeswap
+            .pools
+            .iter()
+            .map(|p| {
+                // the id of a pool in sundaeswap's API is the asset name (minus a two-byte prefix)
+                let prefix_len = config.sundaeswap.policy_id.len() + ".7020".len();
+                let id = &p.asset_id[prefix_len..];
+                SundaeSwapPool {
+                    token: p.token.clone(),
+                    id: id.to_string(),
+                }
+            })
+            .collect();
+        Ok(Self { client, pools })
     }
 
     async fn query_impl(&self, sink: &PriceSink) -> Result<()> {
-        loop {
-            sleep(Duration::from_secs(3)).await;
+        let mut variables = HashMap::new();
+        variables.insert("ids", self.pools.iter().map(|p| p.id.as_str()).collect());
+        let query = serde_json::to_string(&GraphQLQuery {
+            query: GQL_QUERY,
+            operation_name: GQL_OPERATION_NAME,
+            variables,
+        })?;
 
-            let query = serde_json::to_string(&GraphQLQuery {
-                query: GQL_QUERY,
-                operation_name: GQL_OPERATION_NAME,
-            })?;
-
-            let response = self
-                .client
-                .post(URL)
-                .header("Accept", "application/json")
-                .header("Content-Type", "application/json")
-                .body(query)
-                .timeout(Duration::from_secs(10))
-                .send()
-                .await?;
-            let contents = response.text().await?;
-            let gql_response: GraphQLResponse = serde_json::from_str(&contents)?;
-            for pool in gql_response.data.pools.by_asset {
-                let Some(token) = pool.asset_b.ticker else {
-                    continue;
-                };
-                if TOKENS.iter().all(|&t| token != t) {
-                    continue;
-                }
-
-                let Stats {
-                    quantity_a,
-                    quantity_b,
-                } = pool.current;
-                let numerator = Decimal::from_i128_with_scale(
-                    i128::from_str(&quantity_a.quantity)?,
-                    pool.asset_a.decimals,
-                );
-                let denominator = Decimal::from_i128_with_scale(
-                    i128::from_str(&quantity_b.quantity)?,
-                    pool.asset_b.decimals,
-                );
-                // TODO: maybe represent prices as numerator/denominator instead of decimal?
-                let value = numerator / denominator;
-
-                sink.send(PriceInfo {
-                    token,
-                    unit: "ADA".into(),
-                    value,
-                })?;
-            }
+        let response = self
+            .client
+            .post(URL)
+            .header("Accept", "application/json")
+            .header("Content-Type", "application/json")
+            .body(query)
+            .timeout(Duration::from_secs(10))
+            .send()
+            .await?;
+        let contents = response.text().await?;
+        let gql_response: GraphQLResponse = serde_json::from_str(&contents)?;
+        for error in &gql_response.errors.unwrap_or_default() {
+            warn!("error returned by sundaeswap api: {}", error.message);
         }
+        let Some(data) = gql_response.data else {
+            return Err(anyhow!("no data returned by sundaeswap api"));
+        };
+        for pool in data.pools.by_ids {
+            let Some(token) = pool.asset_b.ticker else {
+                continue;
+            };
+
+            let Stats {
+                quantity_a,
+                quantity_b,
+            } = pool.current;
+            let numerator = Decimal::from_i128_with_scale(
+                i128::from_str(&quantity_a.quantity)?,
+                pool.asset_a.decimals,
+            );
+            let denominator = Decimal::from_i128_with_scale(
+                i128::from_str(&quantity_b.quantity)?,
+                pool.asset_b.decimals,
+            );
+            // TODO: maybe represent prices as numerator/denominator instead of decimal?
+            let value = numerator / denominator;
+
+            sink.send(PriceInfo {
+                token,
+                unit: "ADA".into(),
+                value,
+            })?;
+        }
+
+        sleep(Duration::from_secs(3)).await;
+        Ok(())
     }
 }
 
@@ -119,11 +145,18 @@ impl SundaeSwapSource {
 struct GraphQLQuery<'a> {
     query: &'a str,
     operation_name: &'a str,
+    variables: HashMap<&'a str, Vec<&'a str>>,
 }
 
 #[derive(Deserialize)]
 struct GraphQLResponse {
-    data: DataQuery,
+    data: Option<DataQuery>,
+    errors: Option<Vec<GraphQLError>>,
+}
+
+#[derive(Deserialize)]
+struct GraphQLError {
+    message: String,
 }
 
 #[derive(Deserialize)]
@@ -134,7 +167,7 @@ struct DataQuery {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PoolsQuery {
-    pub by_asset: Vec<Pool>,
+    pub by_ids: Vec<Pool>,
 }
 
 #[derive(Deserialize)]
