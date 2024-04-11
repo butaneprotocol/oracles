@@ -77,7 +77,8 @@ impl SundaeSwapKupoSource {
                 None => matc.value.coins,
             };
 
-            let value = Decimal::new(unit_value as i64, 0) / Decimal::new(token_value as i64, 0);
+            let value = Decimal::new(unit_value as i64, pool.unit_digits)
+                / Decimal::new(token_value as i64, pool.token_digits);
             sink.send(PriceInfo {
                 token: pool.pool.token.clone(),
                 unit: pool.pool.unit.clone(),

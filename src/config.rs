@@ -30,38 +30,41 @@ impl OracleConfig {
     }
 
     pub fn hydrate_pools(&self, pools: &[Pool]) -> Vec<HydratedPool> {
-        let asset_ids = self.build_asset_id_lookup();
+        let assets = self.build_asset_lookup();
         pools
             .iter()
             .map(|p| {
-                let token_asset_id = Self::find_asset_id(&p.token, &asset_ids);
-                let unit_asset_id = Self::find_asset_id(&p.unit, &asset_ids);
+                let token_asset = assets[&p.token];
+                let token_asset_id = Self::find_asset_id(token_asset);
+                let unit_asset = assets[&p.unit];
+                let unit_asset_id = Self::find_asset_id(unit_asset);
                 HydratedPool {
                     pool: p.clone(),
                     token_asset_id,
+                    token_digits: token_asset.digits,
                     unit_asset_id,
+                    unit_digits: unit_asset.digits,
                 }
             })
             .collect()
     }
 
-    fn build_asset_id_lookup(&self) -> HashMap<&String, &String> {
+    fn build_asset_lookup(&self) -> HashMap<&String, &CollateralConfig> {
         let mut result = HashMap::new();
         for collateral in &self.collateral {
-            if let Some(asset_id) = &collateral.asset_id {
-                result.insert(&collateral.name, asset_id);
-            }
+            result.insert(&collateral.name, collateral);
         }
         result
     }
 
-    fn find_asset_id(token: &String, asset_ids: &HashMap<&String, &String>) -> Option<AssetId> {
-        if token == "ADA" {
+    fn find_asset_id(asset: &CollateralConfig) -> Option<AssetId> {
+        if asset.name == "ADA" {
             return None;
         }
-        let asset_id = asset_ids
-            .get(token)
-            .unwrap_or_else(|| panic!("Unrecognized token {}", token));
+        let asset_id = asset
+            .asset_id
+            .as_ref()
+            .unwrap_or_else(|| panic!("Token {} has no asset id", asset.name));
         Some(AssetId::from_hex(asset_id))
     }
 }
@@ -106,7 +109,9 @@ pub struct Pool {
 pub struct HydratedPool {
     pub pool: Pool,
     pub token_asset_id: Option<AssetId>,
+    pub token_digits: u32,
     pub unit_asset_id: Option<AssetId>,
+    pub unit_digits: u32,
 }
 
 #[derive(Debug, Deserialize, Clone)]
