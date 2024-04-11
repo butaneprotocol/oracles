@@ -1,10 +1,24 @@
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use minicbor::{
     data::{Tag, Type},
-    decode, Decode, Decoder,
+    decode, Decode, Decoder, Encoder,
 };
 use num_bigint::BigUint;
 use pallas_primitives::conway::{BigInt, Constr, PlutusData};
 use rust_decimal::{prelude::ToPrimitive, Decimal};
+
+pub fn serialize<T: Into<PlutusData>>(data: T) -> Vec<u8> {
+    let plutus: PlutusData = data.into();
+    let mut encoder = Encoder::new(vec![]);
+    encoder.encode(&plutus).unwrap(); //infallible
+    encoder.into_writer()
+}
+
+pub fn deserialize<'a, T: Decode<'a, ()>>(bytes: &'a [u8]) -> Result<T, minicbor::decode::Error> {
+    let mut decoder = Decoder::new(bytes);
+    decoder.decode()
+}
 
 #[derive(Clone, Debug)]
 pub struct PriceFeedEntry {
@@ -82,8 +96,8 @@ impl<'b, C> Decode<'b, C> for PriceFeed {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Validity {
-    lower_bound: IntervalBound,
-    upper_bound: IntervalBound,
+    pub lower_bound: IntervalBound,
+    pub upper_bound: IntervalBound,
 }
 impl Default for Validity {
     fn default() -> Self {
@@ -120,8 +134,23 @@ impl<'b, C> Decode<'b, C> for Validity {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct IntervalBound {
-    bound_type: IntervalBoundType,
-    is_inclusive: bool,
+    pub bound_type: IntervalBoundType,
+    pub is_inclusive: bool,
+}
+impl IntervalBound {
+    pub fn moment(moment: SystemTime, is_inclusive: bool) -> Self {
+        let timestamp = moment
+            .duration_since(UNIX_EPOCH)
+            .expect("it is currently after 1970")
+            .as_millis() as u64;
+        Self::unix_timestamp(timestamp, is_inclusive)
+    }
+    pub fn unix_timestamp(timestamp: u64, is_inclusive: bool) -> Self {
+        Self {
+            bound_type: IntervalBoundType::Finite(timestamp),
+            is_inclusive,
+        }
+    }
 }
 impl From<IntervalBound> for PlutusData {
     fn from(val: IntervalBound) -> Self {
@@ -236,9 +265,68 @@ fn decode_enum<'b, C, V: Decode<'b, C>>(
     let Tag::Unassigned(variant) = d.tag()? else {
         return Err(decode::Error::message("Missing plutus struct tag"));
     };
-    let result = match d.array()? {
-        Some(0) => (variant - CBOR_VARIANT_0, None),
-        _ => (variant - CBOR_VARIANT_0, Some(d.decode_with(ctx)?)),
+    let datum = match d.array()? {
+        Some(0) => None,
+        Some(1) => d.decode_with(ctx)?,
+        Some(_) => return Err(decode::Error::message("Enum has too much data")),
+        None => {
+            if let Type::Break = d.datatype()? {
+                d.skip()?;
+                None
+            } else {
+                let datum = d.decode_with(ctx)?;
+                let Type::Break = d.datatype()? else {
+                    return Err(decode::Error::message("Enum has too much data"));
+                };
+                d.skip()?;
+                Some(datum)
+            }
+        }
     };
-    Ok(result)
+    Ok((variant - CBOR_VARIANT_0, datum))
+}
+
+#[cfg(test)]
+mod tests {
+    use num_bigint::BigUint;
+
+    use super::{deserialize, serialize, IntervalBound, IntervalBoundType, PriceFeed, Validity};
+
+    #[test]
+    fn should_serialize_infinite_validity() {
+        let validity = Validity {
+            lower_bound: IntervalBound {
+                bound_type: IntervalBoundType::NegativeInfinity,
+                is_inclusive: false,
+            },
+            upper_bound: IntervalBound {
+                bound_type: IntervalBoundType::PositiveInfinity,
+                is_inclusive: false,
+            },
+        };
+        let round_tripped = deserialize(&serialize(validity.clone())).unwrap();
+        assert_eq!(validity, round_tripped);
+    }
+
+    #[test]
+    fn should_serialize_finite_validity() {
+        let validity = Validity {
+            lower_bound: IntervalBound::unix_timestamp(1000000, true),
+            upper_bound: IntervalBound::unix_timestamp(1005000, true),
+        };
+        let round_tripped = deserialize(&serialize(validity.clone())).unwrap();
+        assert_eq!(validity, round_tripped);
+    }
+
+    #[test]
+    fn should_serialize_price_feed() {
+        let feed = PriceFeed {
+            collateral_prices: vec![BigUint::from(1u32), BigUint::from(u128::MAX) * 2u32],
+            synthetic: "HIPI".into(),
+            denominator: BigUint::from(31337u32),
+            validity: Validity::default(),
+        };
+        let round_tripped = deserialize(&serialize(&feed)).unwrap();
+        assert_eq!(feed, round_tripped);
+    }
 }

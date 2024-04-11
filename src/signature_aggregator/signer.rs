@@ -8,15 +8,16 @@ use frost_ed25519::{
     round2::{self, SignatureShare},
     Identifier, SigningPackage,
 };
-use minicbor::{Decoder, Encoder};
-use pallas_primitives::conway::PlutusData;
 use rand::thread_rng;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc::Sender, watch::Receiver};
 use uuid::Uuid;
 
 use crate::{
-    price_feed::{PriceFeed, PriceFeedEntry, SignedPriceFeed, SignedPriceFeedEntry},
+    price_feed::{
+        deserialize, serialize, IntervalBound, IntervalBoundType, PriceFeed, PriceFeedEntry,
+        SignedPriceFeed, SignedPriceFeedEntry, Validity,
+    },
     raft::RaftLeader,
 };
 
@@ -252,10 +253,7 @@ impl Signer {
 
         let price_data = price_data.clone();
         // Request signatures from all the committees
-        let messages: Vec<Vec<u8>> = price_data
-            .iter()
-            .map(|e| serialize_price_feed(&e.data))
-            .collect();
+        let messages: Vec<Vec<u8>> = price_data.iter().map(|e| serialize(&e.data)).collect();
         let packages: Vec<SigningPackage> = commitment_maps
             .into_iter()
             .zip(messages)
@@ -314,7 +312,8 @@ impl Signer {
             ));
         }
         for (package, my_feed) in packages.iter().zip(price_data.iter()) {
-            let leader_feed = deserialize_price_feed(package.message())?;
+            let leader_feed =
+                deserialize(package.message()).context("could not decode price_feed")?;
             if let Err(mismatch) = should_sign(&leader_feed, &my_feed.data) {
                 return Err(anyhow!("Not signing payload: {}", mismatch));
             }
@@ -436,19 +435,6 @@ impl Signer {
     }
 }
 
-fn serialize_price_feed(price_feed: &PriceFeed) -> Vec<u8> {
-    let plutus: PlutusData = price_feed.into();
-    let mut encoder = Encoder::new(vec![]);
-    encoder.encode(&plutus).unwrap(); // this is infallible
-    encoder.into_writer()
-}
-
-fn deserialize_price_feed(bytes: &[u8]) -> Result<PriceFeed> {
-    let mut decoder = Decoder::new(bytes);
-    let result: PriceFeed = decoder.decode().context("Could not decode price_feed")?;
-    Ok(result)
-}
-
 fn should_sign(leader_feed: &PriceFeed, my_feed: &PriceFeed) -> Result<(), String> {
     if leader_feed.synthetic != my_feed.synthetic {
         return Err(format!(
@@ -456,8 +442,7 @@ fn should_sign(leader_feed: &PriceFeed, my_feed: &PriceFeed) -> Result<(), Strin
             leader_feed.synthetic, my_feed.synthetic
         ));
     }
-    if leader_feed.validity != my_feed.validity {
-        // TODO: need "close enough" date range logic here
+    if !is_validity_close_enough(&leader_feed.validity, &my_feed.validity) {
         return Err(format!(
             "mismatched validity: leader has {:?}, we have {:?}",
             leader_feed.validity, my_feed.validity
@@ -490,6 +475,21 @@ fn should_sign(leader_feed: &PriceFeed, my_feed: &PriceFeed) -> Result<(), Strin
     }
     Ok(())
 }
+fn is_validity_close_enough(leader_validity: &Validity, my_validity: &Validity) -> bool {
+    are_bounds_close_enough(&leader_validity.lower_bound, &my_validity.lower_bound)
+        && are_bounds_close_enough(&leader_validity.upper_bound, &my_validity.upper_bound)
+}
+
+fn are_bounds_close_enough(leader_bound: &IntervalBound, my_bound: &IntervalBound) -> bool {
+    if let IntervalBoundType::Finite(leader_moment) = leader_bound.bound_type {
+        if let IntervalBoundType::Finite(my_moment) = my_bound.bound_type {
+            let difference = leader_moment.max(my_moment) - leader_moment.min(my_moment);
+            // allow up to 60 seconds difference between bounds
+            return difference < 1000 * 60;
+        }
+    }
+    leader_bound == my_bound
+}
 
 #[cfg(test)]
 mod tests {
@@ -501,7 +501,7 @@ mod tests {
     use tokio::sync::{mpsc, watch};
 
     use crate::{
-        price_feed::{PriceFeed, PriceFeedEntry, SignedPriceFeedEntry, Validity},
+        price_feed::{IntervalBound, PriceFeed, PriceFeedEntry, SignedPriceFeedEntry, Validity},
         raft::RaftLeader,
         signature_aggregator::signer::{OutgoingMessage, SignerMessage, SignerMessageData},
     };
@@ -750,6 +750,59 @@ mod tests {
             err.to_string(),
             "Not signing payload: collateral prices are too distant: leader has 2/1, we have 3/2"
         );
+
+        assert!(payload_source.try_recv().is_err());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn should_sign_close_enough_validity() -> Result<()> {
+        const TIMESTAMP: u64 = 1712723729359;
+        let mut leader_price = price_feed_entry("TOKEN", 3.50, &[1], 1);
+        leader_price.data.validity = Validity {
+            lower_bound: IntervalBound::unix_timestamp(TIMESTAMP, true),
+            upper_bound: IntervalBound::unix_timestamp(TIMESTAMP + 3000000, true),
+        };
+        let mut follower_price = price_feed_entry("TOKEN", 3.50, &[1], 1);
+        follower_price.data.validity = Validity {
+            lower_bound: IntervalBound::unix_timestamp(TIMESTAMP + 5000, true),
+            upper_bound: IntervalBound::unix_timestamp(TIMESTAMP + 3005000, true),
+        };
+
+        let (mut signers, mut message_source, mut payload_source) =
+            construct_signers(2, vec![vec![leader_price], vec![follower_price]]).await?;
+        assign_roles(&mut signers).await?;
+        run_round(&mut signers, &mut message_source).await?;
+
+        assert!(payload_source.recv().await.is_some());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn should_not_sign_distant_validity() -> Result<()> {
+        const TIMESTAMP: u64 = 1712723729359;
+        let mut leader_price = price_feed_entry("TOKEN", 3.50, &[1], 1);
+        leader_price.data.validity = Validity {
+            lower_bound: IntervalBound::unix_timestamp(TIMESTAMP, true),
+            upper_bound: IntervalBound::unix_timestamp(TIMESTAMP + 3000000, true),
+        };
+        let mut follower_price = price_feed_entry("TOKEN", 3.50, &[1], 1);
+        follower_price.data.validity = Validity {
+            lower_bound: IntervalBound::unix_timestamp(TIMESTAMP + 5000000, true),
+            upper_bound: IntervalBound::unix_timestamp(TIMESTAMP + 8000000, true),
+        };
+
+        let (mut signers, mut message_source, mut payload_source) =
+            construct_signers(2, vec![vec![leader_price], vec![follower_price]]).await?;
+        assign_roles(&mut signers).await?;
+        let err = run_round(&mut signers, &mut message_source)
+            .await
+            .expect_err("round should have failed");
+        assert!(err
+            .to_string()
+            .starts_with("Not signing payload: mismatched validity"));
 
         assert!(payload_source.try_recv().is_err());
 

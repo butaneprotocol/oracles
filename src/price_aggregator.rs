@@ -1,4 +1,7 @@
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::Arc,
+    time::{Duration, SystemTime},
+};
 
 use anyhow::Result;
 use dashmap::DashMap;
@@ -16,7 +19,7 @@ use crate::{
     },
     config::{CollateralConfig, OracleConfig, SyntheticConfig},
     health::HealthSink,
-    price_feed::{PriceFeed, PriceFeedEntry, Validity},
+    price_feed::{IntervalBound, PriceFeed, PriceFeedEntry, Validity},
 };
 
 use self::{conversions::ConversionLookup, source_adapter::SourceAdapter};
@@ -113,14 +116,19 @@ impl PriceAggregator {
             .collect();
         let price = conversions.value_in_usd(&synth.name);
         let (collateral_prices, denominator) = normalize(&prices, price);
+        let valid_from = SystemTime::now();
+        let valid_to = valid_from + Duration::from_secs(300);
+
         PriceFeedEntry {
             price,
             data: PriceFeed {
                 collateral_prices,
                 synthetic: synth.name.clone(),
                 denominator,
-                // TODO: limit validity
-                validity: Validity::default(),
+                validity: Validity {
+                    lower_bound: IntervalBound::moment(valid_from, true),
+                    upper_bound: IntervalBound::moment(valid_to, false),
+                },
             },
         }
     }

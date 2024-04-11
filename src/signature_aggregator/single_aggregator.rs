@@ -1,9 +1,7 @@
 use std::{env, time::Duration};
 
 use anyhow::Result;
-use minicbor::Encoder;
 use pallas_crypto::key::ed25519::SecretKey;
-use pallas_primitives::conway::PlutusData;
 use tokio::{
     sync::{mpsc::Sender, watch::Receiver},
     time::sleep,
@@ -11,7 +9,7 @@ use tokio::{
 use tracing::warn;
 
 use crate::{
-    price_feed::{PriceFeedEntry, SignedPriceFeed, SignedPriceFeedEntry},
+    price_feed::{serialize, PriceFeedEntry, SignedPriceFeed, SignedPriceFeedEntry},
     raft::RaftLeader,
 };
 
@@ -64,12 +62,7 @@ impl SingleSignatureAggregator {
     }
 
     fn sign_price_feed(&self, data: PriceFeedEntry) -> SignedPriceFeedEntry {
-        let price_feed: PlutusData = (&data.data).into();
-        let price_feed_bytes = {
-            let mut encoder = Encoder::new(vec![]);
-            encoder.encode(&price_feed).expect("encoding is infallible");
-            encoder.into_writer()
-        };
+        let price_feed_bytes = serialize(&data.data);
         let signature = self.key.sign(price_feed_bytes);
         SignedPriceFeedEntry {
             price: data.price,
