@@ -4,7 +4,7 @@ use reqwest::Client;
 use serde::Deserialize;
 use std::{env, sync::Arc, time::Duration};
 use tokio::{task::JoinSet, time::sleep};
-use tracing::warn;
+use tracing::{warn, Instrument};
 
 use crate::apis::source::{PriceInfo, PriceSink};
 
@@ -53,7 +53,7 @@ impl MaestroSource {
             for token in TOKENS {
                 let other = self.clone();
                 let sink = sink.clone();
-                set.spawn(async move { other.query_one(token, sink).await });
+                set.spawn(async move { other.query_one(token, sink).await }.in_current_span());
             }
             while let Some(Ok(result)) = set.join_next().await {
                 if let Err(error) = result {

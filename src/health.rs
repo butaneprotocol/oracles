@@ -4,7 +4,7 @@ use dashmap::DashMap;
 use serde::Serialize;
 use tide::Response;
 use tokio::{sync::mpsc, task::JoinSet};
-use tracing::{info, warn};
+use tracing::{info, warn, Instrument};
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum Origin {
@@ -60,20 +60,26 @@ impl HealthServer {
 
         let mut source = self.source;
         let statuses = self.statuses.clone();
-        set.spawn(async move {
-            while let Some(info) = source.recv().await {
-                statuses.insert(info.origin, info.status);
+        set.spawn(
+            async move {
+                while let Some(info) = source.recv().await {
+                    statuses.insert(info.origin, info.status);
+                }
             }
-        });
+            .in_current_span(),
+        );
 
         let mut app = tide::with_state(self.statuses);
         app.at("/health").get(report_health);
-        set.spawn(async move {
-            info!("Health server starting on port {}", port);
-            if let Err(error) = app.listen(("127.0.0.1", port)).await {
-                warn!("Health server stopped: {}", error);
-            };
-        });
+        set.spawn(
+            async move {
+                info!("Health server starting on port {}", port);
+                if let Err(error) = app.listen(("127.0.0.1", port)).await {
+                    warn!("Health server stopped: {}", error);
+                };
+            }
+            .in_current_span(),
+        );
 
         while let Some(res) = set.join_next().await {
             if let Err(error) = res {

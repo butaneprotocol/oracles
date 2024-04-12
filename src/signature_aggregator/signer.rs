@@ -1,4 +1,7 @@
-use std::collections::BTreeMap;
+use std::{
+    collections::BTreeMap,
+    fmt::{self, Display},
+};
 
 use anyhow::{anyhow, Context, Result};
 use frost_ed25519::{
@@ -11,6 +14,7 @@ use frost_ed25519::{
 use rand::thread_rng;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc::Sender, watch::Receiver};
+use tracing::{info, instrument, warn};
 use uuid::Uuid;
 
 use crate::{
@@ -26,6 +30,14 @@ pub struct SignerMessage {
     pub round: String,
     pub data: SignerMessageData,
 }
+impl Display for SignerMessage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_fmt(format_args!(
+            "{{round:{},message={}}}",
+            self.round, self.data
+        ))
+    }
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum SignerMessageData {
@@ -33,6 +45,16 @@ pub enum SignerMessageData {
     Commit(Commitment),
     RequestSignature(Vec<SigningPackage>),
     Sign(Signature),
+}
+impl Display for SignerMessageData {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::RequestCommitment => f.write_str("RequestCommitment"),
+            Self::Commit(_) => f.write_str("Commit"),
+            Self::RequestSignature(_) => f.write_str("RequestSignature"),
+            Self::Sign(_) => f.write_str("Sign"),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -49,10 +71,22 @@ pub struct Signature {
     pub signatures: Vec<SignatureShare>,
 }
 
+#[derive(Clone)]
 pub enum SignerEvent {
     RoundStarted,
     Message(SignerMessage),
     LeaderChanged(RaftLeader),
+}
+impl Display for SignerEvent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::RoundStarted => f.write_str("RoundStarted"),
+            Self::Message(message) => f.write_fmt(format_args!("Message{}", message)),
+            Self::LeaderChanged(leader) => {
+                f.write_fmt(format_args!("LeaderChanged{{{:?}}}", leader))
+            }
+        }
+    }
 }
 
 enum LeaderState {
@@ -70,6 +104,33 @@ enum LeaderState {
         packages: Vec<SigningPackage>,
     },
 }
+impl Display for LeaderState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Ready => f.write_str("{role=Leader,state=Ready}"),
+            Self::CollectingCommitments {
+                round, commitments, ..
+            } => {
+                let committed: Vec<_> = commitments.iter().map(|c| c.identifier).collect();
+                f.write_fmt(format_args!(
+                    "{{role=Leader,state=CollectingCommitments,round={},committed={:?}}}",
+                    round, committed
+                ))
+            }
+            Self::CollectingSignatures {
+                round,
+                signatures,
+                packages,
+                ..
+            } => {
+                let committed: Vec<_> = packages[0].signing_commitments().keys().collect();
+                let signed: Vec<_> = signatures.iter().map(|s| s.identifier).collect();
+                f.write_fmt(format_args!("{{role=Leader,state=CollectingSignatures,round={},committed={:?},signed={:?}}}", round, committed, signed))
+            }
+        }
+    }
+}
+
 enum FollowerState {
     Ready,
     Committed {
@@ -77,10 +138,30 @@ enum FollowerState {
         nonces: Vec<SigningNonces>,
     },
 }
+impl Display for FollowerState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Ready => f.write_str("{role=Follower,state=Ready}"),
+            Self::Committed { round, .. } => f.write_fmt(format_args!(
+                "{{role=Follower,state=Committed,round={}}}",
+                round
+            )),
+        }
+    }
+}
 enum SignerState {
     Leader(LeaderState),
     Follower(String, FollowerState),
     Unknown,
+}
+impl Display for SignerState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Leader(state) => state.fmt(f),
+            Self::Follower(_, state) => state.fmt(f),
+            Self::Unknown => f.write_str("{role=Unknown}"),
+        }
+    }
 }
 
 pub struct OutgoingMessage {
@@ -118,7 +199,19 @@ impl Signer {
         }
     }
 
-    pub async fn process(&mut self, event: SignerEvent) -> Result<()> {
+    #[instrument(skip_all, fields(state = %self.state))]
+    pub async fn process(&mut self, event: SignerEvent) {
+        match self.do_process(event.clone()).await {
+            Ok(()) => {
+                info!("Event processed: {}", event)
+            }
+            Err(error) => {
+                warn!(%error, "Error occurred during signing flow");
+            }
+        }
+    }
+
+    async fn do_process(&mut self, event: SignerEvent) -> Result<()> {
         match event {
             SignerEvent::LeaderChanged(leader) => {
                 self.state = match leader {
@@ -551,26 +644,26 @@ mod tests {
 
     // make the first signer the leader, and other signers followers.
     // return the leader's id
-    async fn assign_roles(signers: &mut [Signer]) -> Result<String> {
+    async fn assign_roles(signers: &mut [Signer]) -> String {
         let leader_id = signers[0].id.clone();
         signers[0]
             .process(SignerEvent::LeaderChanged(RaftLeader::Myself))
-            .await?;
+            .await;
         for signer in signers.iter_mut().skip(1) {
             signer
                 .process(SignerEvent::LeaderChanged(RaftLeader::Other(
                     leader_id.clone(),
                 )))
-                .await?;
+                .await;
         }
-        Ok(leader_id)
+        leader_id
     }
 
     async fn run_round(
         signers: &mut [Signer],
         message_source: &mut mpsc::Receiver<OutgoingMessage>,
-    ) -> Result<()> {
-        signers[0].process(SignerEvent::RoundStarted).await?;
+    ) {
+        signers[0].process(SignerEvent::RoundStarted).await;
         while let Ok(message) = message_source.try_recv() {
             let to = message.to;
             let message = message.message;
@@ -580,10 +673,9 @@ mod tests {
             for receiver in receivers {
                 receiver
                     .process(SignerEvent::Message(message.clone()))
-                    .await?;
+                    .await;
             }
         }
-        Ok(())
     }
 
     fn price_feed_entry(
@@ -618,10 +710,10 @@ mod tests {
             construct_signers(2, prices).await?;
 
         // set everyone's roles
-        let leader_id = assign_roles(&mut signers).await?;
+        let leader_id = assign_roles(&mut signers).await;
 
         // Start the round
-        signers[0].process(SignerEvent::RoundStarted).await?;
+        signers[0].process(SignerEvent::RoundStarted).await;
 
         // Leader should have broadcast a request to all followers
         let message = message_source.recv().await;
@@ -643,7 +735,7 @@ mod tests {
                 round: round.clone(),
                 data: SignerMessageData::RequestCommitment,
             }))
-            .await?;
+            .await;
 
         // Follower should have sent a commitment to the leader
         let message = message_source.recv().await;
@@ -666,7 +758,7 @@ mod tests {
                 round: round.clone(),
                 data: SignerMessageData::Commit(commitment),
             }))
-            .await?;
+            .await;
 
         // Leader should have sent a signing request to that follower
         let message = message_source.recv().await;
@@ -689,7 +781,7 @@ mod tests {
                 round: round.clone(),
                 data: SignerMessageData::RequestSignature(packages),
             }))
-            .await?;
+            .await;
 
         // Follower should have sent a signature to the leader
         let message = message_source.recv().await;
@@ -712,7 +804,7 @@ mod tests {
                 round: round.clone(),
                 data: SignerMessageData::Sign(signature),
             }))
-            .await?;
+            .await;
 
         // leader should have published results
         assert!(payload_source.recv().await.is_some());
@@ -727,8 +819,8 @@ mod tests {
 
         let (mut signers, mut message_source, mut payload_source) =
             construct_signers(2, vec![leader_prices, follower_prices]).await?;
-        assign_roles(&mut signers).await?;
-        run_round(&mut signers, &mut message_source).await?;
+        assign_roles(&mut signers).await;
+        run_round(&mut signers, &mut message_source).await;
 
         assert!(payload_source.recv().await.is_some());
 
@@ -742,14 +834,8 @@ mod tests {
 
         let (mut signers, mut message_source, mut payload_source) =
             construct_signers(2, vec![leader_prices, follower_prices]).await?;
-        assign_roles(&mut signers).await?;
-        let err = run_round(&mut signers, &mut message_source)
-            .await
-            .expect_err("round should have failed");
-        assert_eq!(
-            err.to_string(),
-            "Not signing payload: collateral prices are too distant: leader has 2/1, we have 3/2"
-        );
+        assign_roles(&mut signers).await;
+        run_round(&mut signers, &mut message_source).await;
 
         assert!(payload_source.try_recv().is_err());
 
@@ -772,8 +858,8 @@ mod tests {
 
         let (mut signers, mut message_source, mut payload_source) =
             construct_signers(2, vec![vec![leader_price], vec![follower_price]]).await?;
-        assign_roles(&mut signers).await?;
-        run_round(&mut signers, &mut message_source).await?;
+        assign_roles(&mut signers).await;
+        run_round(&mut signers, &mut message_source).await;
 
         assert!(payload_source.recv().await.is_some());
 
@@ -796,13 +882,8 @@ mod tests {
 
         let (mut signers, mut message_source, mut payload_source) =
             construct_signers(2, vec![vec![leader_price], vec![follower_price]]).await?;
-        assign_roles(&mut signers).await?;
-        let err = run_round(&mut signers, &mut message_source)
-            .await
-            .expect_err("round should have failed");
-        assert!(err
-            .to_string()
-            .starts_with("Not signing payload: mismatched validity"));
+        assign_roles(&mut signers).await;
+        run_round(&mut signers, &mut message_source).await;
 
         assert!(payload_source.try_recv().is_err());
 

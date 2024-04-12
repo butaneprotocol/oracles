@@ -3,7 +3,7 @@ use std::{sync::Arc, time::Duration};
 use anyhow::Result;
 use reqwest::Client;
 use tokio::sync::{mpsc::Receiver, Mutex};
-use tracing::{trace, warn};
+use tracing::{info, trace, warn};
 
 const URL: &str = "https://infra-integration.silver-train-1la.pages.dev/api/updatePrices";
 
@@ -26,7 +26,7 @@ impl Publisher {
 
         let mut source = self.source.lock().await;
         while let Some(payload) = source.recv().await {
-            println!("{}", payload);
+            info!(payload, "publishing payload");
 
             if !DEBUG {
                 match self.make_request(payload).await {

@@ -14,7 +14,7 @@ use tokio::{
     task::{JoinError, JoinSet},
     time::sleep,
 };
-use tracing::{info, Level};
+use tracing::{info, info_span, Instrument, Level};
 use tracing_subscriber::FmtSubscriber;
 
 pub mod apis;
@@ -40,7 +40,6 @@ struct Args {
 }
 
 struct Node {
-    id: String,
     health_server: HealthServer,
     health_sink: HealthSink,
     network: Network,
@@ -91,7 +90,6 @@ impl Node {
         let publisher = Publisher::new(result_rx)?;
 
         Ok(Node {
-            id: id.to_string(),
             health_server,
             health_sink,
             network: network.clone(),
@@ -108,35 +106,53 @@ impl Node {
 
         // Start up the health server
         let health_port = self.config.health_port;
-        set.spawn(async move {
-            self.health_server.run(health_port).await;
-        });
+        set.spawn(
+            async move {
+                self.health_server.run(health_port).await;
+            }
+            .in_current_span(),
+        );
 
         // Spawn the abstract raft state machine, which internally uses network to maintain a Raft consensus
-        set.spawn(async move {
-            self.raft.handle_messages().await;
-        });
+        set.spawn(
+            async move {
+                self.raft.handle_messages().await;
+            }
+            .in_current_span(),
+        );
 
         // Then spawn the peer to peer network, which will maintain a connection to each peer, and dispatch messages to the correct state machine
         let port = self.config.port;
         let peers = self.config.peers.clone();
-        set.spawn(async move {
-            self.network.handle_network(port, peers).await.unwrap();
-        });
+        set.spawn(
+            async move {
+                self.network.handle_network(port, peers).await.unwrap();
+            }
+            .in_current_span(),
+        );
 
         let health = self.health_sink;
-        set.spawn(async move {
-            self.price_aggregator.run(&health).await;
-        });
+        set.spawn(
+            async move {
+                self.price_aggregator.run(&health).await;
+            }
+            .in_current_span(),
+        );
 
         let signature_aggregator = self.signature_aggregator;
-        set.spawn(async move {
-            signature_aggregator.run().await;
-        });
+        set.spawn(
+            async move {
+                signature_aggregator.run().await;
+            }
+            .in_current_span(),
+        );
 
-        set.spawn(async move {
-            self.publisher.run().await;
-        });
+        set.spawn(
+            async move {
+                self.publisher.run().await;
+            }
+            .in_current_span(),
+        );
 
         // Then wait for all of them to complete (they won't)
         while let Some(res) = set.join_next().await {
@@ -152,7 +168,7 @@ where
     F: Fn() -> Result<Node>,
 {
     let node = node_factory()?;
-    node.start().await?;
+    node.start().in_current_span().await?;
     Ok(())
 }
 
@@ -164,10 +180,9 @@ where
         let mut set = JoinSet::new();
 
         let node = node_factory()?;
-        let id = node.id.clone();
         set.spawn(async move {
             // Runs forever
-            node.start().await.unwrap();
+            node.start().in_current_span().await.unwrap();
         });
 
         set.spawn_blocking(|| {
@@ -176,11 +191,11 @@ where
             std::io::stdin().read_line(&mut line).unwrap();
         });
 
-        set.join_next().await.unwrap()?;
+        set.join_next().in_current_span().await.unwrap()?;
         set.abort_all();
-        info!(me = id, "Node shutting down for {:?}", restart_after);
+        info!("Node shutting down for {:?}", restart_after);
         sleep(restart_after).await;
-        info!(me = id, "Node restarting...");
+        info!("Node restarting...");
     }
 }
 
@@ -201,16 +216,19 @@ async fn main() -> Result<()> {
 
     frost::frost_poc().await;
 
-    info!(me = id, "Node starting...");
+    let span = info_span!("oracle", me = id);
+    span.in_scope(|| info!("Node starting..."));
 
     let node_factory = || Node::new(&id, config.clone());
 
     // Start the node, which will spawn a bunch of threads and infinite loop
     if debug {
         let restart_after = config.timeout() + Duration::from_secs(1);
-        run_debug(node_factory, restart_after).await?;
+        run_debug(node_factory, restart_after)
+            .instrument(span)
+            .await?;
     } else {
-        run(node_factory).await?;
+        run(node_factory).instrument(span).await?;
     }
     Ok(())
 }

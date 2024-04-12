@@ -5,7 +5,7 @@ use futures::{future::BoxFuture, FutureExt};
 use kupon::MatchOptions;
 use rust_decimal::Decimal;
 use tokio::{task::JoinSet, time::sleep};
-use tracing::warn;
+use tracing::{warn, Instrument};
 
 use crate::config::{HydratedPool, OracleConfig};
 
@@ -57,30 +57,33 @@ impl MinswapSource {
                 .asset_id(&pool.pool.asset_id)
                 .only_unspent();
 
-            set.spawn(async move {
-                let mut result = client.matches(&options).await?;
-                if result.len() != 1 {
-                    return Err(anyhow!("more than one result returned"));
-                }
-                let matc = result.remove(0);
-                let token_value = match &pool.token_asset_id {
-                    Some(token) => matc.value.assets[token],
-                    None => matc.value.coins,
-                };
-                let unit_value = match &pool.unit_asset_id {
-                    Some(token) => matc.value.assets[token],
-                    None => matc.value.coins,
-                };
-                let value = Decimal::new(unit_value as i64, pool.unit_digits)
-                    / Decimal::new(token_value as i64, pool.token_digits);
+            set.spawn(
+                async move {
+                    let mut result = client.matches(&options).await?;
+                    if result.len() != 1 {
+                        return Err(anyhow!("more than one result returned"));
+                    }
+                    let matc = result.remove(0);
+                    let token_value = match &pool.token_asset_id {
+                        Some(token) => matc.value.assets[token],
+                        None => matc.value.coins,
+                    };
+                    let unit_value = match &pool.unit_asset_id {
+                        Some(token) => matc.value.assets[token],
+                        None => matc.value.coins,
+                    };
+                    let value = Decimal::new(unit_value as i64, pool.unit_digits)
+                        / Decimal::new(token_value as i64, pool.token_digits);
 
-                sink.send(PriceInfo {
-                    token: pool.pool.token.clone(),
-                    unit: pool.pool.unit.clone(),
-                    value,
-                })?;
-                Ok(())
-            });
+                    sink.send(PriceInfo {
+                        token: pool.pool.token.clone(),
+                        unit: pool.pool.unit.clone(),
+                        value,
+                    })?;
+                    Ok(())
+                }
+                .in_current_span(),
+            );
         }
 
         while let Some(res) = set.join_next().await {

@@ -9,6 +9,7 @@ use tokio::{
     time::{sleep, Duration},
 };
 use tokio_tungstenite::{connect_async, tungstenite::Message};
+use tracing::Instrument;
 
 use super::source::{PriceInfo, PriceSink, Source};
 
@@ -71,7 +72,8 @@ impl ByBitSource {
                     return Err(anyhow!("Error sending heartbeat: {}", err));
                 }
             }
-        };
+        }
+        .in_current_span();
 
         let consumer = async move {
             while let Some(result) = stream.next().await {
@@ -120,7 +122,8 @@ impl ByBitSource {
                 };
             }
             Ok(())
-        };
+        }
+        .in_current_span();
 
         select! {
             res = heartbeat => res,

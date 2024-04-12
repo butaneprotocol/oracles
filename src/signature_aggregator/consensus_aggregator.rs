@@ -10,7 +10,7 @@ use tokio::{
     },
     time::sleep,
 };
-use tracing::warn;
+use tracing::{warn, Instrument};
 
 use crate::{
     networking::Network,
@@ -73,7 +73,8 @@ impl ConsensusSignatureAggregator {
                     break;
                 }
             }
-        };
+        }
+        .in_current_span();
 
         // Any time the current leader changes, send the signer a "leader changed" event
         let mut leader = self.leader_source;
@@ -86,7 +87,8 @@ impl ConsensusSignatureAggregator {
                     break;
                 }
             }
-        };
+        }
+        .in_current_span();
 
         // Any time someone sends us a message, send the signer a "message" event
         let mut message_source = self.message_source;
@@ -97,7 +99,8 @@ impl ConsensusSignatureAggregator {
                     break;
                 }
             }
-        };
+        }
+        .in_current_span();
 
         // When the signer wants to send someone else a message, give it to the network
         let network = self.network;
@@ -114,17 +117,17 @@ impl ConsensusSignatureAggregator {
                     }
                 }
             }
-        };
+        }
+        .in_current_span();
 
         let mut signer = self.signer;
         // Forward any events to the signer
         let handle_events_task = async move {
             while let Some(event) = event_source.recv().await {
-                if let Err(err) = signer.process(event).await {
-                    warn!("Error occurred during signing flow: {}", err);
-                }
+                signer.process(event).await;
             }
-        };
+        }
+        .in_current_span();
 
         select! {
             res = new_round_task => res,

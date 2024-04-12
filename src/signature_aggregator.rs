@@ -13,7 +13,7 @@ use tokio::{
     select,
     sync::{mpsc, watch::Receiver},
 };
-use tracing::warn;
+use tracing::{warn, Instrument};
 
 use crate::{
     networking::Network,
@@ -80,7 +80,8 @@ impl SignatureAggregator {
                 SignatureAggregatorImplementation::Single(s) => s.run().await,
                 SignatureAggregatorImplementation::Consensus(c) => c.run().await,
             }
-        };
+        }
+        .in_current_span();
 
         let mut signed_price_source = self.signed_price_source;
         let publish_task = async move {
@@ -107,7 +108,8 @@ impl SignatureAggregator {
                     warn!("Could not send payload: {}", error);
                 }
             }
-        };
+        }
+        .in_current_span();
 
         select! {
             res = run_task => res,

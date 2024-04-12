@@ -45,7 +45,7 @@ pub enum RaftStatus {
     Leader,
 }
 
-#[derive(Eq, PartialEq, Clone)]
+#[derive(Eq, PartialEq, Clone, Debug)]
 pub enum RaftLeader {
     Myself,
     Other(String),
@@ -127,7 +127,7 @@ impl RaftState {
     ) -> Vec<(String, RaftMessage)> {
         match &message {
             RaftMessage::Connect { node_id } => {
-                info!(me = self.id, "New peer {}", node_id);
+                info!("New peer {}", node_id);
                 self.peers.insert(node_id.clone());
                 if matches!(self.status, RaftStatus::Leader) {
                     // Let them know right away that we're the leader
@@ -142,7 +142,7 @@ impl RaftState {
                 }
             }
             RaftMessage::Disconnect { node_id } => {
-                info!(me = self.id, "Peer disconnected {}", node_id);
+                info!("Peer disconnected {}", node_id);
                 self.peers.remove(node_id);
                 vec![]
             }
@@ -155,7 +155,7 @@ impl RaftState {
                         voted_for: None,
                     });
                     if Some(leader.clone()) != current_leader {
-                        info!(me = self.id, term = term, leader = leader, "New leader");
+                        info!(term = term, leader = leader, "New leader");
                     }
                     self.warned_about_quorum = false;
                 }
@@ -167,12 +167,7 @@ impl RaftState {
                 term: requested_term,
                 ..
             } => {
-                trace!(
-                    me = self.id,
-                    term = requested_term,
-                    "Vote requested by {}",
-                    from
-                );
+                trace!(term = requested_term, "Vote requested by {}", from);
                 let peer = from.clone();
                 let (vote, reason) = match self.status {
                     RaftStatus::Follower {
@@ -216,7 +211,6 @@ impl RaftState {
                     }
                 };
                 trace!(
-                    me = self.id,
                     term = requested_term,
                     reason = reason,
                     vote = vote,
@@ -239,7 +233,6 @@ impl RaftState {
                         }
                         if !vote {
                             trace!(
-                                me = self.id,
                                 votes = prev_votes,
                                 term = term,
                                 my_term = self.term,
@@ -250,16 +243,10 @@ impl RaftState {
                         }
 
                         let new_votes = prev_votes + 1;
-                        trace!(
-                            me = self.id,
-                            votes = new_votes,
-                            quorum = self.quorum,
-                            "Vote received"
-                        );
+                        trace!(votes = new_votes, quorum = self.quorum, "Vote received");
                         self.set_status(RaftStatus::Candidate { votes: new_votes });
                         if new_votes >= self.quorum {
                             info!(
-                                me = self.id,
                                 term = term,
                                 votes = new_votes,
                                 quorum = self.quorum,
@@ -287,12 +274,7 @@ impl RaftState {
                     }
                     _ => {
                         if *term >= self.term {
-                            warn!(
-                                me = self.id,
-                                term = term,
-                                "Unexpected message {:?}",
-                                message
-                            );
+                            warn!(term = term, "Unexpected message {:?}", message);
                         }
                         vec![]
                     }
@@ -312,7 +294,6 @@ impl RaftState {
         if election_timeout && !can_reach_quorum {
             if !self.warned_about_quorum {
                 warn!(
-                    me = self.id,
                     term = self.term,
                     nodes = self.peers.len() + 1,
                     quorum = self.quorum,
@@ -324,7 +305,6 @@ impl RaftState {
             vec![]
         } else if election_timeout && can_reach_quorum {
             info!(
-                me = self.id,
                 term = self.term + 1,
                 nodes = self.peers.len() + 1,
                 quorum = self.quorum,
@@ -356,7 +336,7 @@ impl RaftState {
                 .collect();
         } else if is_leader && heartbeat_timeout {
             if !self.peers.is_empty() {
-                trace!(me = self.id, "Sending heartbeats as leader");
+                trace!("Sending heartbeats as leader");
                 // Send heartbeats
                 self.last_heartbeat = timestamp;
                 self.peers
@@ -412,7 +392,6 @@ impl Raft {
         leader: Sender<RaftLeader>,
     ) -> Self {
         info!(
-            me = id,
             quorum = quorum,
             heartbeat = format!("{:?}", heartbeat_freq),
             timeout = format!("{:?}", timeout_freq),
@@ -433,6 +412,7 @@ impl Raft {
     }
 
     pub async fn handle_messages(&self) {
+        info!("testing");
         let mut messages = self.incoming_messages.lock().await;
         let mut state = self.state.lock().await;
         loop {
@@ -441,12 +421,12 @@ impl Raft {
 
             let responses = match next_message {
                 Ok(msg) => {
-                    trace!(me = self.id, "Received message: {:?}", msg);
+                    trace!("Received message: {:?}", msg);
                     state.receive(timestamp, msg)
                 }
                 Err(tokio::sync::mpsc::error::TryRecvError::Empty) => state.tick(timestamp),
                 Err(err) => {
-                    warn!(me = self.id, "Failed to receive message: {}", err);
+                    warn!("Failed to receive message: {}", err);
                     vec![]
                 }
             };
