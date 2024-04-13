@@ -14,10 +14,17 @@ pub struct OracleConfig {
     pub peers: Vec<PeerConfig>,
     pub heartbeat_ms: u64,
     pub timeout_ms: u64,
+    pub logs: LogConfig,
     pub synthetics: Vec<SyntheticConfig>,
     pub collateral: Vec<CollateralConfig>,
     pub sundaeswap: SundaeSwapConfig,
     pub minswap: MinswapConfig,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LogConfig {
+    pub json: bool,
+    pub level: String,
 }
 
 impl OracleConfig {

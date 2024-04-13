@@ -3,6 +3,9 @@ health_port: 18000  # Port to report our health status
 heartbeat_ms: 100   # How long should the leader wait before sending a heartbeat
 timeout_ms: 500     # How long should we wait before picking a new leader
 consensus: true
+logs:
+  json: true
+  level: info
 synthetics:
   - name: USDb
     price: 1

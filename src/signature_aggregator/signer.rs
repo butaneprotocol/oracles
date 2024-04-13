@@ -248,7 +248,11 @@ impl Signer {
         let round = Uuid::new_v4().to_string();
 
         let price_data = self.price_source.borrow().clone();
-        info!(round, ?price_data, "Beginning round of signature collection, requesting commitments");
+        info!(
+            round,
+            ?price_data,
+            "Beginning round of signature collection, requesting commitments"
+        );
 
         // request other folks commit
         self.message_sink

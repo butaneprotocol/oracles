@@ -1,8 +1,8 @@
-use std::{sync::Arc, time::Duration};
+use std::{str::FromStr, sync::Arc, time::Duration};
 
 use anyhow::Result;
 use clap::Parser;
-use config::{load_config, OracleConfig};
+use config::{load_config, LogConfig, OracleConfig};
 use health::{HealthServer, HealthSink};
 use networking::Network;
 use price_aggregator::PriceAggregator;
@@ -199,6 +199,24 @@ where
     }
 }
 
+fn init_tracing(config: &LogConfig) -> Result<()> {
+    let level = Level::from_str(&config.level)?;
+    if config.json {
+        let subscriber = FmtSubscriber::builder()
+            .json()
+            .with_max_level(level)
+            .finish();
+        tracing::subscriber::set_global_default(subscriber)?;
+    } else {
+        let subscriber = FmtSubscriber::builder()
+            .compact()
+            .with_max_level(level)
+            .finish();
+        tracing::subscriber::set_global_default(subscriber)?;
+    }
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
@@ -209,10 +227,7 @@ async fn main() -> Result<()> {
 
     let config = Arc::new(load_config(&args.config_file)?);
 
-    let subscriber = FmtSubscriber::builder()
-        .with_max_level(if debug { Level::DEBUG } else { Level::INFO })
-        .finish();
-    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+    init_tracing(&config.logs)?;
 
     frost::frost_poc().await;
 

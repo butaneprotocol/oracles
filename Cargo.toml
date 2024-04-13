@@ -36,5 +36,5 @@ tokio-serde = {version ="0.9", features = ["json", "cbor"] }
 tokio-tungstenite = { version = "0.21.0", features = ["native-tls"] }
 tokio-util = { version = "0.7", features = ["full"] }
 tracing = "0.1.40"
-tracing-subscriber = "0.3.18"
+tracing-subscriber = { version = "0.3", features = ["json"] }
 uuid = { version = "1.7.0", features = ["v4"] }
