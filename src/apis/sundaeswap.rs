@@ -127,12 +127,13 @@ impl SundaeSwapSource {
             );
             // TODO: maybe represent prices as numerator/denominator instead of decimal?
             let value = numerator / denominator;
+            let tvl = Decimal::from_str(&quantity_b.quantity)?;
 
             sink.send(PriceInfo {
                 token,
                 unit: "ADA".into(),
                 value,
-                reliability: numerator,
+                reliability: tvl,
             })?;
         }
 
