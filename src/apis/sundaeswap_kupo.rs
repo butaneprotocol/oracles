@@ -79,10 +79,12 @@ impl SundaeSwapKupoSource {
 
             let value = Decimal::new(unit_value as i64, pool.unit_digits)
                 / Decimal::new(token_value as i64, pool.token_digits);
+            let tvl = Decimal::new(token_value as i64 * 2, 0);
             sink.send(PriceInfo {
                 token: pool.pool.token.clone(),
                 unit: pool.pool.unit.clone(),
                 value,
+                reliability: tvl,
             })?;
         }
         sleep(Duration::from_secs(3)).await;

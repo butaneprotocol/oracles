@@ -132,6 +132,7 @@ impl SundaeSwapSource {
                 token,
                 unit: "ADA".into(),
                 value,
+                reliability: numerator,
             })?;
         }
 

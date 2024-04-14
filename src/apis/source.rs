@@ -8,6 +8,7 @@ pub struct PriceInfo {
     pub token: String,
     pub unit: String,
     pub value: Decimal,
+    pub reliability: Decimal,
 }
 
 pub type PriceSink = mpsc::UnboundedSender<PriceInfo>;

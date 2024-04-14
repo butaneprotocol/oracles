@@ -31,17 +31,22 @@ impl<'a> ConversionLookup<'a> {
             defaults.insert(coll.name.as_str(), coll.price);
         }
 
-        let mut aggregated_prices: HashMap<_, Vec<Decimal>> = HashMap::new();
+        let mut aggregated_prices: HashMap<_, Vec<PriceInfo>> = HashMap::new();
         for price in prices {
             aggregated_prices
                 .entry(CurrencyPair(&price.token, &price.unit))
-                .and_modify(|e| e.push(price.value))
-                .or_insert(vec![price.value]);
+                .and_modify(|e| e.push(price.clone()))
+                .or_insert(vec![price.clone()]);
         }
         for (currencies, prices) in aggregated_prices {
-            let average_price = prices.iter().fold(Decimal::ZERO, |acc, el| acc + *el)
-                / Decimal::new(prices.len() as i64, 0);
-            conversions.insert(currencies, average_price);
+            let mut price_sum = Decimal::ZERO;
+            let mut weight_sum = Decimal::ZERO;
+            for price in prices {
+                price_sum += price.value * price.reliability;
+                weight_sum += price.reliability;
+            }
+            let weighted_price = price_sum / weight_sum;
+            conversions.insert(currencies, weighted_price);
         }
 
         Self {
@@ -137,6 +142,7 @@ mod tests {
             token: "BTCb".into(),
             unit: "USD".into(),
             value: Decimal::new(60000, 0),
+            reliability: Decimal::ONE,
         }];
         let lookup = ConversionLookup::new(&prices, &synthetics, &collateral);
 
@@ -151,16 +157,40 @@ mod tests {
                 token: "BTCb".into(),
                 unit: "USD".into(),
                 value: Decimal::new(70000, 0),
+                reliability: Decimal::ONE,
             },
             PriceInfo {
                 token: "BTCb".into(),
                 unit: "USD".into(),
                 value: Decimal::new(80000, 0),
+                reliability: Decimal::ONE,
             },
         ];
         let lookup = ConversionLookup::new(&prices, &synthetics, &collateral);
 
         assert_eq!(lookup.value_in_usd("BTCb"), Decimal::new(75000, 0));
+    }
+
+    #[test]
+    fn value_in_usd_should_weight_prices() {
+        let (synthetics, collateral) = make_config();
+        let prices = vec![
+            PriceInfo {
+                token: "BTCb".into(),
+                unit: "USD".into(),
+                value: Decimal::new(100, 0),
+                reliability: Decimal::ONE,
+            },
+            PriceInfo {
+                token: "BTCb".into(),
+                unit: "USD".into(),
+                value: Decimal::new(200, 0),
+                reliability: Decimal::new(3, 0),
+            },
+        ];
+        let lookup = ConversionLookup::new(&prices, &synthetics, &collateral);
+
+        assert_eq!(lookup.value_in_usd("BTCb"), Decimal::new(175, 0));
     }
 
     #[test]
@@ -170,6 +200,7 @@ mod tests {
             token: "LENFI".into(),
             unit: "ADA".into(),
             value: Decimal::new(10000, 0),
+            reliability: Decimal::ONE,
         }];
         let lookup = ConversionLookup::new(&prices, &synthetics, &collateral);
 
@@ -184,11 +215,13 @@ mod tests {
                 token: "ADA".into(),
                 unit: "USD".into(),
                 value: Decimal::new(3, 1),
+                reliability: Decimal::ONE,
             },
             PriceInfo {
                 token: "LENFI".into(),
                 unit: "ADA".into(),
                 value: Decimal::new(10000, 0),
+                reliability: Decimal::ONE,
             },
         ];
         let lookup = ConversionLookup::new(&prices, &synthetics, &collateral);

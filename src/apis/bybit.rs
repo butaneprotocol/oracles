@@ -92,6 +92,9 @@ impl ByBitSource {
                         let Some(mark_price) = data.mark_price else {
                             continue;
                         };
+                        let Some(volume) = data.volume_24h else {
+                            continue;
+                        };
 
                         let mut value = Decimal::from_str(&mark_price)?;
                         let (token, unit) = match data.symbol.as_str() {
@@ -109,10 +112,12 @@ impl ByBitSource {
                                 ));
                             }
                         };
+                        let volume = Decimal::from_str(&volume)?;
                         let price_info = PriceInfo {
                             token: token.into(),
                             unit: unit.into(),
                             value,
+                            reliability: volume,
                         };
                         sink.send(price_info)?;
                     }
@@ -159,4 +164,5 @@ enum ByBitResponse {
 struct TickerSnapshotData {
     symbol: String,
     mark_price: Option<String>,
+    volume_24h: Option<String>,
 }

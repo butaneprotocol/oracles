@@ -76,7 +76,12 @@ impl CoinbaseSource {
 
     fn parse_message(&self, message: Message) -> Result<PriceInfo> {
         let response: CoinbaseResponse = message.clone().try_into()?;
-        let CoinbaseResponse::Ticker { product_id, price } = response else {
+        let CoinbaseResponse::Ticker {
+            product_id,
+            price,
+            volume_24h,
+        } = response
+        else {
             return Err(anyhow!("Unexpected response from coinbase: {:?}", response));
         };
         let mut value = Decimal::from_str(&price)?;
@@ -92,10 +97,12 @@ impl CoinbaseSource {
                 return Err(anyhow!("Unrecognized price to match: {}", product_id));
             }
         };
+        let volume = Decimal::from_str(&volume_24h)?;
         Ok(PriceInfo {
             token: token.into(),
             unit: unit.into(),
             value,
+            reliability: volume,
         })
     }
 }
@@ -128,6 +135,7 @@ enum CoinbaseResponse {
     Ticker {
         product_id: String,
         price: String,
+        volume_24h: String,
     },
 }
 

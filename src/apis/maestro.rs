@@ -78,11 +78,13 @@ impl MaestroSource {
         let contents = response.text().await?;
         let messages: [MaestroOHLCMessage; 1] = serde_json::from_str(&contents)?;
         let res = (messages[0].coin_a_open + messages[0].coin_a_close) / 2.;
+        let volume = messages[0].coin_a_volume;
 
         sink.send(PriceInfo {
             token: token.to_string(),
             unit: "ADA".to_string(),
             value: res.try_into()?,
+            reliability: volume.try_into()?,
         })?;
         Ok(())
     }
@@ -92,4 +94,5 @@ impl MaestroSource {
 struct MaestroOHLCMessage {
     coin_a_open: f64,
     coin_a_close: f64,
+    coin_a_volume: f64,
 }

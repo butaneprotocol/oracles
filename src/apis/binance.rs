@@ -12,7 +12,7 @@ use crate::apis::source::{PriceInfo, PriceSink};
 use super::source::Source;
 
 // TODO: currencies shouldn't be hard-coded?
-const URL: &str = "wss://fstream.binance.com/stream?streams=btcusdt@markPrice/adausdt@markPrice/solusdt@markPrice/maticusdt@markPrice";
+const URL: &str = "wss://fstream.binance.com/stream?streams=btcusdt@ticker/adausdt@ticker/solusdt@ticker/maticusdt@ticker";
 
 #[derive(Default)]
 pub struct BinanceSource;
@@ -73,8 +73,10 @@ struct BinanceMarkPriceMessage {
 }
 #[derive(Deserialize)]
 struct BinanceMarkPriceMessageData {
-    #[serde(rename(deserialize = "p"))]
+    #[serde(rename(deserialize = "c"))]
     price: String,
+    #[serde(rename(deserialize = "v"))]
+    volume_base: String,
 }
 
 fn process_binance_message(contents: String, sink: &PriceSink) -> Result<()> {
@@ -95,11 +97,13 @@ fn process_binance_message(contents: String, sink: &PriceSink) -> Result<()> {
         "matic" => "MATICb",
         _ => return Err(anyhow!("Unrecognized currency {}", message.stream)),
     };
+    let volume = Decimal::from_str(&message.data.volume_base)?;
 
     sink.send(PriceInfo {
         token: token.to_string(),
         unit: "USD".to_string(),
         value,
+        reliability: volume,
     })?;
 
     Ok(())
