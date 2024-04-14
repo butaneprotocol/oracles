@@ -69,17 +69,18 @@ impl SundaeSwapKupoSource {
 
             let token_value = match &pool.token_asset_id {
                 Some(token) => matc.value.assets[token],
-                None => matc.value.coins,
+                None => matc.value.coins - 2000000,
             };
 
             let unit_value = match &pool.unit_asset_id {
                 Some(token) => matc.value.assets[token],
-                None => matc.value.coins,
+                None => matc.value.coins - 2000000,
             };
 
             let value = Decimal::new(unit_value as i64, pool.unit_digits)
                 / Decimal::new(token_value as i64, pool.token_digits);
             let tvl = Decimal::new(token_value as i64 * 2, 0);
+
             sink.send(PriceInfo {
                 token: pool.pool.token.clone(),
                 unit: pool.pool.unit.clone(),

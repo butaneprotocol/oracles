@@ -117,17 +117,13 @@ impl SundaeSwapSource {
                 quantity_a,
                 quantity_b,
             } = pool.current;
-            let numerator = Decimal::from_i128_with_scale(
-                i128::from_str(&quantity_a.quantity)?,
-                pool.asset_a.decimals,
-            );
-            let denominator = Decimal::from_i128_with_scale(
-                i128::from_str(&quantity_b.quantity)?,
-                pool.asset_b.decimals,
-            );
-            // TODO: maybe represent prices as numerator/denominator instead of decimal?
-            let value = numerator / denominator;
-            let tvl = Decimal::from_str(&quantity_b.quantity)?;
+
+            let token_value = i64::from_str(&quantity_b.quantity)?;
+            let unit_value = i64::from_str(&quantity_a.quantity)?;
+
+            let value = Decimal::new(unit_value, pool.asset_a.decimals)
+                / Decimal::new(token_value, pool.asset_b.decimals);
+            let tvl = Decimal::new(token_value * 2, 0);
 
             sink.send(PriceInfo {
                 token,
