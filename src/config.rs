@@ -100,6 +100,7 @@ pub struct CollateralConfig {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct SundaeSwapConfig {
+    pub use_api: bool,
     pub kupo_address: String,
     pub address: String,
     pub policy_id: String,

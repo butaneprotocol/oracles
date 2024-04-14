@@ -36,18 +36,26 @@ pub struct PriceAggregator {
 
 impl PriceAggregator {
     pub fn new(tx: Sender<Vec<PriceFeedEntry>>, config: Arc<OracleConfig>) -> Result<Self> {
+        let mut sources = vec![
+            SourceAdapter::new(BinanceSource::new()),
+            SourceAdapter::new(ByBitSource::new()),
+            SourceAdapter::new(CoinbaseSource::new()),
+            SourceAdapter::new(MinswapSource::new(&config)?),
+            SourceAdapter::new(SpectrumSource::new(&config)?),
+        ];
+        if let Some(maestro_source) = MaestroSource::new()? {
+            sources.push(SourceAdapter::new(maestro_source));
+        } else {
+            warn!("Not querying maestro, because no MAESTRO_API_KEY was provided");
+        }
+        if config.sundaeswap.use_api {
+            sources.push(SourceAdapter::new(SundaeSwapSource::new(&config)?));
+        } else {
+            sources.push(SourceAdapter::new(SundaeSwapKupoSource::new(&config)?));
+        }
         Ok(Self {
             tx: Arc::new(tx),
-            sources: Some(vec![
-                SourceAdapter::new(BinanceSource::new()),
-                SourceAdapter::new(ByBitSource::new()),
-                SourceAdapter::new(CoinbaseSource::new()),
-                SourceAdapter::new(MaestroSource::new()?),
-                SourceAdapter::new(MinswapSource::new(&config)?),
-                SourceAdapter::new(SpectrumSource::new(&config)?),
-                SourceAdapter::new(SundaeSwapSource::new(&config)?),
-                SourceAdapter::new(SundaeSwapKupoSource::new(&config)?),
-            ]),
+            sources: Some(sources),
             config,
         })
     }

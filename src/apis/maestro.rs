@@ -41,10 +41,13 @@ impl Source for MaestroSource {
 }
 
 impl MaestroSource {
-    pub fn new() -> Result<Self> {
-        let api_key = Arc::new(env::var("MAESTRO_API_KEY")?);
+    pub fn new() -> Result<Option<Self>> {
+        let Ok(api_key) = env::var("MAESTRO_API_KEY") else {
+            return Ok(None);
+        };
+        let api_key = Arc::new(api_key);
         let client = Arc::new(Client::builder().build()?);
-        Ok(Self { api_key, client })
+        Ok(Some(Self { api_key, client }))
     }
 
     async fn query_impl(&self, sink: &PriceSink) -> Result<()> {
