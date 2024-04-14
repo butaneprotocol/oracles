@@ -69,7 +69,7 @@ impl MaestroSource {
         let response = self
             .client
             .get(ohlc_url(token))
-            .query(&[("limit", "1"), ("resolution", "1m")])
+            .query(&[("limit", "1"), ("resolution", "1d")])
             .header("Accept", "application/json")
             .header("api-key", self.api_key.as_str())
             .timeout(Duration::from_secs(10))
