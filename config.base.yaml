@@ -167,3 +167,22 @@ minswap:
     - token: SNEK
       unit: ADA
       asset_id: 0be55d262b29f564998ff81efe21bdc0022621c12f15af08d0f2ddb1.63f2cbfa5bf8b68828839a2575c8c70f14a32f50ebbfa7c654043269793be896
+spectrum:
+  kupo_address: http://localhost:1442
+  credential: 6b9c456aa650cb808a9ab54326e039d5235ed69f069c9664a8fe5b69/*
+  pools:
+    - token: ENCS
+      unit: ADA
+      asset_id: a209432e4f3aa5136521daa5c2be9bb12f52e3356359843620e26ea6.454e43535f4144415f4e4654
+    - token: iUSD
+      unit: ADA
+      asset_id: 16152a3a0c838c07086d1dd188c7f7846ebd418a2af1b80a5d0c3032.695553445f4144415f4e4654
+    - token: LENFI
+      unit: ADA
+      asset_id: 2b12a80b6dae4b251faa611946efb05a33ca54920ba50cb220eb7d8b.414144415f4144415f4e4654
+    - token: MIN
+      unit: ADA
+      asset_id: dd6a3921cc3716f65abc66ad0897f142dd6dbee80c642196e9bf3d86.4d494e5f4144415f4e4654
+    - token: SNEK
+      unit: ADA
+      asset_id: f8fd67ee46f66da669f68dc941090eb753687636b47fc6fd7f5e6254.534e454b5f4144415f4e4654

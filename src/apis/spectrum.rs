@@ -11,15 +11,15 @@ use crate::config::{HydratedPool, OracleConfig};
 
 use super::source::{PriceInfo, PriceSink, Source};
 
-pub struct MinswapSource {
+pub struct SpectrumSource {
     client: Arc<kupon::Client>,
     credential: String,
     pools: Vec<Arc<HydratedPool>>,
 }
 
-impl Source for MinswapSource {
+impl Source for SpectrumSource {
     fn name(&self) -> String {
-        "Minswap".into()
+        "Spectrum".into()
     }
 
     fn tokens(&self) -> Vec<String> {
@@ -31,15 +31,15 @@ impl Source for MinswapSource {
     }
 }
 
-impl MinswapSource {
+impl SpectrumSource {
     pub fn new(config: &OracleConfig) -> Result<Self> {
-        let minswap_config = &config.minswap;
-        let client = kupon::Builder::with_endpoint(&minswap_config.kupo_address).build()?;
+        let spectrum_config = &config.spectrum;
+        let client = kupon::Builder::with_endpoint(&spectrum_config.kupo_address).build()?;
         Ok(Self {
             client: Arc::new(client),
-            credential: minswap_config.credential.clone(),
+            credential: spectrum_config.credential.clone(),
             pools: config
-                .hydrate_pools(&minswap_config.pools)
+                .hydrate_pools(&spectrum_config.pools)
                 .into_iter()
                 .map(Arc::new)
                 .collect(),
@@ -95,11 +95,11 @@ impl MinswapSource {
             match res {
                 Err(error) => {
                     // the task was cancelled or panicked
-                    warn!("error running minswap query: {}", error);
+                    warn!("error running spectrum query: {}", error);
                 }
                 Ok(Err(error)) => {
                     // the task ran, but returned an error
-                    warn!("error querying minswap: {}", error);
+                    warn!("error querying spectrum: {}", error);
                 }
                 Ok(Ok(())) => {
                     // all is well

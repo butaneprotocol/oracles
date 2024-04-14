@@ -19,6 +19,7 @@ pub struct OracleConfig {
     pub collateral: Vec<CollateralConfig>,
     pub sundaeswap: SundaeSwapConfig,
     pub minswap: MinswapConfig,
+    pub spectrum: SpectrumConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -106,6 +107,20 @@ pub struct SundaeSwapConfig {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+pub struct MinswapConfig {
+    pub kupo_address: String,
+    pub credential: String,
+    pub pools: Vec<Pool>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct SpectrumConfig {
+    pub kupo_address: String,
+    pub credential: String,
+    pub pools: Vec<Pool>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
 pub struct Pool {
     pub token: String,
     pub unit: String,
@@ -119,13 +134,6 @@ pub struct HydratedPool {
     pub token_digits: u32,
     pub unit_asset_id: Option<AssetId>,
     pub unit_digits: u32,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-pub struct MinswapConfig {
-    pub kupo_address: String,
-    pub credential: String,
-    pub pools: Vec<Pool>,
 }
 
 pub fn load_config(config_file: &str) -> Result<OracleConfig> {
