@@ -35,8 +35,8 @@ struct Args {
     id: Option<String>,
     #[clap(long, default_value_t = false)]
     debug: bool,
-    #[clap(short, long, default_value_t = String::from("config.yaml"))]
-    config_file: String,
+    #[clap(short, long)]
+    config_file: Vec<String>,
 }
 
 struct Node {

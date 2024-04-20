@@ -18,7 +18,7 @@ dashmap = "5.5.3"
 frost-ed25519 = { version = "1.0.0", features = ["serde"] }
 futures = "0.3"
 hex = "0.4.3"
-kupon = { git = "https://github.com/SundaeSwap-finance/kupon" }
+kupon = { git = "https://github.com/SundaeSwap-finance/kupon", rev = "bf871825" }
 minicbor = { version = "0.20", features = ["std"] }
 num-bigint = "0.4"
 num-integer = "0.1"

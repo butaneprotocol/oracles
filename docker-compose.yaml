@@ -1,0 +1,20 @@
+services:
+  oracle:
+    image: oracle
+    command: ["./oracles-offchain", "-c", "/app/config.yaml"]
+    volumes:
+      - ./config.yaml:/app/config.yaml
+    environment:
+      FROST_KEY_PATH: /run/secrets/frost_key
+      FROST_PUBLIC_KEY_PATH: /run/secrets/frost_public_key
+    env_file:
+      - path: .env
+        required: false
+    secrets:
+      - frost_key
+      - frost_public_key
+secrets:
+  frost_key:
+    file: keys/private
+  frost_public_key:
+    file: keys/public

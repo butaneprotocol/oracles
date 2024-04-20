@@ -137,11 +137,13 @@ pub struct HydratedPool {
     pub unit_digits: u32,
 }
 
-pub fn load_config(config_file: &str) -> Result<OracleConfig> {
-    let huh = Config::builder()
-        .add_source(File::with_name("config.base.yaml"))
-        .add_source(File::with_name(config_file).required(false))
+pub fn load_config(config_files: &[String]) -> Result<OracleConfig> {
+    let mut builder = Config::builder().add_source(File::with_name("config.base.yaml"));
+    for config_file in config_files {
+        builder = builder.add_source(File::with_name(config_file));
+    }
+    let config = builder
         .add_source(Environment::with_prefix("ORACLE_"))
         .build()?;
-    Ok(huh.try_deserialize()?)
+    Ok(config.try_deserialize()?)
 }
