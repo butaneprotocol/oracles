@@ -10,4 +10,4 @@ FROM alpine
 WORKDIR /app
 COPY --from=build /build/target/release/oracles-offchain /app/
 COPY config.base.yaml /app/
-CMD ["./oracles-offchain", "--config-file", "config.yaml"]
+CMD ["./oracles-offchain"]

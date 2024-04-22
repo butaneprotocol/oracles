@@ -74,7 +74,7 @@ impl HealthServer {
         set.spawn(
             async move {
                 info!("Health server starting on port {}", port);
-                if let Err(error) = app.listen(("127.0.0.1", port)).await {
+                if let Err(error) = app.listen(("0.0.0.0", port)).await {
                     warn!("Health server stopped: {}", error);
                 };
             }

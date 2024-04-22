@@ -1,4 +1,5 @@
 /keys
 /target
+/volumes
 .env
 config.yaml
