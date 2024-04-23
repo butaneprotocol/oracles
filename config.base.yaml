@@ -122,6 +122,20 @@ collateral:
   - name: USDs
     price: 1
     digits: 6
+bybit:
+  tokens:
+    - token: ADA
+      unit: USD
+      stream: ADAUSDT
+    - token: BTCb
+      unit: USD
+      stream: BTCUSDT
+    - token: MATICb
+      unit: USD
+      stream: MATICUSDT
+    - token: SOLp
+      unit: USD
+      stream: SOLUSDT
 sundaeswap:
   use_api: false
   kupo_address: http://sundae-kupo:1442

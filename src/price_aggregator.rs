@@ -38,7 +38,7 @@ impl PriceAggregator {
     pub fn new(tx: Sender<Vec<PriceFeedEntry>>, config: Arc<OracleConfig>) -> Result<Self> {
         let mut sources = vec![
             SourceAdapter::new(BinanceSource::new()),
-            SourceAdapter::new(ByBitSource::new()),
+            SourceAdapter::new(ByBitSource::new(&config)),
             SourceAdapter::new(CoinbaseSource::new()),
             SourceAdapter::new(MinswapSource::new(&config)?),
             SourceAdapter::new(SpectrumSource::new(&config)?),

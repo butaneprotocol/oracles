@@ -87,7 +87,7 @@ impl SourceAdapter {
                     for update_times in last_updated.iter() {
                         let too_long_without_update = update_times
                             .value()
-                            .map_or(true, |v| now - v >= Duration::from_secs(120));
+                            .map_or(true, |v| now - v >= Duration::from_secs(30));
                         if too_long_without_update {
                             missing_updates.push(update_times.key().clone());
                         }
@@ -97,7 +97,7 @@ impl SourceAdapter {
                         HealthStatus::Healthy
                     } else {
                         HealthStatus::Unhealthy(format!(
-                            "Went more than 2 minutes without updates for {:?}",
+                            "Went more than 30 seconds without updates for {:?}",
                             missing_updates
                         ))
                     };

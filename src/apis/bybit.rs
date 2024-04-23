@@ -1,6 +1,7 @@
 use std::str::FromStr;
 
 use anyhow::{anyhow, Result};
+use dashmap::DashMap;
 use futures::{FutureExt, SinkExt, StreamExt};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -11,12 +12,33 @@ use tokio::{
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::Instrument;
 
+use crate::config::OracleConfig;
+
 use super::source::{PriceInfo, PriceSink, Source};
 
 const URL: &str = "wss://stream.bybit.com/v5/public/linear";
 
+struct ByBitPriceInfo {
+    token: String,
+    unit: String,
+    last_value: Option<Decimal>,
+    last_volume: Option<Decimal>,
+}
+impl ByBitPriceInfo {
+    fn new(token: &str, unit: &str) -> Self {
+        Self {
+            token: token.to_string(),
+            unit: unit.to_string(),
+            last_value: None,
+            last_volume: None,
+        }
+    }
+}
+
 #[derive(Default)]
-pub struct ByBitSource;
+pub struct ByBitSource {
+    stream_info: DashMap<String, ByBitPriceInfo>,
+}
 
 impl Source for ByBitSource {
     fn name(&self) -> String {
@@ -24,7 +46,10 @@ impl Source for ByBitSource {
     }
 
     fn tokens(&self) -> Vec<String> {
-        vec!["ADA".into(), "BTCb".into(), "SOLp".into(), "MATICb".into()]
+        self.stream_info
+            .iter()
+            .map(|entry| entry.token.clone())
+            .collect()
     }
 
     fn query<'a>(
@@ -36,8 +61,14 @@ impl Source for ByBitSource {
 }
 
 impl ByBitSource {
-    pub fn new() -> Self {
-        Self
+    pub fn new(config: &OracleConfig) -> Self {
+        let stream_info = config
+            .bybit
+            .tokens
+            .iter()
+            .map(|x| (x.stream.clone(), ByBitPriceInfo::new(&x.token, &x.unit)))
+            .collect();
+        Self { stream_info }
     }
 
     async fn query_impl(&self, sink: &PriceSink) -> Result<()> {
@@ -47,12 +78,11 @@ impl ByBitSource {
             .send(
                 ByBitRequest {
                     op: "subscribe".into(),
-                    args: vec![
-                        "tickers.ADAUSDT".into(),
-                        "tickers.BTCUSDT".into(),
-                        "tickers.MATICUSDT".into(),
-                        "tickers.SOLUSDT".into(),
-                    ],
+                    args: self
+                        .stream_info
+                        .iter()
+                        .map(|e| format!("tickers.{}", e.key()))
+                        .collect(),
                 }
                 .try_into()?,
             )
@@ -89,33 +119,38 @@ impl ByBitSource {
                             }
                             ByBitResponse::TickerResponse { data } => data,
                         };
-                        let Some(mark_price) = data.mark_price else {
+                        let Some(mut info) = self.stream_info.get_mut(&data.symbol) else {
                             continue;
                         };
-                        let Some(volume) = data.volume_24h else {
+                        let Some(value) = data
+                            .mark_price
+                            .and_then(|x| Decimal::from_str(&x).ok())
+                            .map(|p| {
+                                // We track inverse solana prices
+                                if info.token == "SOLp" {
+                                    Decimal::ONE / p
+                                } else {
+                                    p
+                                }
+                            })
+                            .or(info.last_value)
+                        else {
                             continue;
                         };
+                        info.last_value = Some(value);
 
-                        let mut value = Decimal::from_str(&mark_price)?;
-                        let (token, unit) = match data.symbol.as_str() {
-                            "ADAUSDT" => ("ADA", "USD"),
-                            "BTCUSDT" => ("BTCb", "USD"),
-                            "MATICUSDT" => ("MATICb", "USD"),
-                            "SOLUSDT" => {
-                                value = Decimal::ONE / value;
-                                ("SOLp", "USD")
-                            }
-                            _ => {
-                                return Err(anyhow!(
-                                    "Unrecognized price to match: {}",
-                                    data.symbol
-                                ));
-                            }
+                        let Some(volume) = data
+                            .volume_24h
+                            .and_then(|x| Decimal::from_str(&x).ok())
+                            .or(info.last_volume)
+                        else {
+                            continue;
                         };
-                        let volume = Decimal::from_str(&volume)?;
+                        info.last_volume = Some(volume);
+
                         let price_info = PriceInfo {
-                            token: token.into(),
-                            unit: unit.into(),
+                            token: info.token.clone(),
+                            unit: info.unit.clone(),
                             value,
                             reliability: volume,
                         };

@@ -17,6 +17,7 @@ pub struct OracleConfig {
     pub logs: LogConfig,
     pub synthetics: Vec<SyntheticConfig>,
     pub collateral: Vec<CollateralConfig>,
+    pub bybit: ByBitConfig,
     pub sundaeswap: SundaeSwapConfig,
     pub minswap: MinswapConfig,
     pub spectrum: SpectrumConfig,
@@ -96,6 +97,18 @@ pub struct CollateralConfig {
     pub asset_id: Option<String>,
     pub price: Decimal,
     pub digits: u32,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ByBitConfig {
+    pub tokens: Vec<ByBitTokenConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ByBitTokenConfig {
+    pub token: String,
+    pub unit: String,
+    pub stream: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]
