@@ -19,7 +19,6 @@ use tracing_subscriber::FmtSubscriber;
 
 pub mod apis;
 pub mod config;
-pub mod frost;
 pub mod health;
 pub mod networking;
 pub mod price_aggregator;
@@ -228,8 +227,6 @@ async fn main() -> Result<()> {
     let config = Arc::new(load_config(&args.config_file)?);
 
     init_tracing(&config.logs)?;
-
-    frost::frost_poc().await;
 
     let span = info_span!("oracle", me = id);
     span.in_scope(|| info!("Node starting..."));
