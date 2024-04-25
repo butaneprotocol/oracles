@@ -15,6 +15,5 @@ Default config values are defined in `config.base.yaml`. You should write your o
 ## Running
 
 ```sh
-docker build -t oracle .
 docker compose up -d
 ```

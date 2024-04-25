@@ -1,6 +1,6 @@
 services:
   oracle:
-    image: oracle
+    image: sundaeswap/butane-oracle:latest
     command: ["./oracles-offchain", "-c", "/app/config.yaml"]
     volumes:
       - ./config.yaml:/app/config.yaml
