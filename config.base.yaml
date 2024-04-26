@@ -138,7 +138,7 @@ bybit:
       stream: SOLUSDT
 sundaeswap:
   use_api: false
-  kupo_address: http://sundae-kupo:1442
+  kupo_address: http://kupo:1442
   address: addr1w9qzpelu9hn45pefc0xr4ac4kdxeswq7pndul2vuj59u8tqaxdznu
   policy_id: 0029cb7c88c7567b63d1a512c0ed626aa169688ec980730c0473b913
   pools:
@@ -158,7 +158,7 @@ sundaeswap:
       unit: ADA
       asset_id: 0029cb7c88c7567b63d1a512c0ed626aa169688ec980730c0473b913.70201f04
 minswap:
-  kupo_address: http://minswap-kupo:1442
+  kupo_address: http://kupo:1442
   credential: e1317b152faac13426e6a83e06ff88a4d62cce3c1634ab0a5ec13309/*
   pools:
     - token: DJED
@@ -183,7 +183,7 @@ minswap:
       unit: ADA
       asset_id: 0be55d262b29f564998ff81efe21bdc0022621c12f15af08d0f2ddb1.63f2cbfa5bf8b68828839a2575c8c70f14a32f50ebbfa7c654043269793be896
 spectrum:
-  kupo_address: http://spectrum-kupo:1442
+  kupo_address: http://kupo:1442
   credential: 6b9c456aa650cb808a9ab54326e039d5235ed69f069c9664a8fe5b69/*
   pools:
     - token: ENCS

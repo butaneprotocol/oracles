@@ -18,6 +18,7 @@ services:
     ports:
       - 8000:8000
       - 18000:18000
+    restart: unless-stopped
     secrets:
       - frost_key
       - frost_public_key
@@ -31,52 +32,19 @@ services:
     ]
     entrypoint: cardano-node
     image: ghcr.io/intersectmbo/cardano-node:8.9.1
+    profiles: ["standalone"]
     volumes:
       - ./mainnet-config:/config
       - ./volumes/cardano-node-data:/data
-      - node-ipc:/ipc
-  sundae-kupo:
+      - ${IPC_DIR:-./volumes/node-ipc}:/ipc
+  kupo:
     command: [
       --node-socket, /ipc/socket,
       --node-config, /config/config.json,
       --since, 49962542.b0f61babba6e357eee78cc4e55045a683eda0f1330a28333b6dc5af5320e3f76,
       --host, "0.0.0.0",
       --match, "addr1w9qzpelu9hn45pefc0xr4ac4kdxeswq7pndul2vuj59u8tqaxdznu", # sundae
-      --workdir, /db,
-      --defer-db-indexes,
-      --prune-utxo,
-    ]
-    image: cardanosolutions/kupo
-    expose:
-      - "1442"
-    volumes:
-      - ./mainnet-config:/config
-      - ./volumes/sundae-kupo-db:/db
-      - node-ipc:/ipc
-  minswap-kupo:
-    command: [
-      --node-socket, /ipc/socket,
-      --node-config, /config/config.json,
-      --since, 49962542.b0f61babba6e357eee78cc4e55045a683eda0f1330a28333b6dc5af5320e3f76,
-      --host, "0.0.0.0",
       --match, "e1317b152faac13426e6a83e06ff88a4d62cce3c1634ab0a5ec13309/*", # minswap
-      --workdir, /db,
-      --defer-db-indexes,
-      --prune-utxo,
-    ]
-    image: cardanosolutions/kupo
-    expose:
-      - "1442"
-    volumes:
-      - ./mainnet-config:/config
-      - ./volumes/minswap-kupo-db:/db
-      - node-ipc:/ipc
-  spectrum-kupo:
-    command: [
-      --node-socket, /ipc/socket,
-      --node-config, /config/config.json,
-      --since, 49962542.b0f61babba6e357eee78cc4e55045a683eda0f1330a28333b6dc5af5320e3f76,
-      --host, "0.0.0.0",
       --match, "6b9c456aa650cb808a9ab54326e039d5235ed69f069c9664a8fe5b69/*", # spectrum
       --workdir, /db,
       --defer-db-indexes,
@@ -87,12 +55,10 @@ services:
       - "1442"
     volumes:
       - ./mainnet-config:/config
-      - ./volumes/spectrum-kupo-db:/db
-      - node-ipc:/ipc
+      - ./volumes/kupo-db:/db
+      - ${IPC_DIR:-./volumes/node-ipc}:/ipc
 secrets:
   frost_key:
     file: keys/private
   frost_public_key:
     file: keys/public
-volumes:
-  node-ipc:

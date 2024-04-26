@@ -16,9 +16,13 @@ If you don't pass an API key, the oracle will still run, but it won't include ma
 
 Default config values are defined in `config.base.yaml`. You should write your own `config.yaml` file which lists all of your node's peers. See `config.example.yaml` for the format of this.
 
-
 ## Running
 
 ```sh
-docker compose up -d
+# If you have your own cardano node, you can point to its IPC directory
+IPC_DIR=/path/to/ipc docker compose up -d
+
+# If you don't have a cardano node (note that spinning one up takes hours)
+docker compose --profile standalone up -d
+
 ```
