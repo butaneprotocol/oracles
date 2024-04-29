@@ -4,7 +4,7 @@ use anyhow::Result;
 use clap::Parser;
 use config::{load_config, LogConfig, OracleConfig};
 use health::{HealthServer, HealthSink};
-use networking::Network;
+use network::Network;
 use price_aggregator::PriceAggregator;
 use publisher::Publisher;
 use raft::{Raft, RaftLeader};
@@ -20,6 +20,7 @@ use tracing_subscriber::FmtSubscriber;
 pub mod apis;
 pub mod config;
 pub mod health;
+pub mod network;
 pub mod networking;
 pub mod price_aggregator;
 pub mod price_feed;
@@ -63,7 +64,8 @@ impl Node {
         let (signer_tx, signer_rx) = mpsc::channel(10);
 
         // Construct a peer-to-peer network that can connect to peers, and dispatch messages to the correct state machine
-        let network = Network::new(id.to_string(), Arc::new(raft_tx), Arc::new(signer_tx));
+        let network =
+            crate::networking::Network::new(id.to_string(), Arc::new(raft_tx), Arc::new(signer_tx));
 
         let (pa_tx, pa_rx) = watch::channel(vec![]);
 
@@ -91,7 +93,7 @@ impl Node {
         Ok(Node {
             health_server,
             health_sink,
-            network: network.clone(),
+            network: Network::new(&config, network.clone()),
             raft: Raft::new(id, quorum, heartbeat, timeout, raft_rx, network, leader_tx),
             price_aggregator,
             signature_aggregator,
@@ -121,11 +123,9 @@ impl Node {
         );
 
         // Then spawn the peer to peer network, which will maintain a connection to each peer, and dispatch messages to the correct state machine
-        let port = self.config.port;
-        let peers = self.config.peers.clone();
         set.spawn(
             async move {
-                self.network.handle_network(port, peers).await.unwrap();
+                self.network.listen().await.unwrap();
             }
             .in_current_span(),
         );
