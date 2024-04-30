@@ -5,7 +5,10 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, watch::Sender, Mutex};
 use tracing::{info, trace, warn};
 
-use crate::networking::{Message, Network};
+use crate::{
+    network::TargetId,
+    networking::{Message, Network},
+};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum RaftMessage {
@@ -48,7 +51,7 @@ pub enum RaftStatus {
 #[derive(Eq, PartialEq, Clone, Debug)]
 pub enum RaftLeader {
     Myself,
-    Other(String),
+    Other(TargetId),
     Unknown,
 }
 
@@ -366,7 +369,7 @@ impl RaftState {
             RaftStatus::Follower {
                 leader: Some(leader),
                 ..
-            } => RaftLeader::Other(leader.clone()),
+            } => RaftLeader::Other(TargetId::new(leader.clone())),
             _ => RaftLeader::Unknown,
         };
         self.status = status;

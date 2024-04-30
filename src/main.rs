@@ -61,11 +61,15 @@ impl Node {
 
         // Construct mpsc channels for each of our abstract state machines
         let (raft_tx, raft_rx) = mpsc::channel(10);
-        let (signer_tx, signer_rx) = mpsc::channel(10);
+        let (message_tx, message_rx) = mpsc::channel(10);
 
         // Construct a peer-to-peer network that can connect to peers, and dispatch messages to the correct state machine
-        let network =
-            crate::networking::Network::new(id.to_string(), Arc::new(raft_tx), Arc::new(signer_tx));
+        let old_network = crate::networking::Network::new(
+            id.to_string(),
+            Arc::new(raft_tx),
+            Arc::new(message_tx),
+        );
+        let mut network = Network::new(&config, old_network.clone(), message_rx);
 
         let (pa_tx, pa_rx) = watch::channel(vec![]);
 
@@ -78,8 +82,7 @@ impl Node {
         let signature_aggregator = if config.consensus {
             SignatureAggregator::consensus(
                 id.to_string(),
-                network.clone(),
-                signer_rx,
+                &mut network,
                 pa_rx,
                 leader_rx,
                 result_tx,
@@ -93,8 +96,16 @@ impl Node {
         Ok(Node {
             health_server,
             health_sink,
-            network: Network::new(&config, network.clone()),
-            raft: Raft::new(id, quorum, heartbeat, timeout, raft_rx, network, leader_tx),
+            network,
+            raft: Raft::new(
+                id,
+                quorum,
+                heartbeat,
+                timeout,
+                raft_rx,
+                old_network,
+                leader_tx,
+            ),
             price_aggregator,
             signature_aggregator,
             publisher,

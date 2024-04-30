@@ -35,7 +35,7 @@ pub struct Network {
 
     // An MPSC channel that can dispatch messages to the raft state machine
     raft_messages: Arc<tokio::sync::mpsc::Sender<RaftMessage>>,
-    signer_messages: Arc<tokio::sync::mpsc::Sender<SignerMessage>>,
+    message_sender: Arc<tokio::sync::mpsc::Sender<(String, Message)>>,
 
     // Instead of trying to handle the crossing-paths problem, we just maintain one incoming and one outgoing connection for each peer
     // A set of incoming connections
@@ -48,12 +48,12 @@ impl Network {
     pub fn new(
         id: String,
         raft_messages: Arc<tokio::sync::mpsc::Sender<RaftMessage>>,
-        signer_messages: Arc<tokio::sync::mpsc::Sender<SignerMessage>>,
+        message_sender: Arc<tokio::sync::mpsc::Sender<(String, Message)>>,
     ) -> Self {
         Network {
             id,
             raft_messages,
-            signer_messages,
+            message_sender,
             incoming_connections: Arc::new(dashmap::DashMap::new()),
             outgoing_connections: Arc::new(dashmap::DashMap::new()),
         }
@@ -182,6 +182,17 @@ impl Network {
         while let Some(msg) = stream.next().await {
             trace!("Received message {:?} from {}", msg, them);
 
+            if let Ok(message) = &msg {
+                if let Err(e) = self
+                    .message_sender
+                    .send((them.clone(), message.clone()))
+                    .await
+                {
+                    warn!(them = them, "Failed to send message: {}", e);
+                    break;
+                }
+            }
+
             match msg {
                 Ok(Message::Raft(raft)) => {
                     if let Err(e) = self.raft_messages.send(raft).await {
@@ -189,11 +200,8 @@ impl Network {
                         break;
                     }
                 }
-                Ok(Message::Signer(signer)) => {
-                    if let Err(e) = self.signer_messages.send(signer).await {
-                        warn!(them = them, "Failed to send signer message: {}", e);
-                        break;
-                    }
+                Ok(Message::Signer(_)) => {
+                    // handled elsewhere
                 }
                 // If someone tries to Hello us again, break it off
                 Ok(_) => {
@@ -327,7 +335,7 @@ impl Network {
     // send a message, by looking up the outgoing connection mpsc and sending to it
     pub async fn send(
         &self,
-        peer: &String,
+        peer: &str,
         message: Message,
     ) -> Result<(), tokio::sync::mpsc::error::SendError<Message>> {
         if let Some(sender) = self.outgoing_connections.get(peer) {
