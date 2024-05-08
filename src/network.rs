@@ -4,6 +4,7 @@ use tracing::{info, warn};
 
 use crate::networking::Message as OldMessage;
 use crate::networking::Network as OldNetwork;
+use crate::raft::RaftMessage;
 use crate::{
     config::{OracleConfig, PeerConfig},
     signature_aggregator::signer::SignerMessage,
@@ -23,6 +24,8 @@ pub struct Network {
     incoming_message_receiver: mpsc::Receiver<(String, OldMessage)>,
     outgoing_signer: Option<mpsc::Receiver<OutgoingMessage<SignerMessage>>>,
     incoming_signer: Option<mpsc::Sender<IncomingMessage<SignerMessage>>>,
+    outgoing_raft: Option<mpsc::Receiver<OutgoingMessage<RaftMessage>>>,
+    incoming_raft: Option<mpsc::Sender<IncomingMessage<RaftMessage>>>,
 }
 
 impl Network {
@@ -38,6 +41,8 @@ impl Network {
             incoming_message_receiver,
             outgoing_signer: None,
             incoming_signer: None,
+            outgoing_raft: None,
+            incoming_raft: None,
         }
     }
 
@@ -53,11 +58,31 @@ impl Network {
         NetworkChannel::new(sender, receiver)
     }
 
+    pub fn raft_channel(&mut self) -> NetworkChannel<RaftMessage> {
+        let (outgoing_tx, outgoing_rx) = mpsc::channel(10);
+        self.outgoing_raft = Some(outgoing_rx);
+        let sender = NetworkSender::new(outgoing_tx);
+
+        let (incoming_tx, incoming_rx) = mpsc::channel(10);
+        self.incoming_raft = Some(incoming_tx);
+        let receiver = NetworkReceiver::new(incoming_rx);
+
+        NetworkChannel::new(sender, receiver)
+    }
+
     pub async fn listen(self) -> Result<()> {
         info!("Now listening on port {}", self.port);
 
         let mut set = JoinSet::new();
 
+        if let Some(mut raft) = self.outgoing_raft {
+            let old = self.old.clone();
+            set.spawn(async move {
+                while let Some(message) = raft.recv().await {
+                    send_message(message, OldMessage::Raft, &old).await;
+                }
+            });
+        }
         if let Some(mut signer) = self.outgoing_signer {
             let old = self.old.clone();
             set.spawn(async move {
@@ -70,8 +95,14 @@ impl Network {
         let mut receiver = self.incoming_message_receiver;
         set.spawn(async move {
             while let Some((from, data)) = receiver.recv().await {
-                if let OldMessage::Signer(data) = data {
-                    receive_message(from, data, &self.incoming_signer).await;
+                match data {
+                    OldMessage::Raft(data) => {
+                        receive_message(from, data, &self.incoming_raft).await;
+                    }
+                    OldMessage::Signer(data) => {
+                        receive_message(from, data, &self.incoming_signer).await;
+                    }
+                    _ => {}
                 }
             }
         });

@@ -25,12 +25,13 @@ impl Display for TargetId {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct OutgoingMessage<T> {
     pub to: Option<TargetId>,
     pub data: T,
 }
 
+#[derive(Debug)]
 pub struct IncomingMessage<T> {
     pub from: TargetId,
     pub data: T,

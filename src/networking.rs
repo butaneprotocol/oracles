@@ -33,8 +33,7 @@ pub enum Message {
 pub struct Network {
     id: String,
 
-    // An MPSC channel that can dispatch messages to the raft state machine
-    raft_messages: Arc<tokio::sync::mpsc::Sender<RaftMessage>>,
+    // An MPSC channel that can dispatch messages to different state machines
     message_sender: Arc<tokio::sync::mpsc::Sender<(String, Message)>>,
 
     // Instead of trying to handle the crossing-paths problem, we just maintain one incoming and one outgoing connection for each peer
@@ -47,12 +46,10 @@ pub struct Network {
 impl Network {
     pub fn new(
         id: String,
-        raft_messages: Arc<tokio::sync::mpsc::Sender<RaftMessage>>,
         message_sender: Arc<tokio::sync::mpsc::Sender<(String, Message)>>,
     ) -> Self {
         Network {
             id,
-            raft_messages,
             message_sender,
             incoming_connections: Arc::new(dashmap::DashMap::new()),
             outgoing_connections: Arc::new(dashmap::DashMap::new()),
@@ -169,11 +166,9 @@ impl Network {
         // If we only get an incoming connection, we don't want raft to start trying to send messages; and if we only get an outgoing connection,
         // then we may not be able to reach consensus yet
         if self.outgoing_connections.contains_key(&them) {
-            self.raft_messages
+            self.message_sender
                 .clone()
-                .send(RaftMessage::Connect {
-                    node_id: them.clone(),
-                })
+                .send((them.clone(), Message::Raft(RaftMessage::Connect)))
                 .await
                 .unwrap();
         }
@@ -194,17 +189,14 @@ impl Network {
             }
 
             match msg {
-                Ok(Message::Raft(raft)) => {
-                    if let Err(e) = self.raft_messages.send(raft).await {
-                        warn!(them = them, "Failed to send raft message: {}", e);
-                        break;
-                    }
+                Ok(Message::Raft(_)) => {
+                    // handled elsewhere
                 }
                 Ok(Message::Signer(_)) => {
                     // handled elsewhere
                 }
                 // If someone tries to Hello us again, break it off
-                Ok(_) => {
+                Ok(Message::Hello(_)) => {
                     warn!(them = them, "Unexpected message");
                     break;
                 }
@@ -303,11 +295,9 @@ impl Network {
         // Once both connections have been established, tell raft about it
         // until we can both send and receive, it doesn't make sense to consider them for raft elections, for example
         if self.incoming_connections.contains_key(&them) {
-            self.raft_messages
+            self.message_sender
                 .clone()
-                .send(RaftMessage::Connect {
-                    node_id: them.clone(),
-                })
+                .send((them.clone(), Message::Raft(RaftMessage::Connect)))
                 .await
                 .unwrap();
         }
@@ -323,11 +313,9 @@ impl Network {
         // We got disconnected, so let the Raft protocol know to stop sending messages, and then return so we can try to connect again
         warn!("Outgoing connection Disconnected");
         self.outgoing_connections.remove(&them);
-        self.raft_messages
+        self.message_sender
             .clone()
-            .send(RaftMessage::Disconnect {
-                node_id: them.clone(),
-            })
+            .send((them.clone(), Message::Raft(RaftMessage::Disconnect)))
             .await
             .unwrap();
     }

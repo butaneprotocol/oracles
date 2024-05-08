@@ -59,17 +59,12 @@ impl Node {
 
         let (health_server, health_sink) = HealthServer::new();
 
-        // Construct mpsc channels for each of our abstract state machines
-        let (raft_tx, raft_rx) = mpsc::channel(10);
+        // Construct an mpsc channel for incoming messages
         let (message_tx, message_rx) = mpsc::channel(10);
 
         // Construct a peer-to-peer network that can connect to peers, and dispatch messages to the correct state machine
-        let old_network = crate::networking::Network::new(
-            id.to_string(),
-            Arc::new(raft_tx),
-            Arc::new(message_tx),
-        );
-        let mut network = Network::new(&config, old_network.clone(), message_rx);
+        let old_network = crate::networking::Network::new(id.to_string(), Arc::new(message_tx));
+        let mut network = Network::new(&config, old_network, message_rx);
 
         let (pa_tx, pa_rx) = watch::channel(vec![]);
 
@@ -93,19 +88,20 @@ impl Node {
 
         let publisher = Publisher::new(result_rx)?;
 
+        let raft = Raft::new(
+            id,
+            quorum,
+            heartbeat,
+            timeout,
+            network.raft_channel(),
+            leader_tx,
+        );
+
         Ok(Node {
             health_server,
             health_sink,
             network,
-            raft: Raft::new(
-                id,
-                quorum,
-                heartbeat,
-                timeout,
-                raft_rx,
-                old_network,
-                leader_tx,
-            ),
+            raft,
             price_aggregator,
             signature_aggregator,
             publisher,
@@ -126,9 +122,10 @@ impl Node {
         );
 
         // Spawn the abstract raft state machine, which internally uses network to maintain a Raft consensus
+        let raft = self.raft;
         set.spawn(
             async move {
-                self.raft.handle_messages().await;
+                raft.handle_messages().await;
             }
             .in_current_span(),
         );
