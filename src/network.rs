@@ -19,10 +19,11 @@ mod test;
 mod types;
 
 pub struct Network {
+    pub id: TargetId,
     port: u16,
     peers: Vec<PeerConfig>,
     core: Core,
-    incoming_message_receiver: mpsc::Receiver<(String, Message)>,
+    incoming_message_receiver: mpsc::Receiver<(TargetId, Message)>,
     outgoing_signer: Option<mpsc::Receiver<OutgoingMessage<SignerMessage>>>,
     incoming_signer: Option<mpsc::Sender<IncomingMessage<SignerMessage>>>,
     outgoing_raft: Option<mpsc::Receiver<OutgoingMessage<RaftMessage>>>,
@@ -31,9 +32,11 @@ pub struct Network {
 
 impl Network {
     pub fn new(id: &str, config: &OracleConfig) -> Self {
+        let id = TargetId::new(id.to_string());
         let (incoming_message_sender, incoming_message_receiver) = mpsc::channel(10);
-        let core = Core::new(id.to_string(), Arc::new(incoming_message_sender));
+        let core = Core::new(id.clone(), Arc::new(incoming_message_sender));
         Self {
+            id,
             port: config.port,
             peers: config.peers.clone(),
             core,
@@ -133,14 +136,11 @@ async fn send_message<T, F: Fn(T) -> Message>(message: OutgoingMessage<T>, wrap:
 }
 
 async fn receive_message<T>(
-    from: String,
+    from: TargetId,
     data: T,
     sender: &Option<mpsc::Sender<IncomingMessage<T>>>,
 ) {
-    let message = IncomingMessage {
-        from: TargetId::new(from),
-        data,
-    };
+    let message = IncomingMessage { from, data };
     if let Some(sender) = sender {
         if let Err(error) = sender.send(message).await {
             warn!("error receiving message from {:?}: {}", error.0.from, error);

@@ -27,7 +27,7 @@ pub struct ConsensusSignatureAggregator {
 }
 impl ConsensusSignatureAggregator {
     pub fn new(
-        id: String,
+        id: TargetId,
         channel: NetworkChannel<SignerMessage>,
         price_source: Receiver<Vec<PriceFeedEntry>>,
         leader_source: Receiver<RaftLeader>,
@@ -36,7 +36,7 @@ impl ConsensusSignatureAggregator {
         let (key, public_key) = Self::load_keys()?;
         let (outgoing_message_sink, message_source) = channel.split();
         let signer = Signer::new(
-            TargetId::new(id),
+            id,
             key,
             public_key,
             price_source,

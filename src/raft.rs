@@ -1,11 +1,11 @@
-use std::{collections::HashSet, ops::Sub, sync::Arc};
+use std::{collections::HashSet, ops::Sub};
 
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use tokio::sync::watch::Sender;
+use tokio::sync::watch;
 use tracing::{info, trace, warn};
 
-use crate::network::{IncomingMessage, NetworkChannel, TargetId};
+use crate::network::{IncomingMessage, Network, NetworkChannel, TargetId};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum RaftMessage {
@@ -35,7 +35,6 @@ pub enum RaftLeader {
     Unknown,
 }
 
-#[derive(Clone)]
 pub struct RaftState {
     pub id: TargetId,
     pub quorum: usize,
@@ -50,11 +49,11 @@ pub struct RaftState {
     pub status: RaftStatus,
     pub term: usize,
 
-    pub leader: Arc<Sender<RaftLeader>>,
+    pub leader_sink: watch::Sender<RaftLeader>,
 }
 
 pub struct Raft {
-    pub id: String,
+    pub id: TargetId,
 
     channel: NetworkChannel<RaftMessage>,
     state: RaftState,
@@ -62,14 +61,14 @@ pub struct Raft {
 
 impl RaftState {
     pub fn new(
-        id: &str,
+        id: TargetId,
         quorum: usize,
         heartbeat_freq: std::time::Duration,
         timeout_freq: std::time::Duration,
-        leader: Sender<RaftLeader>,
+        leader_sink: watch::Sender<RaftLeader>,
     ) -> Self {
         RaftState {
-            id: TargetId::new(id.to_string()),
+            id,
             quorum,
             warned_about_quorum: false,
             peers: HashSet::new(),
@@ -82,7 +81,7 @@ impl RaftState {
                 voted_for: None,
             },
             term: 0,
-            leader: Arc::new(leader),
+            leader_sink,
         }
     }
 
@@ -317,7 +316,7 @@ impl RaftState {
             _ => RaftLeader::Unknown,
         };
         self.status = status;
-        self.leader.send_if_modified(|old_leader| {
+        self.leader_sink.send_if_modified(|old_leader| {
             let changed = *old_leader != leader;
             if changed {
                 *old_leader = leader;
@@ -329,12 +328,11 @@ impl RaftState {
 
 impl Raft {
     pub fn new(
-        id: &str,
         quorum: usize,
         heartbeat_freq: std::time::Duration,
         timeout_freq: std::time::Duration,
-        channel: NetworkChannel<RaftMessage>,
-        leader: Sender<RaftLeader>,
+        network: &mut Network,
+        leader_sink: watch::Sender<RaftLeader>,
     ) -> Self {
         info!(
             quorum = quorum,
@@ -342,11 +340,16 @@ impl Raft {
             timeout = format!("{:?}", timeout_freq),
             "New raft protocol"
         );
-        Raft {
-            id: id.to_string(),
-            channel,
-            state: RaftState::new(id, quorum, heartbeat_freq, timeout_freq, leader),
-        }
+        let id = network.id.clone();
+        let channel = network.raft_channel();
+        let state = RaftState::new(
+            id.clone(),
+            quorum,
+            heartbeat_freq,
+            timeout_freq,
+            leader_sink,
+        );
+        Raft { id, channel, state }
     }
 
     pub async fn handle_messages(self) {

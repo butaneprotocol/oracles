@@ -48,7 +48,6 @@ impl SignatureAggregator {
     }
 
     pub fn consensus(
-        id: String,
         network: &mut Network,
         price_source: Receiver<Vec<PriceFeedEntry>>,
         leader_source: Receiver<RaftLeader>,
@@ -56,7 +55,7 @@ impl SignatureAggregator {
     ) -> Result<Self> {
         let (signed_price_sink, signed_price_source) = mpsc::channel(10);
         let aggregator = ConsensusSignatureAggregator::new(
-            id,
+            network.id.clone(),
             network.signer_channel(),
             price_source,
             leader_source,

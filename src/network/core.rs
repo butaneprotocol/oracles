@@ -15,6 +15,8 @@ use tracing::{info, trace, warn, Instrument};
 
 use crate::{config::PeerConfig, raft::RaftMessage, signature_aggregator::signer::SignerMessage};
 
+use super::TargetId;
+
 type WrappedStream = FramedRead<OwnedReadHalf, LengthDelimitedCodec>;
 type WrappedSink = FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>;
 
@@ -31,22 +33,22 @@ pub enum Message {
 /// A network is a fully connected set of peers
 #[derive(Clone)]
 pub struct Core {
-    id: String,
+    id: TargetId,
 
     // An MPSC channel that can dispatch messages to different state machines
-    message_sender: Arc<tokio::sync::mpsc::Sender<(String, Message)>>,
+    message_sender: Arc<tokio::sync::mpsc::Sender<(TargetId, Message)>>,
 
     // Instead of trying to handle the crossing-paths problem, we just maintain one incoming and one outgoing connection for each peer
     // A set of incoming connections
-    incoming_connections: Arc<dashmap::DashMap<String, ()>>,
+    incoming_connections: Arc<dashmap::DashMap<TargetId, ()>>,
     // A set of outgoing connections, and the channel used to send them messages
-    outgoing_connections: Arc<dashmap::DashMap<String, tokio::sync::mpsc::Sender<Message>>>,
+    outgoing_connections: Arc<dashmap::DashMap<TargetId, tokio::sync::mpsc::Sender<Message>>>,
 }
 
 impl Core {
     pub fn new(
-        id: String,
-        message_sender: Arc<tokio::sync::mpsc::Sender<(String, Message)>>,
+        id: TargetId,
+        message_sender: Arc<tokio::sync::mpsc::Sender<(TargetId, Message)>>,
     ) -> Self {
         Self {
             id,
@@ -123,38 +125,33 @@ impl Core {
         let mut stream: SerStream = SerStream::new(stream, Cbor::default());
         let mut sink: DeSink = DeSink::new(sink, Cbor::default());
 
-        let mut them = "".to_string();
-
         // Incoming connections *first receive* a `Hello`, then send our own
         // Outgoing connections will do the reverse
-        match stream.next().await {
+        let them = match stream.next().await {
             Some(Ok(Message::Hello(other))) => {
-                them = other;
-                trace!(them = them, "Incoming Hello received");
+                trace!(them = other, "Incoming Hello received");
+                TargetId::new(other)
             }
             Some(Ok(other)) => {
-                warn!(them = them, "Expected Hello, got {:?}", other);
+                warn!("Expected Hello, got {:?}", other);
                 return;
             }
             Some(Err(e)) => {
-                warn!(them = them, "Failed to parse: {}", e);
+                warn!("Failed to parse: {}", e);
                 return;
             }
             None => {
-                warn!(
-                    them = them,
-                    "Incoming Connection disconnected before handshake"
-                );
+                warn!("Incoming Connection disconnected before handshake");
                 return;
             }
-        }
+        };
 
-        match sink.send(Message::Hello(self.id.clone())).await {
+        match sink.send(Message::Hello(self.id.to_string())).await {
             Ok(_) => {
-                trace!(them = them, "Incoming Hello Sent");
+                trace!(them = %them, "Incoming Hello Sent");
             }
             Err(e) => {
-                warn!(them = them, "Failed to send hello: {}", e);
+                warn!(them = %them, "Failed to send hello: {}", e);
                 return;
             }
         }
@@ -183,7 +180,7 @@ impl Core {
                     .send((them.clone(), message.clone()))
                     .await
                 {
-                    warn!(them = them, "Failed to send message: {}", e);
+                    warn!(them = %them, "Failed to send message: {}", e);
                     break;
                 }
             }
@@ -197,12 +194,12 @@ impl Core {
                 }
                 // If someone tries to Hello us again, break it off
                 Ok(Message::Hello(_)) => {
-                    warn!(them = them, "Unexpected message");
+                    warn!(them = %them, "Unexpected message");
                     break;
                 }
                 // Someone is sending us messages that we can't parse
                 Err(e) => {
-                    warn!(them = them, "Failed to parse message: {}", e);
+                    warn!(them = %them, "Failed to parse message: {}", e);
                     break;
                 }
             }
@@ -210,7 +207,7 @@ impl Core {
         self.incoming_connections.remove(&them);
         // NOTE: we *don't* send the raft disconnect message here; we should continue to send them heartbeats
         // so that we can notice when the socket disconnects
-        warn!(them = them, "Incoming connection Disconnected");
+        warn!(them = %them, "Incoming connection Disconnected");
     }
 
     // Connect to a given peer, and reconnect if disconnected
@@ -258,7 +255,7 @@ impl Core {
         let mut sink: DeSink = DeSink::new(sink, Cbor::default());
 
         // First, send our ID, because they're waiting for it on connection
-        match sink.send(Message::Hello(self.id.clone())).await {
+        match sink.send(Message::Hello(self.id.to_string())).await {
             Ok(_) => {
                 trace!("Outgoing Hello sent");
             }
@@ -267,12 +264,11 @@ impl Core {
                 return;
             }
         }
-        let them: String;
         // Now, read the expected `Hello` coming back, so we know their ID
-        match stream.next().await {
+        let them = match stream.next().await {
             Some(Ok(Message::Hello(other))) => {
-                them = other;
-                trace!(them = them, "Outgoing Hello received");
+                trace!(them = other, "Outgoing Hello received");
+                TargetId::new(other)
             }
             Some(Ok(other)) => {
                 warn!("Expected Hello, got {:?}", other);
@@ -286,7 +282,7 @@ impl Core {
                 warn!("Outgoing connection disconnected");
                 return;
             }
-        }
+        };
 
         // Now, setup a mpsc channel for outgoing messages
         let (tx, mut rx) = tokio::sync::mpsc::channel(10);
@@ -323,12 +319,12 @@ impl Core {
     // send a message, by looking up the outgoing connection mpsc and sending to it
     pub async fn send(
         &self,
-        peer: &str,
+        peer: &TargetId,
         message: Message,
     ) -> Result<(), tokio::sync::mpsc::error::SendError<Message>> {
         if let Some(sender) = self.outgoing_connections.get(peer) {
             if let Err(e) = sender.send(message).await {
-                warn!(them = peer, "Failed to send response: {}", e);
+                warn!(them = %peer, "Failed to send response: {}", e);
                 return Err(e);
             }
             Ok(())
@@ -338,7 +334,7 @@ impl Core {
                 keys.push(kvp.key().clone());
             }
             warn!(
-                them = peer,
+                them = %peer,
                 nodes = format!("{:?}", keys),
                 "No connection to peer to send {:?}",
                 message
@@ -353,7 +349,7 @@ impl Core {
             let sender = kvp.value();
             if let Err(e) = sender.send(message.clone()).await {
                 warn!(
-                    them = peer,
+                    them = %peer,
                     "No connection to peer to broadcast {:?}: {}", message, e
                 );
             };

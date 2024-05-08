@@ -70,27 +70,14 @@ impl Node {
         let (result_tx, result_rx) = mpsc::channel(10);
 
         let signature_aggregator = if config.consensus {
-            SignatureAggregator::consensus(
-                id.to_string(),
-                &mut network,
-                pa_rx,
-                leader_rx,
-                result_tx,
-            )?
+            SignatureAggregator::consensus(&mut network, pa_rx, leader_rx, result_tx)?
         } else {
             SignatureAggregator::single(pa_rx, leader_rx, result_tx)?
         };
 
         let publisher = Publisher::new(result_rx)?;
 
-        let raft = Raft::new(
-            id,
-            quorum,
-            heartbeat,
-            timeout,
-            network.raft_channel(),
-            leader_tx,
-        );
+        let raft = Raft::new(quorum, heartbeat, timeout, &mut network, leader_tx);
 
         Ok(Node {
             health_server,
