@@ -17,16 +17,19 @@ mod core;
 mod test;
 mod types;
 
+type MpscPair<T> = (
+    mpsc::Sender<IncomingMessage<T>>,
+    mpsc::Receiver<OutgoingMessage<T>>,
+);
+
 pub struct Network {
     pub id: NodeId,
     port: u16,
     peers: Vec<PeerConfig>,
     core: Core,
     incoming_message_receiver: mpsc::Receiver<(NodeId, Message)>,
-    outgoing_signer: Option<mpsc::Receiver<OutgoingMessage<SignerMessage>>>,
-    incoming_signer: Option<mpsc::Sender<IncomingMessage<SignerMessage>>>,
-    outgoing_raft: Option<mpsc::Receiver<OutgoingMessage<RaftMessage>>>,
-    incoming_raft: Option<mpsc::Sender<IncomingMessage<RaftMessage>>>,
+    raft: Option<MpscPair<RaftMessage>>,
+    signer: Option<MpscPair<SignerMessage>>,
 }
 
 impl Network {
@@ -40,35 +43,17 @@ impl Network {
             peers: config.peers.clone(),
             core,
             incoming_message_receiver,
-            outgoing_signer: None,
-            incoming_signer: None,
-            outgoing_raft: None,
-            incoming_raft: None,
+            signer: None,
+            raft: None,
         }
     }
 
     pub fn signer_channel(&mut self) -> NetworkChannel<SignerMessage> {
-        let (outgoing_tx, outgoing_rx) = mpsc::channel(10);
-        self.outgoing_signer = Some(outgoing_rx);
-        let sender = NetworkSender::new(outgoing_tx);
-
-        let (incoming_tx, incoming_rx) = mpsc::channel(10);
-        self.incoming_signer = Some(incoming_tx);
-        let receiver = NetworkReceiver::new(incoming_rx);
-
-        NetworkChannel::new(sender, receiver)
+        create_channel(&mut self.signer)
     }
 
     pub fn raft_channel(&mut self) -> NetworkChannel<RaftMessage> {
-        let (outgoing_tx, outgoing_rx) = mpsc::channel(10);
-        self.outgoing_raft = Some(outgoing_rx);
-        let sender = NetworkSender::new(outgoing_tx);
-
-        let (incoming_tx, incoming_rx) = mpsc::channel(10);
-        self.incoming_raft = Some(incoming_tx);
-        let receiver = NetworkReceiver::new(incoming_rx);
-
-        NetworkChannel::new(sender, receiver)
+        create_channel(&mut self.raft)
     }
 
     pub async fn listen(self) -> Result<()> {
@@ -76,32 +61,18 @@ impl Network {
 
         let mut set = JoinSet::new();
 
-        if let Some(mut raft) = self.outgoing_raft {
-            let core = self.core.clone();
-            set.spawn(async move {
-                while let Some(message) = raft.recv().await {
-                    send_message(message, Message::Raft, &core).await;
-                }
-            });
-        }
-        if let Some(mut signer) = self.outgoing_signer {
-            let core = self.core.clone();
-            set.spawn(async move {
-                while let Some(message) = signer.recv().await {
-                    send_message(message, Message::Signer, &core).await;
-                }
-            });
-        }
+        let raft_sender = send_messages(&mut set, &self.core, self.raft, Message::Raft);
+        let signer_sender = send_messages(&mut set, &self.core, self.signer, Message::Signer);
 
         let mut receiver = self.incoming_message_receiver;
         set.spawn(async move {
             while let Some((from, data)) = receiver.recv().await {
                 match data {
                     Message::Raft(data) => {
-                        receive_message(from, data, &self.incoming_raft).await;
+                        receive_message(from, data, &raft_sender).await;
                     }
                     Message::Signer(data) => {
-                        receive_message(from, data, &self.incoming_signer).await;
+                        receive_message(from, data, &signer_sender).await;
                     }
                     _ => {}
                 }
@@ -122,15 +93,46 @@ impl Network {
     }
 }
 
-async fn send_message<T, F: Fn(T) -> Message>(message: OutgoingMessage<T>, wrap: F, core: &Core) {
-    let wrapped = wrap(message.data);
-    match message.to {
-        Some(id) => {
-            core.send(&id, wrapped).await.unwrap();
-        }
-        None => {
-            core.broadcast(wrapped).await;
-        }
+fn create_channel<T>(holder: &mut Option<MpscPair<T>>) -> NetworkChannel<T> {
+    let (outgoing_tx, outgoing_rx) = mpsc::channel(10);
+    let sender = NetworkSender::new(outgoing_tx);
+
+    let (incoming_tx, incoming_rx) = mpsc::channel(10);
+    let receiver = NetworkReceiver::new(incoming_rx);
+
+    holder.replace((incoming_tx, outgoing_rx));
+
+    NetworkChannel::new(sender, receiver)
+}
+
+fn send_messages<T, F>(
+    set: &mut JoinSet<()>,
+    core: &Core,
+    holder: Option<MpscPair<T>>,
+    wrap: F,
+) -> Option<mpsc::Sender<IncomingMessage<T>>>
+where
+    T: Send + 'static,
+    F: Send + 'static + Fn(T) -> Message,
+{
+    if let Some((sender, mut receiver)) = holder {
+        let core = core.clone();
+        set.spawn(async move {
+            while let Some(message) = receiver.recv().await {
+                let wrapped = wrap(message.data);
+                match message.to {
+                    Some(id) => {
+                        core.send(&id, wrapped).await.unwrap();
+                    }
+                    None => {
+                        core.broadcast(wrapped).await;
+                    }
+                }
+            }
+        });
+        Some(sender)
+    } else {
+        None
     }
 }
 
