@@ -21,7 +21,6 @@ pub mod apis;
 pub mod config;
 pub mod health;
 pub mod network;
-pub mod networking;
 pub mod price_aggregator;
 pub mod price_feed;
 pub mod publisher;
@@ -59,12 +58,8 @@ impl Node {
 
         let (health_server, health_sink) = HealthServer::new();
 
-        // Construct an mpsc channel for incoming messages
-        let (message_tx, message_rx) = mpsc::channel(10);
-
         // Construct a peer-to-peer network that can connect to peers, and dispatch messages to the correct state machine
-        let old_network = crate::networking::Network::new(id.to_string(), Arc::new(message_tx));
-        let mut network = Network::new(&config, old_network, message_rx);
+        let mut network = Network::new(id, &config);
 
         let (pa_tx, pa_rx) = watch::channel(vec![]);
 

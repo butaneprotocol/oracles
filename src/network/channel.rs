@@ -1,7 +1,7 @@
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::warn;
 
-use super::core::{IncomingMessage, OutgoingMessage, TargetId};
+use super::types::{IncomingMessage, OutgoingMessage, TargetId};
 
 pub struct NetworkSender<T>(Sender<OutgoingMessage<T>>);
 

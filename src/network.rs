@@ -2,26 +2,27 @@ use anyhow::Result;
 use tokio::{sync::mpsc, task::JoinSet};
 use tracing::{info, warn};
 
-use crate::networking::Message as OldMessage;
-use crate::networking::Network as OldNetwork;
 use crate::raft::RaftMessage;
 use crate::{
     config::{OracleConfig, PeerConfig},
     signature_aggregator::signer::SignerMessage,
 };
 pub use channel::{NetworkChannel, NetworkReceiver, NetworkSender};
-pub use core::{IncomingMessage, OutgoingMessage, TargetId};
+use core::{Core, Message};
+use std::sync::Arc;
 pub use test::TestNetwork;
+pub use types::{IncomingMessage, OutgoingMessage, TargetId};
 
 mod channel;
 mod core;
 mod test;
+mod types;
 
 pub struct Network {
     port: u16,
     peers: Vec<PeerConfig>,
-    old: crate::networking::Network,
-    incoming_message_receiver: mpsc::Receiver<(String, OldMessage)>,
+    core: Core,
+    incoming_message_receiver: mpsc::Receiver<(String, Message)>,
     outgoing_signer: Option<mpsc::Receiver<OutgoingMessage<SignerMessage>>>,
     incoming_signer: Option<mpsc::Sender<IncomingMessage<SignerMessage>>>,
     outgoing_raft: Option<mpsc::Receiver<OutgoingMessage<RaftMessage>>>,
@@ -29,15 +30,13 @@ pub struct Network {
 }
 
 impl Network {
-    pub fn new(
-        config: &OracleConfig,
-        old: crate::networking::Network,
-        incoming_message_receiver: mpsc::Receiver<(String, crate::networking::Message)>,
-    ) -> Self {
+    pub fn new(id: &str, config: &OracleConfig) -> Self {
+        let (incoming_message_sender, incoming_message_receiver) = mpsc::channel(10);
+        let core = Core::new(id.to_string(), Arc::new(incoming_message_sender));
         Self {
             port: config.port,
             peers: config.peers.clone(),
-            old,
+            core,
             incoming_message_receiver,
             outgoing_signer: None,
             incoming_signer: None,
@@ -76,18 +75,18 @@ impl Network {
         let mut set = JoinSet::new();
 
         if let Some(mut raft) = self.outgoing_raft {
-            let old = self.old.clone();
+            let core = self.core.clone();
             set.spawn(async move {
                 while let Some(message) = raft.recv().await {
-                    send_message(message, OldMessage::Raft, &old).await;
+                    send_message(message, Message::Raft, &core).await;
                 }
             });
         }
         if let Some(mut signer) = self.outgoing_signer {
-            let old = self.old.clone();
+            let core = self.core.clone();
             set.spawn(async move {
                 while let Some(message) = signer.recv().await {
-                    send_message(message, OldMessage::Signer, &old).await;
+                    send_message(message, Message::Signer, &core).await;
                 }
             });
         }
@@ -96,10 +95,10 @@ impl Network {
         set.spawn(async move {
             while let Some((from, data)) = receiver.recv().await {
                 match data {
-                    OldMessage::Raft(data) => {
+                    Message::Raft(data) => {
                         receive_message(from, data, &self.incoming_raft).await;
                     }
-                    OldMessage::Signer(data) => {
+                    Message::Signer(data) => {
                         receive_message(from, data, &self.incoming_signer).await;
                     }
                     _ => {}
@@ -108,7 +107,7 @@ impl Network {
         });
 
         set.spawn(async move {
-            self.old
+            self.core
                 .handle_network(self.port, self.peers)
                 .await
                 .unwrap();
@@ -121,18 +120,14 @@ impl Network {
     }
 }
 
-async fn send_message<T, F: Fn(T) -> OldMessage>(
-    message: OutgoingMessage<T>,
-    wrap: F,
-    network: &OldNetwork,
-) {
+async fn send_message<T, F: Fn(T) -> Message>(message: OutgoingMessage<T>, wrap: F, core: &Core) {
     let wrapped = wrap(message.data);
     match message.to {
         Some(id) => {
-            network.send(&id, wrapped).await.unwrap();
+            core.send(&id, wrapped).await.unwrap();
         }
         None => {
-            network.broadcast(wrapped).await;
+            core.broadcast(wrapped).await;
         }
     }
 }
