@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 use tracing::{info, trace, warn};
 
-use crate::network::{IncomingMessage, Network, NetworkChannel, TargetId};
+use crate::network::{IncomingMessage, Network, NetworkChannel, NodeId};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum RaftMessage {
@@ -19,8 +19,8 @@ pub enum RaftMessage {
 #[derive(Eq, PartialEq, Clone)]
 pub enum RaftStatus {
     Follower {
-        leader: Option<TargetId>,
-        voted_for: Option<TargetId>,
+        leader: Option<NodeId>,
+        voted_for: Option<NodeId>,
     },
     Candidate {
         votes: usize,
@@ -31,14 +31,14 @@ pub enum RaftStatus {
 #[derive(Eq, PartialEq, Clone, Debug)]
 pub enum RaftLeader {
     Myself,
-    Other(TargetId),
+    Other(NodeId),
     Unknown,
 }
 
 pub struct RaftState {
-    pub id: TargetId,
+    pub id: NodeId,
     pub quorum: usize,
-    pub peers: HashSet<TargetId>,
+    pub peers: HashSet<NodeId>,
     warned_about_quorum: bool,
 
     pub last_heartbeat: std::time::Instant,
@@ -53,7 +53,7 @@ pub struct RaftState {
 }
 
 pub struct Raft {
-    pub id: TargetId,
+    pub id: NodeId,
 
     channel: NetworkChannel<RaftMessage>,
     state: RaftState,
@@ -61,7 +61,7 @@ pub struct Raft {
 
 impl RaftState {
     pub fn new(
-        id: TargetId,
+        id: NodeId,
         quorum: usize,
         heartbeat_freq: std::time::Duration,
         timeout_freq: std::time::Duration,
@@ -85,7 +85,7 @@ impl RaftState {
         }
     }
 
-    pub fn leader(&self) -> Option<TargetId> {
+    pub fn leader(&self) -> Option<NodeId> {
         match &self.status {
             RaftStatus::Leader => Some(self.id.clone()),
             RaftStatus::Follower {
@@ -104,7 +104,7 @@ impl RaftState {
         &mut self,
         timestamp: std::time::Instant,
         message: IncomingMessage<RaftMessage>,
-    ) -> Vec<(TargetId, RaftMessage)> {
+    ) -> Vec<(NodeId, RaftMessage)> {
         let from = message.from;
         match &message.data {
             RaftMessage::Connect => {
@@ -247,7 +247,7 @@ impl RaftState {
         }
     }
 
-    pub fn tick(&mut self, timestamp: std::time::Instant) -> Vec<(TargetId, RaftMessage)> {
+    pub fn tick(&mut self, timestamp: std::time::Instant) -> Vec<(NodeId, RaftMessage)> {
         let actual_timeout = self.timeout_freq.sub(self.jitter);
         let is_leader = self.is_leader();
         let elapsed_time = timestamp.duration_since(self.last_heartbeat);

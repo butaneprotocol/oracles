@@ -13,7 +13,7 @@ use tokio::{
 use tracing::{warn, Instrument};
 
 use crate::{
-    network::{NetworkChannel, NetworkReceiver, TargetId},
+    network::{NetworkChannel, NetworkReceiver, NodeId},
     price_feed::{PriceFeedEntry, SignedPriceFeedEntry},
     raft::RaftLeader,
 };
@@ -27,7 +27,7 @@ pub struct ConsensusSignatureAggregator {
 }
 impl ConsensusSignatureAggregator {
     pub fn new(
-        id: TargetId,
+        id: NodeId,
         channel: NetworkChannel<SignerMessage>,
         price_source: Receiver<Vec<PriceFeedEntry>>,
         leader_source: Receiver<RaftLeader>,

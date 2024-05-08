@@ -6,20 +6,20 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct TargetId(String);
-impl TargetId {
+pub struct NodeId(String);
+impl NodeId {
     pub const fn new(id: String) -> Self {
         Self(id)
     }
 }
-impl Deref for TargetId {
+impl Deref for NodeId {
     type Target = str;
 
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
-impl Display for TargetId {
+impl Display for NodeId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0)
     }
@@ -27,12 +27,12 @@ impl Display for TargetId {
 
 #[derive(Clone, Debug)]
 pub struct OutgoingMessage<T> {
-    pub to: Option<TargetId>,
+    pub to: Option<NodeId>,
     pub data: T,
 }
 
 #[derive(Debug)]
 pub struct IncomingMessage<T> {
-    pub from: TargetId,
+    pub from: NodeId,
     pub data: T,
 }

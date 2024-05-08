@@ -3,12 +3,12 @@ use std::collections::HashMap;
 use tokio::sync::mpsc;
 
 use crate::network::{
-    IncomingMessage, NetworkChannel, NetworkReceiver, NetworkSender, OutgoingMessage, TargetId,
+    IncomingMessage, NetworkChannel, NetworkReceiver, NetworkSender, NodeId, OutgoingMessage,
 };
 
 pub struct TestNetwork<T: Clone> {
-    outgoing: HashMap<TargetId, mpsc::Receiver<OutgoingMessage<T>>>,
-    incoming: HashMap<TargetId, mpsc::Sender<IncomingMessage<T>>>,
+    outgoing: HashMap<NodeId, mpsc::Receiver<OutgoingMessage<T>>>,
+    incoming: HashMap<NodeId, mpsc::Sender<IncomingMessage<T>>>,
 }
 
 impl<T: Clone> Default for TestNetwork<T> {
@@ -25,22 +25,22 @@ impl<T: Clone> TestNetwork<T> {
         }
     }
 
-    pub fn connect(&mut self) -> (TargetId, NetworkChannel<T>) {
-        let target_id = TargetId::new(self.outgoing.len().to_string());
+    pub fn connect(&mut self) -> (NodeId, NetworkChannel<T>) {
+        let node_id = NodeId::new(self.outgoing.len().to_string());
 
         let (outgoing_tx, outgoing_rx) = mpsc::channel(10);
-        self.outgoing.insert(target_id.clone(), outgoing_rx);
+        self.outgoing.insert(node_id.clone(), outgoing_rx);
         let sender = NetworkSender::new(outgoing_tx);
 
         let (incoming_tx, incoming_rx) = mpsc::channel(10);
-        self.incoming.insert(target_id.clone(), incoming_tx);
+        self.incoming.insert(node_id.clone(), incoming_tx);
         let receiver = NetworkReceiver::new(incoming_rx);
 
         let channel = NetworkChannel::new(sender, receiver);
-        (target_id, channel)
+        (node_id, channel)
     }
 
-    pub async fn drain_one(&mut self, from: &TargetId) -> Vec<OutgoingMessage<T>> {
+    pub async fn drain_one(&mut self, from: &NodeId) -> Vec<OutgoingMessage<T>> {
         let mut sent = vec![];
         let receiver = self.outgoing.get_mut(from).unwrap();
         while let Ok(message) = receiver.try_recv() {
@@ -64,12 +64,12 @@ impl<T: Clone> TestNetwork<T> {
     }
 
     pub async fn drain(&mut self) -> bool {
-        let targets: Vec<TargetId> = self.outgoing.keys().cloned().collect();
+        let targets: Vec<NodeId> = self.outgoing.keys().cloned().collect();
         let mut something_sent = false;
         loop {
             let mut something_sent_this_round = false;
-            for target_id in &targets {
-                if !self.drain_one(target_id).await.is_empty() {
+            for node_id in &targets {
+                if !self.drain_one(node_id).await.is_empty() {
                     something_sent = true;
                     something_sent_this_round = true;
                 }

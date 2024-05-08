@@ -9,9 +9,8 @@ use crate::{
 };
 pub use channel::{NetworkChannel, NetworkReceiver, NetworkSender};
 use core::{Core, Message};
-use std::sync::Arc;
 pub use test::TestNetwork;
-pub use types::{IncomingMessage, OutgoingMessage, TargetId};
+pub use types::{IncomingMessage, NodeId, OutgoingMessage};
 
 mod channel;
 mod core;
@@ -19,11 +18,11 @@ mod test;
 mod types;
 
 pub struct Network {
-    pub id: TargetId,
+    pub id: NodeId,
     port: u16,
     peers: Vec<PeerConfig>,
     core: Core,
-    incoming_message_receiver: mpsc::Receiver<(TargetId, Message)>,
+    incoming_message_receiver: mpsc::Receiver<(NodeId, Message)>,
     outgoing_signer: Option<mpsc::Receiver<OutgoingMessage<SignerMessage>>>,
     incoming_signer: Option<mpsc::Sender<IncomingMessage<SignerMessage>>>,
     outgoing_raft: Option<mpsc::Receiver<OutgoingMessage<RaftMessage>>>,
@@ -32,9 +31,9 @@ pub struct Network {
 
 impl Network {
     pub fn new(id: &str, config: &OracleConfig) -> Self {
-        let id = TargetId::new(id.to_string());
+        let id = NodeId::new(id.to_string());
         let (incoming_message_sender, incoming_message_receiver) = mpsc::channel(10);
-        let core = Core::new(id.clone(), Arc::new(incoming_message_sender));
+        let core = Core::new(id.clone(), incoming_message_sender);
         Self {
             id,
             port: config.port,
@@ -136,7 +135,7 @@ async fn send_message<T, F: Fn(T) -> Message>(message: OutgoingMessage<T>, wrap:
 }
 
 async fn receive_message<T>(
-    from: TargetId,
+    from: NodeId,
     data: T,
     sender: &Option<mpsc::Sender<IncomingMessage<T>>>,
 ) {

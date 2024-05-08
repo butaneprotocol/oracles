@@ -1,7 +1,7 @@
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::warn;
 
-use super::types::{IncomingMessage, OutgoingMessage, TargetId};
+use super::types::{IncomingMessage, NodeId, OutgoingMessage};
 
 pub struct NetworkSender<T>(Sender<OutgoingMessage<T>>);
 
@@ -10,7 +10,7 @@ impl<T> NetworkSender<T> {
         Self(sender)
     }
 
-    pub async fn send(&self, to: TargetId, message: T) {
+    pub async fn send(&self, to: NodeId, message: T) {
         if let Err(error) = self
             .0
             .send(OutgoingMessage {

@@ -7,6 +7,7 @@ use tokio::{
         tcp::{OwnedReadHalf, OwnedWriteHalf},
         TcpListener, TcpStream,
     },
+    sync::mpsc,
     task::{JoinError, JoinSet},
 };
 use tokio_serde::{formats::Cbor, Framed};
@@ -15,7 +16,7 @@ use tracing::{info, trace, warn, Instrument};
 
 use crate::{config::PeerConfig, raft::RaftMessage, signature_aggregator::signer::SignerMessage};
 
-use super::TargetId;
+use super::NodeId;
 
 type WrappedStream = FramedRead<OwnedReadHalf, LengthDelimitedCodec>;
 type WrappedSink = FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>;
@@ -33,26 +34,23 @@ pub enum Message {
 /// A network is a fully connected set of peers
 #[derive(Clone)]
 pub struct Core {
-    id: TargetId,
+    id: NodeId,
 
     // An MPSC channel that can dispatch messages to different state machines
-    message_sender: Arc<tokio::sync::mpsc::Sender<(TargetId, Message)>>,
+    message_sender: Arc<mpsc::Sender<(NodeId, Message)>>,
 
     // Instead of trying to handle the crossing-paths problem, we just maintain one incoming and one outgoing connection for each peer
     // A set of incoming connections
-    incoming_connections: Arc<dashmap::DashMap<TargetId, ()>>,
+    incoming_connections: Arc<dashmap::DashMap<NodeId, ()>>,
     // A set of outgoing connections, and the channel used to send them messages
-    outgoing_connections: Arc<dashmap::DashMap<TargetId, tokio::sync::mpsc::Sender<Message>>>,
+    outgoing_connections: Arc<dashmap::DashMap<NodeId, mpsc::Sender<Message>>>,
 }
 
 impl Core {
-    pub fn new(
-        id: TargetId,
-        message_sender: Arc<tokio::sync::mpsc::Sender<(TargetId, Message)>>,
-    ) -> Self {
+    pub fn new(id: NodeId, message_sender: mpsc::Sender<(NodeId, Message)>) -> Self {
         Self {
             id,
-            message_sender,
+            message_sender: Arc::new(message_sender),
             incoming_connections: Arc::new(dashmap::DashMap::new()),
             outgoing_connections: Arc::new(dashmap::DashMap::new()),
         }
@@ -130,7 +128,7 @@ impl Core {
         let them = match stream.next().await {
             Some(Ok(Message::Hello(other))) => {
                 trace!(them = other, "Incoming Hello received");
-                TargetId::new(other)
+                NodeId::new(other)
             }
             Some(Ok(other)) => {
                 warn!("Expected Hello, got {:?}", other);
@@ -268,7 +266,7 @@ impl Core {
         let them = match stream.next().await {
             Some(Ok(Message::Hello(other))) => {
                 trace!(them = other, "Outgoing Hello received");
-                TargetId::new(other)
+                NodeId::new(other)
             }
             Some(Ok(other)) => {
                 warn!("Expected Hello, got {:?}", other);
@@ -285,7 +283,7 @@ impl Core {
         };
 
         // Now, setup a mpsc channel for outgoing messages
-        let (tx, mut rx) = tokio::sync::mpsc::channel(10);
+        let (tx, mut rx) = mpsc::channel(10);
         self.outgoing_connections.insert(them.clone(), tx.clone());
 
         // Once both connections have been established, tell raft about it
@@ -319,9 +317,9 @@ impl Core {
     // send a message, by looking up the outgoing connection mpsc and sending to it
     pub async fn send(
         &self,
-        peer: &TargetId,
+        peer: &NodeId,
         message: Message,
-    ) -> Result<(), tokio::sync::mpsc::error::SendError<Message>> {
+    ) -> Result<(), mpsc::error::SendError<Message>> {
         if let Some(sender) = self.outgoing_connections.get(peer) {
             if let Err(e) = sender.send(message).await {
                 warn!(them = %peer, "Failed to send response: {}", e);
@@ -339,7 +337,7 @@ impl Core {
                 "No connection to peer to send {:?}",
                 message
             );
-            Err(tokio::sync::mpsc::error::SendError(message))
+            Err(mpsc::error::SendError(message))
         }
     }
 

@@ -18,7 +18,7 @@ use tracing::{info, instrument, warn};
 use uuid::Uuid;
 
 use crate::{
-    network::{NetworkSender, TargetId},
+    network::{NetworkSender, NodeId},
     price_feed::{
         deserialize, serialize, IntervalBound, IntervalBoundType, PriceFeed, PriceFeedEntry,
         SignedPriceFeed, SignedPriceFeedEntry, Validity,
@@ -73,7 +73,7 @@ pub struct Signature {
 #[derive(Clone)]
 pub enum SignerEvent {
     RoundStarted,
-    Message(TargetId, SignerMessage),
+    Message(NodeId, SignerMessage),
     LeaderChanged(RaftLeader),
 }
 impl Display for SignerEvent {
@@ -152,7 +152,7 @@ impl Display for FollowerState {
 }
 enum SignerState {
     Leader(LeaderState),
-    Follower(TargetId, FollowerState),
+    Follower(NodeId, FollowerState),
     Unknown,
 }
 impl Display for SignerState {
@@ -166,7 +166,7 @@ impl Display for SignerState {
 }
 
 pub struct Signer {
-    id: TargetId,
+    id: NodeId,
     key: KeyPackage,
     public_key: PublicKeyPackage,
     price_source: Receiver<Vec<PriceFeedEntry>>,
@@ -177,7 +177,7 @@ pub struct Signer {
 
 impl Signer {
     pub fn new(
-        id: TargetId,
+        id: NodeId,
         key: KeyPackage,
         public_key: PublicKeyPackage,
         price_source: Receiver<Vec<PriceFeedEntry>>,
@@ -302,7 +302,7 @@ impl Signer {
     async fn process_commitment(
         &mut self,
         round: String,
-        from: TargetId,
+        from: NodeId,
         commitment: Commitment,
     ) -> Result<()> {
         let SignerState::Leader(LeaderState::CollectingCommitments {
@@ -592,7 +592,7 @@ mod tests {
     use tokio::sync::{mpsc, watch};
 
     use crate::{
-        network::{NetworkReceiver, TargetId, TestNetwork},
+        network::{NetworkReceiver, NodeId, TestNetwork},
         price_feed::{IntervalBound, PriceFeed, PriceFeedEntry, SignedPriceFeedEntry, Validity},
         raft::RaftLeader,
         signature_aggregator::signer::SignerMessage,
@@ -601,7 +601,7 @@ mod tests {
     use super::{Signer, SignerEvent};
 
     struct SignerOrchestrator {
-        id: TargetId,
+        id: NodeId,
         signer: Signer,
         receiver: NetworkReceiver<SignerMessage>,
     }
@@ -667,7 +667,7 @@ mod tests {
 
     // make the first signer the leader, and other signers followers.
     // return the leader's id
-    async fn assign_roles(signers: &mut [SignerOrchestrator]) -> TargetId {
+    async fn assign_roles(signers: &mut [SignerOrchestrator]) -> NodeId {
         let leader_id = signers[0].id.clone();
         signers[0]
             .process(SignerEvent::LeaderChanged(RaftLeader::Myself))

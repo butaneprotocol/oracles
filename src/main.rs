@@ -104,10 +104,9 @@ impl Node {
         );
 
         // Spawn the abstract raft state machine, which internally uses network to maintain a Raft consensus
-        let raft = self.raft;
         set.spawn(
             async move {
-                raft.handle_messages().await;
+                self.raft.handle_messages().await;
             }
             .in_current_span(),
         );
