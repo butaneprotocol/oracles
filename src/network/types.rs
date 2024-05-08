@@ -1,7 +1,4 @@
-use std::{
-    fmt::{self, Display},
-    ops::Deref,
-};
+use std::fmt::{self, Display};
 
 use serde::{Deserialize, Serialize};
 
@@ -10,13 +7,6 @@ pub struct NodeId(String);
 impl NodeId {
     pub const fn new(id: String) -> Self {
         Self(id)
-    }
-}
-impl Deref for NodeId {
-    type Target = str;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
     }
 }
 impl Display for NodeId {
