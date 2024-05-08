@@ -1,4 +1,5 @@
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
 use tokio::{sync::mpsc, task::JoinSet};
 use tracing::{info, warn};
 
@@ -8,7 +9,7 @@ use crate::{
     signature_aggregator::signer::SignerMessage,
 };
 pub use channel::{NetworkChannel, NetworkReceiver, NetworkSender};
-use core::{Core, Message};
+use core::Core;
 pub use test::TestNetwork;
 pub use types::{IncomingMessage, NodeId, OutgoingMessage};
 
@@ -21,6 +22,12 @@ type MpscPair<T> = (
     mpsc::Sender<IncomingMessage<T>>,
     mpsc::Receiver<OutgoingMessage<T>>,
 );
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub enum Message {
+    Raft(RaftMessage),
+    Signer(SignerMessage),
+}
 
 pub struct Network {
     pub id: NodeId,
@@ -48,12 +55,12 @@ impl Network {
         }
     }
 
-    pub fn signer_channel(&mut self) -> NetworkChannel<SignerMessage> {
-        create_channel(&mut self.signer)
-    }
-
     pub fn raft_channel(&mut self) -> NetworkChannel<RaftMessage> {
         create_channel(&mut self.raft)
+    }
+
+    pub fn signer_channel(&mut self) -> NetworkChannel<SignerMessage> {
+        create_channel(&mut self.signer)
     }
 
     pub async fn listen(self) -> Result<()> {
@@ -74,7 +81,6 @@ impl Network {
                     Message::Signer(data) => {
                         receive_message(from, data, &signer_sender).await;
                     }
-                    _ => {}
                 }
             }
         });

@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use anyhow::{anyhow, Result};
 use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use tokio::{
@@ -14,9 +15,9 @@ use tokio_serde::{formats::Cbor, Framed};
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use tracing::{info, trace, warn, Instrument};
 
-use crate::{config::PeerConfig, raft::RaftMessage, signature_aggregator::signer::SignerMessage};
+use crate::{config::PeerConfig, raft::RaftMessage};
 
-use super::NodeId;
+use super::{Message as AppMessage, NodeId};
 
 type WrappedStream = FramedRead<OwnedReadHalf, LengthDelimitedCodec>;
 type WrappedSink = FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>;
@@ -25,10 +26,9 @@ type SerStream = Framed<WrappedStream, Message, (), Cbor<Message, ()>>;
 type DeSink = Framed<WrappedSink, (), Message, Cbor<(), Message>>;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub enum Message {
+enum Message {
     Hello(String),
-    Raft(RaftMessage),
-    Signer(SignerMessage),
+    Application(AppMessage),
 }
 
 /// A network is a fully connected set of peers
@@ -37,7 +37,7 @@ pub struct Core {
     id: NodeId,
 
     // An MPSC channel that can dispatch messages to different state machines
-    message_sender: Arc<mpsc::Sender<(NodeId, Message)>>,
+    message_sender: Arc<mpsc::Sender<(NodeId, AppMessage)>>,
 
     // Instead of trying to handle the crossing-paths problem, we just maintain one incoming and one outgoing connection for each peer
     // A set of incoming connections
@@ -47,7 +47,7 @@ pub struct Core {
 }
 
 impl Core {
-    pub fn new(id: NodeId, message_sender: mpsc::Sender<(NodeId, Message)>) -> Self {
+    pub fn new(id: NodeId, message_sender: mpsc::Sender<(NodeId, AppMessage)>) -> Self {
         Self {
             id,
             message_sender: Arc::new(message_sender),
@@ -163,7 +163,7 @@ impl Core {
         if self.outgoing_connections.contains_key(&them) {
             self.message_sender
                 .clone()
-                .send((them.clone(), Message::Raft(RaftMessage::Connect)))
+                .send((them.clone(), AppMessage::Raft(RaftMessage::Connect)))
                 .await
                 .unwrap();
         }
@@ -172,23 +172,12 @@ impl Core {
         while let Some(msg) = stream.next().await {
             trace!("Received message {:?} from {}", msg, them);
 
-            if let Ok(message) = &msg {
-                if let Err(e) = self
-                    .message_sender
-                    .send((them.clone(), message.clone()))
-                    .await
-                {
-                    warn!(them = %them, "Failed to send message: {}", e);
-                    break;
-                }
-            }
-
             match msg {
-                Ok(Message::Raft(_)) => {
-                    // handled elsewhere
-                }
-                Ok(Message::Signer(_)) => {
-                    // handled elsewhere
+                Ok(Message::Application(message)) => {
+                    if let Err(e) = self.message_sender.send((them.clone(), message)).await {
+                        warn!(them = %them, "Failed to send message: {}", e);
+                        break;
+                    }
                 }
                 // If someone tries to Hello us again, break it off
                 Ok(Message::Hello(_)) => {
@@ -291,7 +280,7 @@ impl Core {
         if self.incoming_connections.contains_key(&them) {
             self.message_sender
                 .clone()
-                .send((them.clone(), Message::Raft(RaftMessage::Connect)))
+                .send((them.clone(), AppMessage::Raft(RaftMessage::Connect)))
                 .await
                 .unwrap();
         }
@@ -309,21 +298,18 @@ impl Core {
         self.outgoing_connections.remove(&them);
         self.message_sender
             .clone()
-            .send((them.clone(), Message::Raft(RaftMessage::Disconnect)))
+            .send((them.clone(), AppMessage::Raft(RaftMessage::Disconnect)))
             .await
             .unwrap();
     }
 
     // send a message, by looking up the outgoing connection mpsc and sending to it
-    pub async fn send(
-        &self,
-        peer: &NodeId,
-        message: Message,
-    ) -> Result<(), mpsc::error::SendError<Message>> {
+    pub async fn send(&self, peer: &NodeId, message: AppMessage) -> Result<()> {
+        let message = Message::Application(message);
         if let Some(sender) = self.outgoing_connections.get(peer) {
             if let Err(e) = sender.send(message).await {
                 warn!(them = %peer, "Failed to send response: {}", e);
-                return Err(e);
+                return Err(anyhow!("Failed to send response: {}", e));
             }
             Ok(())
         } else {
@@ -334,17 +320,17 @@ impl Core {
             warn!(
                 them = %peer,
                 nodes = format!("{:?}", keys),
-                "No connection to peer to send {:?}",
-                message
+                "No connection to peer to send message"
             );
-            Err(mpsc::error::SendError(message))
+            Err(anyhow!("No connection to peer"))
         }
     }
 
-    pub async fn broadcast(&self, message: Message) {
+    pub async fn broadcast(&self, message: AppMessage) {
         for kvp in self.outgoing_connections.iter() {
             let peer = kvp.key();
             let sender = kvp.value();
+            let message = Message::Application(message.clone());
             if let Err(e) = sender.send(message.clone()).await {
                 warn!(
                     them = %peer,
