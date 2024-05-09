@@ -16,12 +16,10 @@ use tokio::{
 use tracing::{warn, Instrument};
 
 use crate::{
-    networking::Network,
+    network::Network,
     price_feed::{PriceFeedEntry, SignedPriceFeedEntry},
     raft::RaftLeader,
 };
-
-use self::signer::SignerMessage;
 
 pub struct SignatureAggregator {
     implementation: SignatureAggregatorImplementation,
@@ -50,18 +48,15 @@ impl SignatureAggregator {
     }
 
     pub fn consensus(
-        id: String,
-        network: Network,
-        message_source: mpsc::Receiver<SignerMessage>,
+        network: &mut Network,
         price_source: Receiver<Vec<PriceFeedEntry>>,
         leader_source: Receiver<RaftLeader>,
         payload_sink: mpsc::Sender<String>,
     ) -> Result<Self> {
         let (signed_price_sink, signed_price_source) = mpsc::channel(10);
         let aggregator = ConsensusSignatureAggregator::new(
-            id,
-            network,
-            message_source,
+            network.id.clone(),
+            network.signer_channel(),
             price_source,
             leader_source,
             signed_price_sink,

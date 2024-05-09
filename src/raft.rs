@@ -1,43 +1,26 @@
-use std::{collections::HashSet, ops::Sub, sync::Arc};
+use std::{collections::HashSet, ops::Sub};
 
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use tokio::sync::{mpsc, watch::Sender, Mutex};
+use tokio::sync::watch;
 use tracing::{info, trace, warn};
 
-use crate::networking::{Message, Network};
+use crate::network::{IncomingMessage, Network, NetworkChannel, NodeId};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum RaftMessage {
-    Connect {
-        node_id: String,
-    },
-    Disconnect {
-        node_id: String,
-    },
-    RequestVote {
-        from: String,
-        to: String,
-        term: usize,
-    },
-    RequestVoteResponse {
-        from: String,
-        to: String,
-        term: usize,
-        vote: bool,
-    },
-    Heartbeat {
-        leader: String,
-        to: String,
-        term: usize,
-    },
+    Connect,
+    Disconnect,
+    RequestVote { term: usize },
+    RequestVoteResponse { term: usize, vote: bool },
+    Heartbeat { term: usize },
 }
 
 #[derive(Eq, PartialEq, Clone)]
 pub enum RaftStatus {
     Follower {
-        leader: Option<String>,
-        voted_for: Option<String>,
+        leader: Option<NodeId>,
+        voted_for: Option<NodeId>,
     },
     Candidate {
         votes: usize,
@@ -48,15 +31,14 @@ pub enum RaftStatus {
 #[derive(Eq, PartialEq, Clone, Debug)]
 pub enum RaftLeader {
     Myself,
-    Other(String),
+    Other(NodeId),
     Unknown,
 }
 
-#[derive(Clone)]
 pub struct RaftState {
-    pub id: String,
+    pub id: NodeId,
     pub quorum: usize,
-    pub peers: HashSet<String>,
+    pub peers: HashSet<NodeId>,
     warned_about_quorum: bool,
 
     pub last_heartbeat: std::time::Instant,
@@ -67,28 +49,26 @@ pub struct RaftState {
     pub status: RaftStatus,
     pub term: usize,
 
-    pub leader: Arc<Sender<RaftLeader>>,
+    pub leader_sink: watch::Sender<RaftLeader>,
 }
 
-#[derive(Clone)]
 pub struct Raft {
-    pub id: String,
+    pub id: NodeId,
 
-    incoming_messages: Arc<Mutex<mpsc::Receiver<RaftMessage>>>,
-    network: Network,
-    state: Arc<Mutex<RaftState>>,
+    channel: NetworkChannel<RaftMessage>,
+    state: RaftState,
 }
 
 impl RaftState {
     pub fn new(
-        id: &str,
+        id: NodeId,
         quorum: usize,
         heartbeat_freq: std::time::Duration,
         timeout_freq: std::time::Duration,
-        leader: Sender<RaftLeader>,
+        leader_sink: watch::Sender<RaftLeader>,
     ) -> Self {
         RaftState {
-            id: id.to_string(),
+            id,
             quorum,
             warned_about_quorum: false,
             peers: HashSet::new(),
@@ -101,11 +81,11 @@ impl RaftState {
                 voted_for: None,
             },
             term: 0,
-            leader: Arc::new(leader),
+            leader_sink,
         }
     }
 
-    pub fn leader(&self) -> Option<String> {
+    pub fn leader(&self) -> Option<NodeId> {
         match &self.status {
             RaftStatus::Leader => Some(self.id.clone()),
             RaftStatus::Follower {
@@ -123,39 +103,36 @@ impl RaftState {
     pub fn receive(
         &mut self,
         timestamp: std::time::Instant,
-        message: RaftMessage,
-    ) -> Vec<(String, RaftMessage)> {
-        match &message {
-            RaftMessage::Connect { node_id } => {
-                info!("New peer {}", node_id);
-                self.peers.insert(node_id.clone());
+        message: IncomingMessage<RaftMessage>,
+    ) -> Vec<(NodeId, RaftMessage)> {
+        let from = message.from;
+        match &message.data {
+            RaftMessage::Connect => {
+                info!("New peer {}", from);
+                self.peers.insert(from.clone());
                 if matches!(self.status, RaftStatus::Leader) {
                     // Let them know right away that we're the leader
-                    let response = RaftMessage::Heartbeat {
-                        leader: self.id.clone(),
-                        to: node_id.clone(),
-                        term: self.term,
-                    };
-                    vec![(node_id.clone(), response)]
+                    let response = RaftMessage::Heartbeat { term: self.term };
+                    vec![(from.clone(), response)]
                 } else {
                     vec![]
                 }
             }
-            RaftMessage::Disconnect { node_id } => {
-                info!("Peer disconnected {}", node_id);
-                self.peers.remove(node_id);
+            RaftMessage::Disconnect => {
+                info!("Peer disconnected {}", from);
+                self.peers.remove(&from);
                 vec![]
             }
-            RaftMessage::Heartbeat { leader, term, .. } => {
+            RaftMessage::Heartbeat { term } => {
                 let current_leader = self.leader();
                 if *term >= self.term {
                     self.term = *term;
                     self.set_status(RaftStatus::Follower {
-                        leader: Some(leader.clone()),
+                        leader: Some(from.clone()),
                         voted_for: None,
                     });
-                    if Some(leader.clone()) != current_leader {
-                        info!(term = term, leader = leader, "New leader");
+                    if Some(from.clone()) != current_leader {
+                        info!(term = term, leader = %from, "New leader");
                     }
                     self.warned_about_quorum = false;
                 }
@@ -163,9 +140,7 @@ impl RaftState {
                 vec![]
             }
             RaftMessage::RequestVote {
-                from,
                 term: requested_term,
-                ..
             } => {
                 trace!(term = requested_term, "Vote requested by {}", from);
                 let peer = from.clone();
@@ -218,8 +193,6 @@ impl RaftState {
                     peer
                 );
                 let response = RaftMessage::RequestVoteResponse {
-                    from: self.id.clone(),
-                    to: peer.clone(),
                     term: *requested_term,
                     vote,
                 };
@@ -257,16 +230,7 @@ impl RaftState {
                             return self
                                 .peers
                                 .iter()
-                                .map(|peer| {
-                                    (
-                                        peer.clone(),
-                                        RaftMessage::Heartbeat {
-                                            leader: self.id.clone(),
-                                            to: peer.clone(),
-                                            term: *term,
-                                        },
-                                    )
-                                })
+                                .map(|peer| (peer.clone(), RaftMessage::Heartbeat { term: *term }))
                                 .collect();
                         } else {
                             vec![]
@@ -274,7 +238,7 @@ impl RaftState {
                     }
                     _ => {
                         if *term >= self.term {
-                            warn!(term = term, "Unexpected message {:?}", message);
+                            warn!(term = term, from = %from, "Unexpected message {:?}", message.data);
                         }
                         vec![]
                     }
@@ -283,7 +247,7 @@ impl RaftState {
         }
     }
 
-    pub fn tick(&mut self, timestamp: std::time::Instant) -> Vec<(String, RaftMessage)> {
+    pub fn tick(&mut self, timestamp: std::time::Instant) -> Vec<(NodeId, RaftMessage)> {
         let actual_timeout = self.timeout_freq.sub(self.jitter);
         let is_leader = self.is_leader();
         let elapsed_time = timestamp.duration_since(self.last_heartbeat);
@@ -323,16 +287,7 @@ impl RaftState {
             return self
                 .peers
                 .iter()
-                .map(|peer| {
-                    (
-                        peer.clone(),
-                        RaftMessage::RequestVote {
-                            from: self.id.clone(),
-                            to: peer.clone(),
-                            term: self.term,
-                        },
-                    )
-                })
+                .map(|peer| (peer.clone(), RaftMessage::RequestVote { term: self.term }))
                 .collect();
         } else if is_leader && heartbeat_timeout {
             if !self.peers.is_empty() {
@@ -341,16 +296,7 @@ impl RaftState {
                 self.last_heartbeat = timestamp;
                 self.peers
                     .iter()
-                    .map(|peer| {
-                        (
-                            peer.clone(),
-                            RaftMessage::Heartbeat {
-                                leader: self.id.clone(),
-                                to: peer.clone(),
-                                term: self.term,
-                            },
-                        )
-                    })
+                    .map(|peer| (peer.clone(), RaftMessage::Heartbeat { term: self.term }))
                     .collect()
             } else {
                 vec![]
@@ -370,7 +316,7 @@ impl RaftState {
             _ => RaftLeader::Unknown,
         };
         self.status = status;
-        self.leader.send_if_modified(|old_leader| {
+        self.leader_sink.send_if_modified(|old_leader| {
             let changed = *old_leader != leader;
             if changed {
                 *old_leader = leader;
@@ -382,14 +328,11 @@ impl RaftState {
 
 impl Raft {
     pub fn new(
-        id: &str,
         quorum: usize,
         heartbeat_freq: std::time::Duration,
         timeout_freq: std::time::Duration,
-
-        incoming_messages: mpsc::Receiver<RaftMessage>,
-        network: Network,
-        leader: Sender<RaftLeader>,
+        network: &mut Network,
+        leader_sink: watch::Sender<RaftLeader>,
     ) -> Self {
         info!(
             quorum = quorum,
@@ -397,55 +340,37 @@ impl Raft {
             timeout = format!("{:?}", timeout_freq),
             "New raft protocol"
         );
-        Raft {
-            id: id.to_string(),
-            incoming_messages: Arc::new(Mutex::new(incoming_messages)),
-            network,
-            state: Arc::new(Mutex::new(RaftState::new(
-                id,
-                quorum,
-                heartbeat_freq,
-                timeout_freq,
-                leader,
-            ))),
-        }
+        let id = network.id.clone();
+        let channel = network.raft_channel();
+        let state = RaftState::new(
+            id.clone(),
+            quorum,
+            heartbeat_freq,
+            timeout_freq,
+            leader_sink,
+        );
+        Raft { id, channel, state }
     }
 
-    pub async fn handle_messages(&self) {
+    pub async fn handle_messages(self) {
         info!("testing");
-        let mut messages = self.incoming_messages.lock().await;
-        let mut state = self.state.lock().await;
+        let (sender, mut receiver) = self.channel.split();
+        let mut state = self.state;
         loop {
-            let next_message = messages.try_recv();
+            let next_message = receiver.try_recv().await;
             let timestamp = std::time::Instant::now();
 
             let responses = match next_message {
-                Ok(msg) => {
+                Some(msg) => {
                     trace!("Received message: {:?}", msg);
                     state.receive(timestamp, msg)
                 }
-                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => state.tick(timestamp),
-                Err(err) => {
-                    warn!("Failed to receive message: {}", err);
-                    vec![]
-                }
+                None => state.tick(timestamp),
             };
 
             // Send out any responses
             for (peer, response) in responses {
-                if self
-                    .network
-                    .send(&peer, Message::Raft(response))
-                    .await
-                    .is_err()
-                {
-                    state.receive(
-                        timestamp,
-                        RaftMessage::Disconnect {
-                            node_id: peer.clone(),
-                        },
-                    );
-                }
+                sender.send(peer, response).await;
             }
             // Yield back to the scheduler, so that other tasks can run
             tokio::task::yield_now().await;

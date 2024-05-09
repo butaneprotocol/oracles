@@ -4,7 +4,7 @@ use anyhow::Result;
 use clap::Parser;
 use config::{load_config, LogConfig, OracleConfig};
 use health::{HealthServer, HealthSink};
-use networking::Network;
+use network::Network;
 use price_aggregator::PriceAggregator;
 use publisher::Publisher;
 use raft::{Raft, RaftLeader};
@@ -20,7 +20,7 @@ use tracing_subscriber::FmtSubscriber;
 pub mod apis;
 pub mod config;
 pub mod health;
-pub mod networking;
+pub mod network;
 pub mod price_aggregator;
 pub mod price_feed;
 pub mod publisher;
@@ -58,12 +58,8 @@ impl Node {
 
         let (health_server, health_sink) = HealthServer::new();
 
-        // Construct mpsc channels for each of our abstract state machines
-        let (raft_tx, raft_rx) = mpsc::channel(10);
-        let (signer_tx, signer_rx) = mpsc::channel(10);
-
         // Construct a peer-to-peer network that can connect to peers, and dispatch messages to the correct state machine
-        let network = Network::new(id.to_string(), Arc::new(raft_tx), Arc::new(signer_tx));
+        let mut network = Network::new(id, &config);
 
         let (pa_tx, pa_rx) = watch::channel(vec![]);
 
@@ -74,25 +70,20 @@ impl Node {
         let (result_tx, result_rx) = mpsc::channel(10);
 
         let signature_aggregator = if config.consensus {
-            SignatureAggregator::consensus(
-                id.to_string(),
-                network.clone(),
-                signer_rx,
-                pa_rx,
-                leader_rx,
-                result_tx,
-            )?
+            SignatureAggregator::consensus(&mut network, pa_rx, leader_rx, result_tx)?
         } else {
             SignatureAggregator::single(pa_rx, leader_rx, result_tx)?
         };
 
         let publisher = Publisher::new(result_rx)?;
 
+        let raft = Raft::new(quorum, heartbeat, timeout, &mut network, leader_tx);
+
         Ok(Node {
             health_server,
             health_sink,
-            network: network.clone(),
-            raft: Raft::new(id, quorum, heartbeat, timeout, raft_rx, network, leader_tx),
+            network,
+            raft,
             price_aggregator,
             signature_aggregator,
             publisher,
@@ -121,11 +112,9 @@ impl Node {
         );
 
         // Then spawn the peer to peer network, which will maintain a connection to each peer, and dispatch messages to the correct state machine
-        let port = self.config.port;
-        let peers = self.config.peers.clone();
         set.spawn(
             async move {
-                self.network.handle_network(port, peers).await.unwrap();
+                self.network.listen().await.unwrap();
             }
             .in_current_span(),
         );

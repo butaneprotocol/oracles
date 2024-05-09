@@ -18,6 +18,7 @@ use tracing::{info, instrument, warn};
 use uuid::Uuid;
 
 use crate::{
+    network::{NetworkSender, NodeId},
     price_feed::{
         deserialize, serialize, IntervalBound, IntervalBoundType, PriceFeed, PriceFeedEntry,
         SignedPriceFeed, SignedPriceFeedEntry, Validity,
@@ -59,14 +60,12 @@ impl Display for SignerMessageData {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Commitment {
-    pub from: String,
     pub identifier: Identifier,
     pub commitments: Vec<SigningCommitments>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Signature {
-    pub from: String,
     pub identifier: Identifier,
     pub signatures: Vec<SignatureShare>,
 }
@@ -74,14 +73,16 @@ pub struct Signature {
 #[derive(Clone)]
 pub enum SignerEvent {
     RoundStarted,
-    Message(SignerMessage),
+    Message(NodeId, SignerMessage),
     LeaderChanged(RaftLeader),
 }
 impl Display for SignerEvent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::RoundStarted => f.write_str("RoundStarted"),
-            Self::Message(message) => f.write_fmt(format_args!("Message{}", message)),
+            Self::Message(from, message) => {
+                f.write_fmt(format_args!("Message{{from={},data={}}}", from, message))
+            }
             Self::LeaderChanged(leader) => {
                 f.write_fmt(format_args!("LeaderChanged{{{:?}}}", leader))
             }
@@ -151,7 +152,7 @@ impl Display for FollowerState {
 }
 enum SignerState {
     Leader(LeaderState),
-    Follower(String, FollowerState),
+    Follower(NodeId, FollowerState),
     Unknown,
 }
 impl Display for SignerState {
@@ -164,28 +165,23 @@ impl Display for SignerState {
     }
 }
 
-pub struct OutgoingMessage {
-    pub to: Option<String>,
-    pub message: SignerMessage,
-}
-
 pub struct Signer {
-    id: String,
+    id: NodeId,
     key: KeyPackage,
     public_key: PublicKeyPackage,
     price_source: Receiver<Vec<PriceFeedEntry>>,
-    message_sink: Sender<OutgoingMessage>,
+    message_sink: NetworkSender<SignerMessage>,
     signed_price_sink: Sender<Vec<SignedPriceFeedEntry>>,
     state: SignerState,
 }
 
 impl Signer {
     pub fn new(
-        id: String,
+        id: NodeId,
         key: KeyPackage,
         public_key: PublicKeyPackage,
         price_source: Receiver<Vec<PriceFeedEntry>>,
-        message_sink: Sender<OutgoingMessage>,
+        message_sink: NetworkSender<SignerMessage>,
         signed_price_sink: Sender<Vec<SignedPriceFeedEntry>>,
     ) -> Self {
         Self {
@@ -226,12 +222,12 @@ impl Signer {
                     self.request_commitments().await?;
                 }
             }
-            SignerEvent::Message(SignerMessage { round, data }) => match data {
+            SignerEvent::Message(from, SignerMessage { round, data }) => match data {
                 SignerMessageData::RequestCommitment => {
                     self.send_commitment(round).await?;
                 }
                 SignerMessageData::Commit(commitment) => {
-                    self.process_commitment(round, commitment).await?;
+                    self.process_commitment(round, from, commitment).await?;
                 }
                 SignerMessageData::RequestSignature(packages) => {
                     self.send_signature(round, packages).await?;
@@ -256,15 +252,11 @@ impl Signer {
 
         // request other folks commit
         self.message_sink
-            .send(OutgoingMessage {
-                to: None, // broadcast this
-                message: SignerMessage {
-                    round: round.clone(),
-                    data: SignerMessageData::RequestCommitment,
-                },
+            .broadcast(SignerMessage {
+                round: round.clone(),
+                data: SignerMessageData::RequestCommitment,
             })
-            .await
-            .context("Failed to request commitments")?;
+            .await;
 
         // And commit ourself
         let (my_nonces, commitment) = self.commit(price_data.len());
@@ -289,15 +281,14 @@ impl Signer {
         let commitment_count = self.price_source.borrow().len();
         let (nonces, commitment) = self.commit(commitment_count);
         self.message_sink
-            .send(OutgoingMessage {
-                to: Some(leader_id.clone()),
-                message: SignerMessage {
+            .send(
+                leader_id.clone(),
+                SignerMessage {
                     round: round.clone(),
                     data: SignerMessageData::Commit(commitment),
                 },
-            })
-            .await
-            .context("Failed to commit")?;
+            )
+            .await;
 
         // And wait to be asked to sign
         self.state = SignerState::Follower(
@@ -308,7 +299,12 @@ impl Signer {
         Ok(())
     }
 
-    async fn process_commitment(&mut self, round: String, commitment: Commitment) -> Result<()> {
+    async fn process_commitment(
+        &mut self,
+        round: String,
+        from: NodeId,
+        commitment: Commitment,
+    ) -> Result<()> {
         let SignerState::Leader(LeaderState::CollectingCommitments {
             round: curr_round,
             price_data,
@@ -342,8 +338,8 @@ impl Signer {
         let mut recipients = vec![];
         // time to transition to signing
         for commitment in commitments {
-            if commitment.from != self.id {
-                recipients.push(commitment.from.clone());
+            if from != self.id {
+                recipients.push(from.clone());
             }
             for (idx, c) in commitment.commitments.iter().enumerate() {
                 commitment_maps[idx].insert(commitment.identifier, *c);
@@ -360,15 +356,14 @@ impl Signer {
             .collect();
         for recipient in recipients {
             self.message_sink
-                .send(OutgoingMessage {
-                    to: Some(recipient.clone()),
-                    message: SignerMessage {
+                .send(
+                    recipient.clone(),
+                    SignerMessage {
                         round: round.clone(),
                         data: SignerMessageData::RequestSignature(packages.clone()),
                     },
-                })
-                .await
-                .context(format!("Failed to request signature from {}", recipient))?;
+                )
+                .await;
         }
 
         // And be sure to sign the message ourself
@@ -421,15 +416,14 @@ impl Signer {
         // Send our signature back to the leader
         let signature = self.sign(&packages, nonces)?;
         self.message_sink
-            .send(OutgoingMessage {
-                to: Some(leader_id.clone()),
-                message: SignerMessage {
+            .send(
+                leader_id.clone(),
+                SignerMessage {
                     round,
                     data: SignerMessageData::Sign(signature),
                 },
-            })
-            .await
-            .context("Failed to send signature to leader")?;
+            )
+            .await;
 
         // and vibe until we get back into the signature flow
         self.state = SignerState::Follower(leader_id.clone(), FollowerState::Ready);
@@ -513,7 +507,6 @@ impl Signer {
             commitments.push(commitment);
         }
         let commitment = Commitment {
-            from: self.id.clone(),
             identifier: *self.key.identifier(),
             commitments,
         };
@@ -527,7 +520,6 @@ impl Signer {
             signatures.push(signature);
         }
         Ok(Signature {
-            from: self.id.clone(),
             identifier: *self.key.identifier(),
             signatures,
         })
@@ -592,7 +584,7 @@ fn are_bounds_close_enough(leader_bound: &IntervalBound, my_bound: &IntervalBoun
 
 #[cfg(test)]
 mod tests {
-    use anyhow::{anyhow, Result};
+    use anyhow::Result;
     use frost_ed25519::keys::{self, IdentifierList, KeyPackage};
     use num_bigint::BigUint;
     use rand::thread_rng;
@@ -600,19 +592,39 @@ mod tests {
     use tokio::sync::{mpsc, watch};
 
     use crate::{
+        network::{NetworkReceiver, NodeId, TestNetwork},
         price_feed::{IntervalBound, PriceFeed, PriceFeedEntry, SignedPriceFeedEntry, Validity},
         raft::RaftLeader,
-        signature_aggregator::signer::{OutgoingMessage, SignerMessage, SignerMessageData},
+        signature_aggregator::signer::SignerMessage,
     };
 
     use super::{Signer, SignerEvent};
+
+    struct SignerOrchestrator {
+        id: NodeId,
+        signer: Signer,
+        receiver: NetworkReceiver<SignerMessage>,
+    }
+
+    impl SignerOrchestrator {
+        async fn process(&mut self, event: SignerEvent) {
+            self.signer.process(event).await;
+        }
+        async fn process_incoming_messages(&mut self) {
+            while let Some(message) = self.receiver.try_recv().await {
+                self.signer
+                    .process(SignerEvent::Message(message.from, message.data))
+                    .await;
+            }
+        }
+    }
 
     async fn construct_signers(
         min: u16,
         prices: Vec<Vec<PriceFeedEntry>>,
     ) -> Result<(
-        Vec<Signer>,
-        mpsc::Receiver<OutgoingMessage>,
+        Vec<SignerOrchestrator>,
+        TestNetwork<SignerMessage>,
         mpsc::Receiver<Vec<SignedPriceFeedEntry>>,
     )> {
         let mut rng = thread_rng();
@@ -623,34 +635,39 @@ mod tests {
             &mut rng,
         )?;
 
-        let (message_sink, message_source) = mpsc::channel(10);
+        let mut network = TestNetwork::new();
         let (payload_sink, payload_source) = mpsc::channel(10);
 
-        let signers: Vec<Signer> = shares
-            .into_iter()
+        let signers: Vec<SignerOrchestrator> = shares
+            .into_values()
             .zip(prices.into_iter())
-            .enumerate()
-            .map(|(idx, ((_, share), price_data))| {
-                let id = idx.to_string();
+            .map(|(share, price_data)| {
                 let key = KeyPackage::try_from(share).unwrap();
                 let (_, price_source) = watch::channel(price_data);
-                Signer::new(
-                    id,
+                let (id, channel) = network.connect();
+                let (sender, receiver) = channel.split();
+                let signer = Signer::new(
+                    id.clone(),
                     key,
                     public_key.clone(),
                     price_source,
-                    message_sink.clone(),
+                    sender,
                     payload_sink.clone(),
-                )
+                );
+                SignerOrchestrator {
+                    id,
+                    signer,
+                    receiver,
+                }
             })
             .collect();
 
-        Ok((signers, message_source, payload_source))
+        Ok((signers, network, payload_source))
     }
 
     // make the first signer the leader, and other signers followers.
     // return the leader's id
-    async fn assign_roles(signers: &mut [Signer]) -> String {
+    async fn assign_roles(signers: &mut [SignerOrchestrator]) -> NodeId {
         let leader_id = signers[0].id.clone();
         signers[0]
             .process(SignerEvent::LeaderChanged(RaftLeader::Myself))
@@ -666,20 +683,13 @@ mod tests {
     }
 
     async fn run_round(
-        signers: &mut [Signer],
-        message_source: &mut mpsc::Receiver<OutgoingMessage>,
+        signers: &mut [SignerOrchestrator],
+        network: &mut TestNetwork<SignerMessage>,
     ) {
         signers[0].process(SignerEvent::RoundStarted).await;
-        while let Ok(message) = message_source.try_recv() {
-            let to = message.to;
-            let message = message.message;
-            let receivers = signers
-                .iter_mut()
-                .filter(|s| to.is_none() || to.as_ref().unwrap() == &s.id);
-            for receiver in receivers {
-                receiver
-                    .process(SignerEvent::Message(message.clone()))
-                    .await;
+        while network.drain().await {
+            for signer in signers.iter_mut() {
+                signer.process_incoming_messages().await;
             }
         }
     }
@@ -712,8 +722,7 @@ mod tests {
         ];
 
         let prices = vec![price_data.clone(); 3];
-        let (mut signers, mut message_source, mut payload_source) =
-            construct_signers(2, prices).await?;
+        let (mut signers, mut network, mut payload_source) = construct_signers(2, prices).await?;
 
         // set everyone's roles
         let leader_id = assign_roles(&mut signers).await;
@@ -722,95 +731,32 @@ mod tests {
         signers[0].process(SignerEvent::RoundStarted).await;
 
         // Leader should have broadcast a request to all followers
-        let message = message_source.recv().await;
-        let Some(OutgoingMessage {
-            to: None,
-            message:
-                SignerMessage {
-                    round,
-                    data: SignerMessageData::RequestCommitment,
-                },
-        }) = message
-        else {
-            return Err(anyhow!("Unexpected response"));
-        };
+        let message = network.drain_one(&signers[0].id).await.remove(0);
+        assert_eq!(message.to, None);
 
         // Make a single follower commit
-        signers[1]
-            .process(SignerEvent::Message(SignerMessage {
-                round: round.clone(),
-                data: SignerMessageData::RequestCommitment,
-            }))
-            .await;
+        signers[1].process_incoming_messages().await;
 
         // Follower should have sent a commitment to the leader
-        let message = message_source.recv().await;
-        let Some(OutgoingMessage {
-            to: sent_to,
-            message:
-                SignerMessage {
-                    data: SignerMessageData::Commit(commitment),
-                    ..
-                },
-        }) = message
-        else {
-            return Err(anyhow!("Unexpected response"));
-        };
-        assert_eq!(sent_to, Some(leader_id.clone()));
+        let message = network.drain_one(&signers[1].id).await.remove(0);
+        assert_eq!(message.to, Some(leader_id.clone()));
 
         // Send that commitment to the leader
-        signers[0]
-            .process(SignerEvent::Message(SignerMessage {
-                round: round.clone(),
-                data: SignerMessageData::Commit(commitment),
-            }))
-            .await;
+        signers[0].process_incoming_messages().await;
 
         // Leader should have sent a signing request to that follower
-        let message = message_source.recv().await;
-        let Some(OutgoingMessage {
-            to: sent_to,
-            message:
-                SignerMessage {
-                    data: SignerMessageData::RequestSignature(packages),
-                    ..
-                },
-        }) = message
-        else {
-            return Err(anyhow!("Unexpected response"));
-        };
-        assert_eq!(sent_to, Some(signers[1].id.clone()));
+        let message = network.drain_one(&signers[0].id).await.remove(0);
+        assert_eq!(message.to, Some(signers[1].id.clone()));
 
         // Send that request to the follower
-        signers[1]
-            .process(SignerEvent::Message(SignerMessage {
-                round: round.clone(),
-                data: SignerMessageData::RequestSignature(packages),
-            }))
-            .await;
+        signers[1].process_incoming_messages().await;
 
         // Follower should have sent a signature to the leader
-        let message = message_source.recv().await;
-        let Some(OutgoingMessage {
-            to: sent_to,
-            message:
-                SignerMessage {
-                    data: SignerMessageData::Sign(signature),
-                    ..
-                },
-        }) = message
-        else {
-            return Err(anyhow!("Unexpected response"));
-        };
-        assert_eq!(sent_to, Some(leader_id));
+        let message = network.drain_one(&signers[1].id).await.remove(0);
+        assert_eq!(message.to, Some(leader_id.clone()));
 
         // Send that signature to the leader
-        signers[0]
-            .process(SignerEvent::Message(SignerMessage {
-                round: round.clone(),
-                data: SignerMessageData::Sign(signature),
-            }))
-            .await;
+        signers[0].process_incoming_messages().await;
 
         // leader should have published results
         assert!(payload_source.recv().await.is_some());
@@ -823,10 +769,10 @@ mod tests {
         let leader_prices = vec![price_feed_entry("TOKEN", 3.50, &[2], 1)];
         let follower_prices = vec![price_feed_entry("TOKEN", 3.50, &[199], 100)];
 
-        let (mut signers, mut message_source, mut payload_source) =
+        let (mut signers, mut network, mut payload_source) =
             construct_signers(2, vec![leader_prices, follower_prices]).await?;
         assign_roles(&mut signers).await;
-        run_round(&mut signers, &mut message_source).await;
+        run_round(&mut signers, &mut network).await;
 
         assert!(payload_source.recv().await.is_some());
 
@@ -838,10 +784,10 @@ mod tests {
         let leader_prices = vec![price_feed_entry("TOKEN", 3.50, &[2], 1)];
         let follower_prices = vec![price_feed_entry("TOKEN", 3.50, &[3], 2)];
 
-        let (mut signers, mut message_source, mut payload_source) =
+        let (mut signers, mut network, mut payload_source) =
             construct_signers(2, vec![leader_prices, follower_prices]).await?;
         assign_roles(&mut signers).await;
-        run_round(&mut signers, &mut message_source).await;
+        run_round(&mut signers, &mut network).await;
 
         assert!(payload_source.try_recv().is_err());
 
@@ -862,10 +808,10 @@ mod tests {
             upper_bound: IntervalBound::unix_timestamp(TIMESTAMP + 3005000, true),
         };
 
-        let (mut signers, mut message_source, mut payload_source) =
+        let (mut signers, mut network, mut payload_source) =
             construct_signers(2, vec![vec![leader_price], vec![follower_price]]).await?;
         assign_roles(&mut signers).await;
-        run_round(&mut signers, &mut message_source).await;
+        run_round(&mut signers, &mut network).await;
 
         assert!(payload_source.recv().await.is_some());
 
@@ -886,10 +832,10 @@ mod tests {
             upper_bound: IntervalBound::unix_timestamp(TIMESTAMP + 8000000, true),
         };
 
-        let (mut signers, mut message_source, mut payload_source) =
+        let (mut signers, mut network, mut payload_source) =
             construct_signers(2, vec![vec![leader_price], vec![follower_price]]).await?;
         assign_roles(&mut signers).await;
-        run_round(&mut signers, &mut message_source).await;
+        run_round(&mut signers, &mut network).await;
 
         assert!(payload_source.try_recv().is_err());
 

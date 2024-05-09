@@ -13,31 +13,28 @@ use tokio::{
 use tracing::{warn, Instrument};
 
 use crate::{
-    networking::Network,
+    network::{NetworkChannel, NetworkReceiver, NodeId},
     price_feed::{PriceFeedEntry, SignedPriceFeedEntry},
     raft::RaftLeader,
 };
 
-use super::signer::{OutgoingMessage, Signer, SignerEvent, SignerMessage};
+use super::signer::{Signer, SignerEvent, SignerMessage};
 
 pub struct ConsensusSignatureAggregator {
     signer: Signer,
     leader_source: Receiver<RaftLeader>,
-    outgoing_message_source: mpsc::Receiver<OutgoingMessage>,
-    message_source: mpsc::Receiver<SignerMessage>,
-    network: Network,
+    message_source: NetworkReceiver<SignerMessage>,
 }
 impl ConsensusSignatureAggregator {
     pub fn new(
-        id: String,
-        network: Network,
-        message_source: mpsc::Receiver<SignerMessage>,
+        id: NodeId,
+        channel: NetworkChannel<SignerMessage>,
         price_source: Receiver<Vec<PriceFeedEntry>>,
         leader_source: Receiver<RaftLeader>,
         signed_price_sink: Sender<Vec<SignedPriceFeedEntry>>,
     ) -> Result<Self> {
         let (key, public_key) = Self::load_keys()?;
-        let (outgoing_message_sink, outgoing_message_source) = mpsc::channel(10);
+        let (outgoing_message_sink, message_source) = channel.split();
         let signer = Signer::new(
             id,
             key,
@@ -50,9 +47,7 @@ impl ConsensusSignatureAggregator {
         Ok(Self {
             signer,
             leader_source,
-            outgoing_message_source,
             message_source,
-            network,
         })
     }
 
@@ -94,27 +89,12 @@ impl ConsensusSignatureAggregator {
         let mut message_source = self.message_source;
         let message_received_task = async move {
             while let Some(incoming) = message_source.recv().await {
-                if let Err(err) = event_sink.send(SignerEvent::Message(incoming)).await {
+                if let Err(err) = event_sink
+                    .send(SignerEvent::Message(incoming.from, incoming.data))
+                    .await
+                {
                     warn!("Failed to receive message: {}", err);
                     break;
-                }
-            }
-        }
-        .in_current_span();
-
-        // When the signer wants to send someone else a message, give it to the network
-        let network = self.network;
-        let mut outgoing_message_source = self.outgoing_message_source;
-        let send_messages_task = async move {
-            while let Some(outgoing) = outgoing_message_source.recv().await {
-                let message = crate::networking::Message::Signer(outgoing.message);
-                match outgoing.to {
-                    None => network.broadcast(message).await,
-                    Some(peer) => {
-                        if let Err(e) = network.send(&peer, message).await {
-                            warn!("Could not send message to {}: {}", peer, e);
-                        }
-                    }
                 }
             }
         }
@@ -133,7 +113,6 @@ impl ConsensusSignatureAggregator {
             res = new_round_task => res,
             res = leader_changed_task => res,
             res = message_received_task => res,
-            res = send_messages_task => res,
             res = handle_events_task => res,
         }
     }
