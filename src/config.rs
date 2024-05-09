@@ -81,6 +81,7 @@ impl OracleConfig {
 #[derive(Debug, Deserialize, Clone)]
 pub struct PeerConfig {
     pub address: String,
+    pub public_key: String,
 }
 
 #[derive(Debug, Deserialize)]

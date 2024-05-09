@@ -1,3 +1,11 @@
 peers:
   - address: 127.0.0.1:8001
+    public_key: |
+      -----BEGIN PUBLIC KEY-----
+      MCowBQYDK2VwAyEAtYoVpsW+gRlzXM9Iu3OBoopNj6y5OB8oeOJIWD10G/U=
+      -----END PUBLIC KEY-----
   - address: 127.0.0.1:8002
+    public_key: |
+      -----BEGIN PUBLIC KEY-----
+      MCowBQYDK2VwAyEAg1sXWpm7CUeBGj9pdCgAVjKtJhEwL9s3BH1Ua9y6Nm0=
+      -----END PUBLIC KEY-----

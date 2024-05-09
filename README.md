@@ -2,7 +2,14 @@
 
 ## Setup
 
-To run the oracle, you need a frost public/private key pair. The docker-compose file reads them from `keys/private` and `keys/public` files. You can generate a set of frost keys for testing with the keygen command:
+Generate an ED25519 public/private key pair, stored in PEM format. The docker-compose file reads them from `keys/private.pem` and `keys/public.pem`.
+
+```sh
+openssl genpkey -algorithm ed25519 -out ./keys/private.pem
+openssl pkey -in ./keys/private.pem -pubout -out ./keys/public.pem
+```
+
+To run the oracle, you need a frost public/private key pair. The docker-compose file reads them from `keys/frost_private` and `keys/frost_public` files. You can generate a set of frost keys for testing with the keygen command:
 
 ```sh
 cargo run --bin keygen -- --min-signers 2 --max-signers 3
