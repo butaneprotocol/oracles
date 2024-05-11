@@ -1,10 +1,10 @@
-use std::{collections::BTreeMap, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, env, fs, sync::Arc, time::Duration};
 
 use crate::{
     config::OracleConfig,
     network::{Network, NodeId},
 };
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use dashmap::DashMap;
 use frost_ed25519::{
     keys::dkg::{part1, part2, part3, round1, round2},
@@ -13,6 +13,7 @@ use frost_ed25519::{
 use rand::thread_rng;
 use serde::{Deserialize, Serialize};
 use tokio::{sync::watch, time::sleep};
+use tracing::info;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Part1Message {
@@ -33,6 +34,11 @@ pub enum KeygenMessage {
 pub async fn run(config: &OracleConfig) -> Result<()> {
     let mut network = Network::new(config)?;
     let id = network.id.clone();
+
+    // Fetch the paths to store the frost keys early, so we can fail fast on misconfiguration.
+    let key_path = env::var("FROST_KEY_PATH").context("FROST_KEY_PATH not set")?;
+    let public_key_path =
+        env::var("FROST_PUBLIC_KEY_PATH").context("FROST_PUBLIC_KEY_PATH not set")?;
 
     let identifier_lookup: Arc<DashMap<Identifier, NodeId>> = Arc::new(DashMap::new());
 
@@ -77,7 +83,9 @@ pub async fn run(config: &OracleConfig) -> Result<()> {
             let round2_packages = outgoing_round2_packages_rx.borrow().clone();
             for (identifier, package) in round2_packages {
                 let to: NodeId = identifiers.get(&identifier).unwrap().clone();
-                let message = Part2Message { package: Box::new(package) };
+                let message = Part2Message {
+                    package: Box::new(package),
+                };
                 part2_sender.send(to, KeygenMessage::Part2(message)).await;
             }
             sleep(Duration::from_secs(1)).await;
@@ -106,6 +114,7 @@ pub async fn run(config: &OracleConfig) -> Result<()> {
 
                 round1_packages.insert(from_id, *package);
                 if round1_packages.len() == config.peers.len() {
+                    info!("Round 1 complete! Beginning round 2");
                     // We have packages from every peer, and now we can start (or re-start) round 2
                     let (secret_package, outgoing_packages) =
                         part2(round1_secret_package.clone(), &round1_packages)?;
@@ -125,8 +134,11 @@ pub async fn run(config: &OracleConfig) -> Result<()> {
                     let round2_secret_package = round2_secret_package.as_ref().unwrap();
                     let (key_package, public_key_package) =
                         part3(round2_secret_package, &round1_packages, &round2_packages)?;
-                    // TODO: persist these
-                    println!("GOT EM {:?} {:?}", key_package, public_key_package);
+                    info!("Key generation complete!");
+                    fs::write(&key_path, key_package.serialize()?)?;
+                    info!("Frost private key saved to {}", key_path);
+                    fs::write(&public_key_path, public_key_package.serialize()?)?;
+                    info!("Frost public key saved to {}", key_path);
                 }
             }
         }
