@@ -328,6 +328,7 @@ impl Core {
                 Ok(conn) => conn,
                 Err(e) => {
                     warn!("error connecting to {}: {}", peer.id, e);
+                    sleep(Duration::from_secs(1)).await;
                     continue;
                 }
             };
