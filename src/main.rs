@@ -20,6 +20,7 @@ use tracing_subscriber::FmtSubscriber;
 pub mod apis;
 pub mod config;
 pub mod health;
+pub mod keygen;
 pub mod network;
 pub mod price_aggregator;
 pub mod price_feed;
@@ -213,6 +214,11 @@ async fn main() -> Result<()> {
     let config = Arc::new(load_config(&args.config_file)?);
 
     init_tracing(&config.logs)?;
+
+    if config.keygen.enabled {
+        keygen::run(&config).await?;
+        return Ok(());
+    }
 
     let node_factory = || Node::new(config.clone());
 

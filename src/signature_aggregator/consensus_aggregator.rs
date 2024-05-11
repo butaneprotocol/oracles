@@ -118,10 +118,11 @@ impl ConsensusSignatureAggregator {
     }
 
     fn load_keys() -> Result<(KeyPackage, PublicKeyPackage)> {
-        let key_path = env::var("FROST_KEY_PATH")?;
+        let key_path = env::var("FROST_KEY_PATH").context("FROST_KEY_PATH not set")?;
         let key_bytes = fs::read(key_path).context("could not load frost private key")?;
         let key = KeyPackage::deserialize(&key_bytes)?;
-        let public_key_path = env::var("FROST_PUBLIC_KEY_PATH")?;
+        let public_key_path =
+            env::var("FROST_PUBLIC_KEY_PATH").context("FROST_PUBLIC_KEY_PATH not set")?;
         let public_key_bytes =
             fs::read(public_key_path).context("could not load frost public key")?;
         let public_key = PublicKeyPackage::deserialize(&public_key_bytes)?;

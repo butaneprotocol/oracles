@@ -3,8 +3,10 @@ use serde::{Deserialize, Serialize};
 use tokio::{sync::mpsc, task::JoinSet};
 use tracing::{info, warn};
 
+use crate::config::OracleConfig;
+use crate::keygen::KeygenMessage;
 use crate::raft::RaftMessage;
-use crate::{config::OracleConfig, signature_aggregator::signer::SignerMessage};
+use crate::signature_aggregator::signer::SignerMessage;
 pub use channel::{NetworkChannel, NetworkReceiver, NetworkSender};
 use core::Core;
 pub use test::TestNetwork;
@@ -22,6 +24,7 @@ type MpscPair<T> = (
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum Message {
+    Keygen(KeygenMessage),
     Raft(RaftMessage),
     Signer(SignerMessage),
 }
@@ -32,6 +35,7 @@ pub struct Network {
     core: Core,
     outgoing_sender: mpsc::Sender<(Option<NodeId>, Message)>,
     incoming_receiver: mpsc::Receiver<(NodeId, Message)>,
+    keygen: Option<MpscPair<KeygenMessage>>,
     raft: Option<MpscPair<RaftMessage>>,
     signer: Option<MpscPair<SignerMessage>>,
 }
@@ -48,9 +52,14 @@ impl Network {
             core,
             outgoing_sender,
             incoming_receiver,
+            keygen: None,
             signer: None,
             raft: None,
         })
+    }
+
+    pub fn keygen_channel(&mut self) -> NetworkChannel<KeygenMessage> {
+        create_channel(&mut self.keygen)
     }
 
     pub fn raft_channel(&mut self) -> NetworkChannel<RaftMessage> {
@@ -67,6 +76,7 @@ impl Network {
         let mut set = JoinSet::new();
 
         let sender = self.outgoing_sender;
+        let keygen_sender = send_messages(&mut set, &sender, self.keygen, Message::Keygen);
         let raft_sender = send_messages(&mut set, &sender, self.raft, Message::Raft);
         let signer_sender = send_messages(&mut set, &sender, self.signer, Message::Signer);
 
@@ -74,6 +84,9 @@ impl Network {
         set.spawn(async move {
             while let Some((from, data)) = receiver.recv().await {
                 match data {
+                    Message::Keygen(data) => {
+                        receive_message(from, data, &keygen_sender).await;
+                    }
                     Message::Raft(data) => {
                         receive_message(from, data, &raft_sender).await;
                     }

@@ -15,6 +15,7 @@ pub struct OracleConfig {
     pub heartbeat_ms: u64,
     pub timeout_ms: u64,
     pub logs: LogConfig,
+    pub keygen: KeygenConfig,
     pub synthetics: Vec<SyntheticConfig>,
     pub collateral: Vec<CollateralConfig>,
     pub bybit: ByBitConfig,
@@ -27,6 +28,12 @@ pub struct OracleConfig {
 pub struct LogConfig {
     pub json: bool,
     pub level: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct KeygenConfig {
+    pub enabled: bool,
+    pub min_signers: Option<u16>,
 }
 
 impl OracleConfig {

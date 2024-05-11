@@ -4,10 +4,11 @@ services:
     command: ["./oracles-offchain", "-c", "/app/config.yaml"]
     volumes:
       - ./config.yaml:/app/config.yaml
+      - ./keys/frost:/app/frost
     environment:
       PRIVATE_KEY_PATH: /run/secrets/private_key
-      FROST_KEY_PATH: /run/secrets/frost_key
-      FROST_PUBLIC_KEY_PATH: /run/secrets/frost_public_key
+      FROST_KEY_PATH: /app/frost/frost_key
+      FROST_PUBLIC_KEY_PATH: /app/frost/frost_public_key
     env_file:
       - path: .env
         required: false
@@ -22,8 +23,6 @@ services:
     restart: unless-stopped
     secrets:
       - private_key
-      - frost_key
-      - frost_public_key
   cardano-node:
     command: [
       run,
@@ -62,7 +61,3 @@ services:
 secrets:
   private_key:
     file: keys/private.pem
-  frost_key:
-    file: keys/frost_private
-  frost_public_key:
-    file: keys/frost_public
