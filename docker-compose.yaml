@@ -61,7 +61,7 @@ services:
       - ${IPC_DIR:-./volumes/node-ipc}:/ipc
 secrets:
   private_key:
-    file: keys/private
+    file: keys/private.pem
   frost_key:
     file: keys/frost_private
   frost_public_key:
