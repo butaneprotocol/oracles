@@ -6,6 +6,8 @@ consensus: true
 logs:
   json: true
   level: info
+keygen:
+  enabled: false
 synthetics:
   - name: USDb
     price: 1

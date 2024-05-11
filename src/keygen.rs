@@ -1,0 +1,136 @@
+use std::{collections::BTreeMap, sync::Arc, time::Duration};
+
+use crate::{
+    config::OracleConfig,
+    network::{Network, NodeId},
+};
+use anyhow::{anyhow, Result};
+use dashmap::DashMap;
+use frost_ed25519::{
+    keys::dkg::{part1, part2, part3, round1, round2},
+    Identifier,
+};
+use rand::thread_rng;
+use serde::{Deserialize, Serialize};
+use tokio::{sync::watch, time::sleep};
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Part1Message {
+    package: Box<round1::Package>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Part2Message {
+    package: Box<round2::Package>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub enum KeygenMessage {
+    Part1(Part1Message),
+    Part2(Part2Message),
+}
+
+pub async fn run(config: &OracleConfig) -> Result<()> {
+    let mut network = Network::new(config)?;
+    let id = network.id.clone();
+
+    let identifier_lookup: Arc<DashMap<Identifier, NodeId>> = Arc::new(DashMap::new());
+
+    // Run our network layer in the background after setting up a "keygen" channel
+    let channel = network.keygen_channel();
+    tokio::spawn(async move { network.listen().await.unwrap() });
+    let (sender, mut receiver) = channel.split();
+
+    // use our ID to get a stable/unique cryptographic identifier
+    let identifier = Identifier::derive(id.as_bytes())?;
+
+    // DKG has three rounds. We can perform round 1 on our own, it gets us information needed for round 2
+    let (round1_secret_package, round1_package) = {
+        let rng = thread_rng();
+        let max_signers = 1 + config.peers.len() as u16;
+        let min_signers = config
+            .keygen
+            .min_signers
+            .ok_or_else(|| anyhow!("Must specify min_signers"))?;
+        part1(identifier, max_signers, min_signers, rng)?
+    };
+
+    // Keep broadcasting our round 1 payload until everyone has finished (in case someone disconnects or joins late)
+    let part1_sender = sender.clone();
+    tokio::spawn(async move {
+        loop {
+            let package = Box::new(round1_package.clone());
+            let message = Part1Message { package };
+            part1_sender.broadcast(KeygenMessage::Part1(message)).await;
+            sleep(Duration::from_secs(1)).await;
+        }
+    });
+
+    // Also send our round 2 payloads (once we have them)
+    let (outgoing_round2_packages_tx, outgoing_round2_packages_rx) =
+        watch::channel(BTreeMap::new());
+    let identifiers = identifier_lookup.clone();
+    let part2_sender = sender.clone();
+    tokio::spawn(async move {
+        loop {
+            // clone this so we aren't holding a lock for too long
+            let round2_packages = outgoing_round2_packages_rx.borrow().clone();
+            for (identifier, package) in round2_packages {
+                let to: NodeId = identifiers.get(&identifier).unwrap().clone();
+                let message = Part2Message { package: Box::new(package) };
+                part2_sender.send(to, KeygenMessage::Part2(message)).await;
+            }
+            sleep(Duration::from_secs(1)).await;
+        }
+    });
+
+    let mut round1_packages = BTreeMap::new();
+    let mut round2_secret_package: Option<round2::SecretPackage> = None;
+    let mut round2_packages = BTreeMap::new();
+
+    // And now that we've got our senders all set up, we're ready to run our receiver logic
+    while let Some(message) = receiver.recv().await {
+        let from = message.from;
+
+        // The DKG algorithm uses Identifier to identify a node, but our network uses NodeId
+        // Maintain a lookup for later.
+        let from_id = Identifier::derive(from.as_bytes())?;
+        identifier_lookup.insert(from_id, from);
+
+        match message.data {
+            KeygenMessage::Part1(Part1Message { package }) => {
+                if round1_packages.get(&from_id) == Some(&*package) {
+                    // We've seen this one
+                    continue;
+                }
+
+                round1_packages.insert(from_id, *package);
+                if round1_packages.len() == config.peers.len() {
+                    // We have packages from every peer, and now we can start (or re-start) round 2
+                    let (secret_package, outgoing_packages) =
+                        part2(round1_secret_package.clone(), &round1_packages)?;
+                    round2_secret_package.replace(secret_package);
+                    outgoing_round2_packages_tx.send_replace(outgoing_packages);
+                }
+            }
+            KeygenMessage::Part2(Part2Message { package }) => {
+                if round2_packages.get(&from_id) == Some(&*package) {
+                    // We've seen this one
+                    continue;
+                }
+
+                round2_packages.insert(from_id, *package);
+                if round2_packages.len() == config.peers.len() {
+                    // We have everything we need to compute our frost keys
+                    let round2_secret_package = round2_secret_package.as_ref().unwrap();
+                    let (key_package, public_key_package) =
+                        part3(round2_secret_package, &round1_packages, &round2_packages)?;
+                    // TODO: persist these
+                    println!("GOT EM {:?} {:?}", key_package, public_key_package);
+                }
+            }
+        }
+    }
+
+    Ok(())
+}

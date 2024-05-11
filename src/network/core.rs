@@ -430,7 +430,7 @@ impl Core {
         outgoing_connection: OutgoingConnection,
         outgoing_message_rx: &mut mpsc::Receiver<AppMessage>,
     ) {
-        trace!("Fully connected to {} ({})", peer.id, peer.address);
+        info!("Connected to {} ({})", peer.id, peer.address);
         // try to tell Raft that we are definitely connected
         let _ = self
             .incoming_tx
