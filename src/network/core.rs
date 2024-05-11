@@ -431,11 +431,10 @@ impl Core {
         outgoing_message_rx: &mut mpsc::Receiver<AppMessage>,
     ) {
         trace!("Fully connected to {} ({})", peer.id, peer.address);
-        // tell Raft that we are definitely connected
-        self.incoming_tx
-            .send((peer.id.clone(), AppMessage::Raft(RaftMessage::Connect)))
-            .await
-            .unwrap();
+        // try to tell Raft that we are definitely connected
+        let _ = self
+            .incoming_tx
+            .try_send((peer.id.clone(), AppMessage::Raft(RaftMessage::Connect)));
 
         let shared_secret = outgoing_connection
             .ecdh_secret
@@ -496,11 +495,10 @@ impl Core {
             _ = recv_task => {},
         };
 
-        // warn raft that we aren't connected anymore
-        self.incoming_tx
-            .send((peer.id.clone(), AppMessage::Raft(RaftMessage::Disconnect)))
-            .await
-            .unwrap();
+        // try to warn raft that we aren't connected anymore
+        let _ = self
+            .incoming_tx
+            .try_send((peer.id.clone(), AppMessage::Raft(RaftMessage::Disconnect)));
     }
 }
 
