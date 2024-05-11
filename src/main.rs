@@ -14,7 +14,7 @@ use tokio::{
     task::{JoinError, JoinSet},
     time::sleep,
 };
-use tracing::{info, info_span, Instrument, Level};
+use tracing::{info, Instrument, Level};
 use tracing_subscriber::FmtSubscriber;
 
 pub mod apis;
@@ -30,8 +30,6 @@ pub mod signature_aggregator;
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
-    #[clap(short, long)]
-    id: Option<String>,
     #[clap(long, default_value_t = false)]
     debug: bool,
     #[clap(short, long)]
@@ -50,7 +48,7 @@ struct Node {
 }
 
 impl Node {
-    pub fn new(id: &str, config: Arc<OracleConfig>) -> Result<Self> {
+    pub fn new(config: Arc<OracleConfig>) -> Result<Self> {
         // quorum is set to a majority of expected nodes (which includes ourself!)
         let quorum = ((config.peers.len() + 1) / 2) + 1;
         let heartbeat = config.heartbeat();
@@ -59,7 +57,7 @@ impl Node {
         let (health_server, health_sink) = HealthServer::new();
 
         // Construct a peer-to-peer network that can connect to peers, and dispatch messages to the correct state machine
-        let mut network = Network::new(id, &config);
+        let mut network = Network::new(&config)?;
 
         let (pa_tx, pa_rx) = watch::channel(vec![]);
 
@@ -210,26 +208,20 @@ async fn main() -> Result<()> {
     let args = Args::parse();
 
     // Let us specify an ID on the command line, for easier debugging, otherwise generate a UUID
-    let id = args.id.unwrap_or(uuid::Uuid::new_v4().to_string());
     let debug = args.debug;
 
     let config = Arc::new(load_config(&args.config_file)?);
 
     init_tracing(&config.logs)?;
 
-    let span = info_span!("oracle", me = id);
-    span.in_scope(|| info!("Node starting..."));
-
-    let node_factory = || Node::new(&id, config.clone());
+    let node_factory = || Node::new(config.clone());
 
     // Start the node, which will spawn a bunch of threads and infinite loop
     if debug {
         let restart_after = config.timeout() + Duration::from_secs(1);
-        run_debug(node_factory, restart_after)
-            .instrument(span)
-            .await?;
+        run_debug(node_factory, restart_after).await?;
     } else {
-        run(node_factory).instrument(span).await?;
+        run(node_factory).await?;
     }
     Ok(())
 }

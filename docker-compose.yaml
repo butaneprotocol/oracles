@@ -6,7 +6,6 @@ services:
       - ./config.yaml:/app/config.yaml
     environment:
       PRIVATE_KEY_PATH: /run/secrets/private_key
-      PUBLIC_KEY_PATH: /run/secrets/public_key
       FROST_KEY_PATH: /run/secrets/frost_key
       FROST_PUBLIC_KEY_PATH: /run/secrets/frost_public_key
     env_file:
@@ -22,6 +21,7 @@ services:
       - 18000:18000
     restart: unless-stopped
     secrets:
+      - private_key
       - frost_key
       - frost_public_key
   cardano-node:
@@ -62,8 +62,6 @@ services:
 secrets:
   private_key:
     file: keys/private
-  public_key:
-    file: keys/public
   frost_key:
     file: keys/frost_private
   frost_public_key:

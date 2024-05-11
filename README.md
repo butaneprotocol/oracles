@@ -2,11 +2,16 @@
 
 ## Setup
 
-Generate an ED25519 public/private key pair, stored in PEM format. The docker-compose file reads them from `keys/private.pem` and `keys/public.pem`.
+Generate an ED25519 private key, stored in PEM format. The docker-compose file reads it from `keys/private.pem`.
 
 ```sh
 openssl genpkey -algorithm ed25519 -out ./keys/private.pem
-openssl pkey -in ./keys/private.pem -pubout -out ./keys/public.pem
+```
+
+The other node owners will need your public key to finish their setup. You can get that in PEM form with openssl as well:
+
+```sh
+openssl pkey -in ./keys/private.pem -pubout
 ```
 
 To run the oracle, you need a frost public/private key pair. The docker-compose file reads them from `keys/frost_private` and `keys/frost_public` files. You can generate a set of frost keys for testing with the keygen command:

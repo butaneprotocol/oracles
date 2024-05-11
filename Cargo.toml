@@ -11,10 +11,13 @@ almost-raft = "0.3.0"
 anyhow = "1.0.80"
 async-trait = "0.1.77"
 bech32 = "0.11"
+chacha20poly1305 = "0.10"
 cynic = "3.4"
 clap = { version = "4.5.1", features = ["derive"] }
 config = "0.14"
 dashmap = "5.5.3"
+ed25519 = { version = "2.2", features = ["pkcs8", "pem", "serde"] }
+ed25519-dalek = { version = "2.1", features = ["serde"] }
 frost-ed25519 = { version = "1.0.0", features = ["serde"] }
 futures = "0.3"
 hex = "0.4.3"
@@ -27,7 +30,7 @@ pallas-primitives = "0.25"
 rand = "0.8.5"
 reqwest = "0.12"
 rust_decimal = "1.34.3"
-serde = "1.0.197"
+serde = "1.0"
 serde_cbor = "0.11"
 serde_json = "1.0.114"
 tide = "0.16"
@@ -38,3 +41,4 @@ tokio-util = { version = "0.7", features = ["full"] }
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3", features = ["json"] }
 uuid = { version = "1.7.0", features = ["v4"] }
+x25519-dalek = { version = "2", features = ["serde"] }
