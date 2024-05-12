@@ -3,11 +3,10 @@ use serde::{Deserialize, Serialize};
 use tokio::{sync::mpsc, task::JoinSet};
 use tracing::{info, warn};
 
+use crate::config::OracleConfig;
+use crate::keygen::KeygenMessage;
 use crate::raft::RaftMessage;
-use crate::{
-    config::{OracleConfig, PeerConfig},
-    signature_aggregator::signer::SignerMessage,
-};
+use crate::signature_aggregator::signer::SignerMessage;
 pub use channel::{NetworkChannel, NetworkReceiver, NetworkSender};
 use core::Core;
 pub use test::TestNetwork;
@@ -25,6 +24,7 @@ type MpscPair<T> = (
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum Message {
+    Keygen(KeygenMessage),
     Raft(RaftMessage),
     Signer(SignerMessage),
 }
@@ -32,27 +32,34 @@ pub enum Message {
 pub struct Network {
     pub id: NodeId,
     port: u16,
-    peers: Vec<PeerConfig>,
     core: Core,
-    incoming_message_receiver: mpsc::Receiver<(NodeId, Message)>,
+    outgoing_sender: mpsc::Sender<(Option<NodeId>, Message)>,
+    incoming_receiver: mpsc::Receiver<(NodeId, Message)>,
+    keygen: Option<MpscPair<KeygenMessage>>,
     raft: Option<MpscPair<RaftMessage>>,
     signer: Option<MpscPair<SignerMessage>>,
 }
 
 impl Network {
-    pub fn new(id: &str, config: &OracleConfig) -> Self {
-        let id = NodeId::new(id.to_string());
-        let (incoming_message_sender, incoming_message_receiver) = mpsc::channel(10);
-        let core = Core::new(id.clone(), incoming_message_sender);
-        Self {
+    pub fn new(config: &OracleConfig) -> Result<Self> {
+        let (outgoing_sender, outgoing_receiver) = mpsc::channel(10);
+        let (incoming_sender, incoming_receiver) = mpsc::channel(10);
+        let core = Core::new(config, outgoing_receiver, incoming_sender)?;
+        let id = core.id.clone();
+        Ok(Self {
             id,
             port: config.port,
-            peers: config.peers.clone(),
             core,
-            incoming_message_receiver,
+            outgoing_sender,
+            incoming_receiver,
+            keygen: None,
             signer: None,
             raft: None,
-        }
+        })
+    }
+
+    pub fn keygen_channel(&mut self) -> NetworkChannel<KeygenMessage> {
+        create_channel(&mut self.keygen)
     }
 
     pub fn raft_channel(&mut self) -> NetworkChannel<RaftMessage> {
@@ -68,13 +75,18 @@ impl Network {
 
         let mut set = JoinSet::new();
 
-        let raft_sender = send_messages(&mut set, &self.core, self.raft, Message::Raft);
-        let signer_sender = send_messages(&mut set, &self.core, self.signer, Message::Signer);
+        let sender = self.outgoing_sender;
+        let keygen_sender = send_messages(&mut set, &sender, self.keygen, Message::Keygen);
+        let raft_sender = send_messages(&mut set, &sender, self.raft, Message::Raft);
+        let signer_sender = send_messages(&mut set, &sender, self.signer, Message::Signer);
 
-        let mut receiver = self.incoming_message_receiver;
+        let mut receiver = self.incoming_receiver;
         set.spawn(async move {
             while let Some((from, data)) = receiver.recv().await {
                 match data {
+                    Message::Keygen(data) => {
+                        receive_message(from, data, &keygen_sender).await;
+                    }
                     Message::Raft(data) => {
                         receive_message(from, data, &raft_sender).await;
                     }
@@ -86,10 +98,7 @@ impl Network {
         });
 
         set.spawn(async move {
-            self.core
-                .handle_network(self.port, self.peers)
-                .await
-                .unwrap();
+            self.core.handle_network().await.unwrap();
         });
 
         while let Some(x) = set.join_next().await {
@@ -113,7 +122,7 @@ fn create_channel<T>(holder: &mut Option<MpscPair<T>>) -> NetworkChannel<T> {
 
 fn send_messages<T, F>(
     set: &mut JoinSet<()>,
-    core: &Core,
+    core_sender: &mpsc::Sender<(Option<NodeId>, Message)>,
     holder: Option<MpscPair<T>>,
     wrap: F,
 ) -> Option<mpsc::Sender<IncomingMessage<T>>>
@@ -121,19 +130,12 @@ where
     T: Send + 'static,
     F: Send + 'static + Fn(T) -> Message,
 {
+    let core_sender = core_sender.clone();
     if let Some((sender, mut receiver)) = holder {
-        let core = core.clone();
         set.spawn(async move {
             while let Some(message) = receiver.recv().await {
                 let wrapped = wrap(message.data);
-                match message.to {
-                    Some(id) => {
-                        core.send(&id, wrapped).await.unwrap();
-                    }
-                    None => {
-                        core.broadcast(wrapped).await;
-                    }
-                }
+                core_sender.send((message.to, wrapped)).await.unwrap();
             }
         });
         Some(sender)

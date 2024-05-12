@@ -3,6 +3,7 @@ use tracing::warn;
 
 use super::types::{IncomingMessage, NodeId, OutgoingMessage};
 
+#[derive(Clone)]
 pub struct NetworkSender<T>(Sender<OutgoingMessage<T>>);
 
 impl<T> NetworkSender<T> {

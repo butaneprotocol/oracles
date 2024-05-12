@@ -29,11 +29,11 @@ pub fn main() -> Result<()> {
 
     fs::create_dir_all(&keys_path)?;
 
-    let pubkey_path = keys_path.join("public");
+    let pubkey_path = keys_path.join("frost_public");
     fs::write(pubkey_path, pubkey_package.serialize()?)?;
 
     for (index, share) in shares.into_values().enumerate() {
-        let privkey_path = keys_path.join(format!("private_{}", index));
+        let privkey_path = keys_path.join(format!("frost_private_{}", index));
         let privkey_package: KeyPackage = share.try_into()?;
         fs::write(privkey_path, privkey_package.serialize()?)?;
     }

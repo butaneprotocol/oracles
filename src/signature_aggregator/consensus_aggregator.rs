@@ -1,6 +1,6 @@
 use std::{env, fs, time::Duration};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use frost_ed25519::keys::{KeyPackage, PublicKeyPackage};
 use tokio::{
     select,
@@ -118,11 +118,13 @@ impl ConsensusSignatureAggregator {
     }
 
     fn load_keys() -> Result<(KeyPackage, PublicKeyPackage)> {
-        let key_path = env::var("FROST_KEY_PATH")?;
-        let key_bytes = fs::read(key_path)?;
+        let key_path = env::var("FROST_KEY_PATH").context("FROST_KEY_PATH not set")?;
+        let key_bytes = fs::read(key_path).context("could not load frost private key")?;
         let key = KeyPackage::deserialize(&key_bytes)?;
-        let public_key_path = env::var("FROST_PUBLIC_KEY_PATH")?;
-        let public_key_bytes = fs::read(public_key_path)?;
+        let public_key_path =
+            env::var("FROST_PUBLIC_KEY_PATH").context("FROST_PUBLIC_KEY_PATH not set")?;
+        let public_key_bytes =
+            fs::read(public_key_path).context("could not load frost public key")?;
         let public_key = PublicKeyPackage::deserialize(&public_key_bytes)?;
         Ok((key, public_key))
     }

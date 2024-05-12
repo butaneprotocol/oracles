@@ -8,6 +8,9 @@ impl NodeId {
     pub const fn new(id: String) -> Self {
         Self(id)
     }
+    pub fn as_bytes(&self) -> &[u8] {
+        self.0.as_bytes()
+    }
 }
 impl Display for NodeId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

@@ -1,24 +1,41 @@
-use std::sync::Arc;
+use std::{collections::HashMap, env, fs, sync::Arc, time::Duration};
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
+use chacha20poly1305::{aead::Aead, AeadCore, Key, KeyInit, XChaCha20Poly1305};
+use dashmap::DashMap;
+use ed25519::{
+    pkcs8::{DecodePrivateKey, DecodePublicKey},
+    signature::Signer,
+    KeypairBytes, PublicKeyBytes, Signature,
+};
+use ed25519_dalek::{SigningKey as PrivateKey, Verifier, VerifyingKey as PublicKey};
 use futures::{SinkExt, StreamExt};
+use rand::thread_rng;
 use serde::{Deserialize, Serialize};
 use tokio::{
+    io::Interest,
     net::{
         tcp::{OwnedReadHalf, OwnedWriteHalf},
         TcpListener, TcpStream,
     },
-    sync::mpsc,
-    task::{JoinError, JoinSet},
+    select,
+    sync::{mpsc, Mutex},
+    task::JoinSet,
+    time::sleep,
 };
 use tokio_serde::{formats::Cbor, Framed};
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
-use tracing::{info, trace, warn, Instrument};
+use tracing::{info, trace, warn};
+use x25519_dalek as ecdh;
 
-use crate::{config::PeerConfig, raft::RaftMessage};
+type Nonce = chacha20poly1305::aead::generic_array::GenericArray<u8, chacha20poly1305::consts::U24>;
+
+use crate::{
+    config::{OracleConfig, PeerConfig},
+    raft::RaftMessage,
+};
 
 use super::{Message as AppMessage, NodeId};
-
 type WrappedStream = FramedRead<OwnedReadHalf, LengthDelimitedCodec>;
 type WrappedSink = FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>;
 
@@ -26,95 +43,204 @@ type SerStream = Framed<WrappedStream, Message, (), Cbor<Message, ()>>;
 type DeSink = Framed<WrappedSink, (), Message, Cbor<(), Message>>;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-enum Message {
-    Hello(String),
-    Application(AppMessage),
+struct OpenConnectionMessage {
+    /// The other node's public key, used to identify them
+    id_public_key: PublicKey,
+    /// An ephemeral public key, used for ECDH
+    ecdh_public_key: ecdh::PublicKey,
+    /// The ecdh_public_key, signed with the other node's private key
+    signature: Signature,
 }
 
-/// A network is a fully connected set of peers
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct ConfirmConnectionMessage {
+    /// The ecdh_public_key we sent, signed with the other node's private key
+    signature: Signature,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct ApplicationMessage {
+    nonce: Vec<u8>,
+    payload: Vec<u8>,
+}
+
+impl ApplicationMessage {
+    pub fn encrypt(message: AppMessage, cipher: &XChaCha20Poly1305) -> Self {
+        let nonce: Nonce = {
+            let mut rng = thread_rng();
+            XChaCha20Poly1305::generate_nonce(&mut rng)
+        };
+        let payload: Vec<u8> = {
+            let bytes = serde_cbor::to_vec(&message).unwrap();
+            cipher.encrypt(&nonce, bytes.as_slice()).unwrap()
+        };
+        let nonce_bytes: Vec<u8> = nonce.into_iter().collect();
+        Self {
+            nonce: nonce_bytes,
+            payload,
+        }
+    }
+
+    pub fn decrypt(self, cipher: &XChaCha20Poly1305) -> Result<AppMessage> {
+        let nonce = Nonce::from_slice(&self.nonce);
+        let decrypted_bytes: Vec<u8> = cipher
+            .decrypt(nonce, self.payload.as_slice())
+            .map_err(|_| anyhow!("could not decipher message"))?;
+        serde_cbor::from_slice(&decrypted_bytes).context("could not deserialize message")
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+enum Message {
+    OpenConnection(Box<OpenConnectionMessage>), // boxed because it's big
+    ConfirmConnection(ConfirmConnectionMessage),
+    Application(ApplicationMessage),
+}
+
+#[derive(Clone)]
+struct Peer {
+    id: NodeId,
+    public_key: PublicKey,
+    address: String,
+}
+
+struct IncomingConnection {
+    ecdh_public_key: ecdh::PublicKey,
+    stream: SerStream,
+}
+struct OutgoingConnection {
+    ecdh_secret: ecdh::EphemeralSecret,
+    sink: DeSink,
+}
+
+type OutgoingMessageReceiver = mpsc::Receiver<(Option<NodeId>, AppMessage)>;
+type IncomingMessageSender = mpsc::Sender<(NodeId, AppMessage)>;
+
 #[derive(Clone)]
 pub struct Core {
-    id: NodeId,
-
-    // An MPSC channel that can dispatch messages to different state machines
-    message_sender: Arc<mpsc::Sender<(NodeId, AppMessage)>>,
-
-    // Instead of trying to handle the crossing-paths problem, we just maintain one incoming and one outgoing connection for each peer
-    // A set of incoming connections
-    incoming_connections: Arc<dashmap::DashMap<NodeId, ()>>,
-    // A set of outgoing connections, and the channel used to send them messages
-    outgoing_connections: Arc<dashmap::DashMap<NodeId, mpsc::Sender<Message>>>,
+    pub id: NodeId,
+    private_key: Arc<PrivateKey>,
+    port: u16,
+    peers: Arc<Vec<Peer>>,
+    outgoing_rx: Arc<Mutex<OutgoingMessageReceiver>>,
+    incoming_tx: Arc<IncomingMessageSender>,
 }
 
 impl Core {
-    pub fn new(id: NodeId, message_sender: mpsc::Sender<(NodeId, AppMessage)>) -> Self {
-        Self {
+    pub fn new(
+        config: &OracleConfig,
+        outgoing_rx: OutgoingMessageReceiver,
+        incoming_tx: IncomingMessageSender,
+    ) -> Result<Self> {
+        let private_key = Arc::new(read_private_key()?);
+        let id = compute_node_id(&private_key.verifying_key());
+        let peers = {
+            let peers: Result<Vec<Peer>> = config.peers.iter().map(parse_peer).collect();
+            Arc::new(peers?)
+        };
+        Ok(Self {
             id,
-            message_sender: Arc::new(message_sender),
-            incoming_connections: Arc::new(dashmap::DashMap::new()),
-            outgoing_connections: Arc::new(dashmap::DashMap::new()),
-        }
+            private_key,
+            port: config.port,
+            peers,
+            outgoing_rx: Arc::new(Mutex::new(outgoing_rx)),
+            incoming_tx: Arc::new(incoming_tx),
+        })
     }
 
-    /// Spawn threads to listen for new connections, and connect to each other peer (with retry)
-    pub async fn handle_network(
-        self,
-        port: u16,
-        peers: Vec<PeerConfig>,
-    ) -> Result<Self, JoinError> {
+    pub async fn handle_network(self) -> Result<()> {
         let mut set = JoinSet::new();
 
-        // Start a listener for incoming connections on the given port
-        // each incoming connection will do a handshake to identify the nodes, and start a pump to handle incoming messages
-        let network = self.clone();
-        let local_addr = format!("0.0.0.0:{}", port);
-        set.spawn(
-            async move {
-                network
-                    .accept_connections(local_addr.as_str())
+        let incoming_connection_txs = DashMap::new();
+        let mut outgoing_message_txs = HashMap::new();
+
+        // Spawn one task per peer that's responsible for all comms with that peer
+        for peer in self.peers.iter() {
+            let core = self.clone();
+            let peer = peer.clone();
+
+            // Each peer gets a receiver that tells it when a new incoming connection from that peer is open.
+            // Hold onto the senders here
+            let (incoming_connection_tx, incoming_connection_rx) = mpsc::channel(10);
+            incoming_connection_txs.insert(peer.id.clone(), incoming_connection_tx);
+
+            // Each peer also gets a receiver that tells it when the app wants to send a message.
+            // Hold onto the senders here
+            let (outgoing_message_tx, outgoing_message_rx) = mpsc::channel(10);
+            outgoing_message_txs.insert(peer.id.clone(), outgoing_message_tx);
+
+            set.spawn(async move {
+                core.handle_peer(peer, incoming_connection_rx, outgoing_message_rx)
                     .await
-                    .unwrap();
-            }
-            .in_current_span(),
-        );
-
-        // Start a thread for each peer, which will attempt to connect (and reconnect on disconnection)
-        // while connected, it will maintain a MPSC queue in outgoing_connections that other machines can use to send messages
-        for peer in peers {
-            let network = self.clone();
-            set.spawn(
-                async move {
-                    network.connect_to(&peer.address).await.unwrap();
-                }
-                .in_current_span(),
-            );
-        }
-
-        // Wait for them all to finish (they won't)
-        while let Some(res) = set.join_next().await {
-            res?
-        }
-        Ok(self)
-    }
-
-    // Accept all incoming connections
-    pub async fn accept_connections(self, addr: &str) -> std::io::Result<()> {
-        info!("Listening on: {}", addr);
-
-        let listener = TcpListener::bind(addr).await?;
-        while let Ok((stream, _)) = listener.accept().await {
-            let node = self.clone();
-            // Each incoming connection spawns its own thread to handling incoming messages
-            tokio::spawn(async move {
-                node.handle_incoming_connection(stream).await;
             });
+        }
+
+        // One task listens for new connections and sends them to the appropriate peer task
+        let core = self.clone();
+        set.spawn(async move { core.accept_connections(incoming_connection_txs).await });
+
+        // One task polls for outgoing messages, and tells the appropriate peer task to send them
+        set.spawn(async move {
+            self.send_messages(outgoing_message_txs).await;
+        });
+
+        while let Some(x) = set.join_next().await {
+            x?
         }
 
         Ok(())
     }
 
-    // Handle messages from an incoming TCP stream
-    async fn handle_incoming_connection(self, stream: TcpStream) {
+    async fn send_messages(self, outgoing_message_txs: HashMap<NodeId, mpsc::Sender<AppMessage>>) {
+        let mut outgoing_rx = self.outgoing_rx.lock_owned().await;
+        while let Some((to, message)) = outgoing_rx.recv().await {
+            match to {
+                Some(id) => {
+                    // Sending to one node
+                    let Some(sender) = outgoing_message_txs.get(&id) else {
+                        warn!("Tried sending message to unrecognized node {}", id);
+                        continue;
+                    };
+                    if let Err(e) = sender.send(message).await {
+                        warn!("Could not send message to node {}: {}", id, e);
+                    }
+                }
+                None => {
+                    // Broadcasting to all nodes
+                    for (id, sender) in outgoing_message_txs.iter() {
+                        if let Err(e) = sender.send(message.clone()).await {
+                            warn!("Could not send message to node {}: {}", id, e);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    async fn accept_connections(
+        self,
+        incoming_connection_txs: DashMap<NodeId, mpsc::Sender<IncomingConnection>>,
+    ) {
+        let addr = format!("0.0.0.0:{}", self.port);
+        let incoming_connection_txs = Arc::new(incoming_connection_txs);
+        info!("Listening on: {}", addr);
+
+        let listener = TcpListener::bind(addr).await.unwrap();
+        while let Ok((stream, _)) = listener.accept().await {
+            let core = self.clone();
+            let txs = incoming_connection_txs.clone();
+            // Each incoming connection spawns its own thread to handling incoming messages
+            tokio::spawn(async move {
+                core.handle_incoming_connection(stream, txs).await;
+            });
+        }
+    }
+
+    async fn handle_incoming_connection(
+        self,
+        stream: TcpStream,
+        txs: Arc<DashMap<NodeId, mpsc::Sender<IncomingConnection>>>,
+    ) {
         trace!("Incoming connection from: {}", stream.peer_addr().unwrap());
 
         let (read, write) = stream.into_split();
@@ -123,13 +249,8 @@ impl Core {
         let mut stream: SerStream = SerStream::new(stream, Cbor::default());
         let mut sink: DeSink = DeSink::new(sink, Cbor::default());
 
-        // Incoming connections *first receive* a `Hello`, then send our own
-        // Outgoing connections will do the reverse
-        let them = match stream.next().await {
-            Some(Ok(Message::Hello(other))) => {
-                trace!(them = other, "Incoming Hello received");
-                NodeId::new(other)
-            }
+        let message = match stream.next().await {
+            Some(Ok(Message::OpenConnection(message))) => message,
             Some(Ok(other)) => {
                 warn!("Expected Hello, got {:?}", other);
                 return;
@@ -144,93 +265,106 @@ impl Core {
             }
         };
 
-        match sink.send(Message::Hello(self.id.to_string())).await {
+        // Grab the ecdh nonce they sent us
+        let ecdh_public_key = message.ecdh_public_key;
+
+        // Figure out who they are based on the public key they sent us
+        let id_public_key = message.id_public_key;
+        let them = compute_node_id(&id_public_key);
+
+        // Confirm that they are who they say they are; they should have signed the ecdh nonce with their private key
+        let signature = message.signature;
+        if let Err(e) = id_public_key.verify(ecdh_public_key.as_bytes(), &signature) {
+            warn!(them = %them, "Signature does not match public key: {}", e);
+            return;
+        }
+
+        // Notify whoever's listening that we have a new connection
+        // (We look up the "incoming connection" sender, so if we don't recognize them we fail here)
+        let Some(connection_tx) = txs.get(&them) else {
+            warn!(them = %them, "Other node not recognized");
+            return;
+        };
+        if let Err(e) = connection_tx
+            .send(IncomingConnection {
+                ecdh_public_key,
+                stream,
+            })
+            .await
+        {
+            warn!(them = %them, "Could not send incoming connection: {}", e);
+            return;
+        }
+
+        // And finally, acknowledge them (and prove who we are) by signing their nonce
+        let signature = self.private_key.sign(ecdh_public_key.as_bytes());
+        match sink
+            .send(Message::ConfirmConnection(ConfirmConnectionMessage {
+                signature,
+            }))
+            .await
+        {
             Ok(_) => {
-                trace!(them = %them, "Incoming Hello Sent");
+                trace!("Outgoing Hello sent");
             }
             Err(e) => {
-                warn!(them = %them, "Failed to send hello: {}", e);
-                return;
+                warn!("Failed to send hello: {}", e);
             }
         }
-
-        trace!("Handshake done, reading incoming messages...");
-
-        self.incoming_connections.insert(them.clone(), ());
-        // Once both connections have been established, tell raft about it so it starts doing heartbeats / reaching consensus
-        // If we only get an incoming connection, we don't want raft to start trying to send messages; and if we only get an outgoing connection,
-        // then we may not be able to reach consensus yet
-        if self.outgoing_connections.contains_key(&them) {
-            self.message_sender
-                .clone()
-                .send((them.clone(), AppMessage::Raft(RaftMessage::Connect)))
-                .await
-                .unwrap();
-        }
-
-        // Then, so long as we're receiving messages, we can dispatch them to the right machine
-        while let Some(msg) = stream.next().await {
-            trace!("Received message {:?} from {}", msg, them);
-
-            match msg {
-                Ok(Message::Application(message)) => {
-                    if let Err(e) = self.message_sender.send((them.clone(), message)).await {
-                        warn!(them = %them, "Failed to send message: {}", e);
-                        break;
-                    }
-                }
-                // If someone tries to Hello us again, break it off
-                Ok(Message::Hello(_)) => {
-                    warn!(them = %them, "Unexpected message");
-                    break;
-                }
-                // Someone is sending us messages that we can't parse
-                Err(e) => {
-                    warn!(them = %them, "Failed to parse message: {}", e);
-                    break;
-                }
-            }
-        }
-        self.incoming_connections.remove(&them);
-        // NOTE: we *don't* send the raft disconnect message here; we should continue to send them heartbeats
-        // so that we can notice when the socket disconnects
-        warn!(them = %them, "Incoming connection Disconnected");
     }
 
-    // Connect to a given peer, and reconnect if disconnected
-    pub async fn connect_to(self, addr: &str) -> std::io::Result<()> {
-        let mut connection_attempts = 0;
-        let mut reconnections = 0;
+    async fn handle_peer(
+        self,
+        peer: Peer,
+        mut incoming_connection_rx: mpsc::Receiver<IncomingConnection>,
+        outgoing_message_rx: mpsc::Receiver<AppMessage>,
+    ) {
+        let outgoing_message_rx = Mutex::new(outgoing_message_rx);
         loop {
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-            trace!(
-                connection_attempts = connection_attempts,
-                reconnections = reconnections,
-                "Attempting to connect to: {}",
-                addr
-            );
-            connection_attempts += 1;
-            let connection = TcpStream::connect(addr).await;
-            match connection {
-                Ok(stream) => {
-                    // If we did manage to connect, then hand off to this method to actually handle sending messages
-                    self.handle_outgoing_connection(stream).await;
-                    warn!("Outgoing peer {:?} disconnected", addr);
-                    reconnections += 1;
-                    // If we disconnect, attempt to reconnect
+            // Every time the outgoing or incoming connections are closed, we need to reconnect to both.
+            // Because we store both connections in local variables inside this loop,
+            // they disconnect at the end of every iteration and reconnect at the start.
+            let outgoing_connection = match self.connect_to_peer(&peer).await {
+                Ok(conn) => conn,
+                Err(e) => {
+                    warn!("error connecting to {}: {}", peer.id, e);
+                    sleep(Duration::from_secs(1)).await;
                     continue;
                 }
-                Err(_) => {
-                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                    // Peer isn't online, try again
+            };
+            let incoming_connection = select! {
+                incoming = incoming_connection_rx.recv() => {
+                    let Some(conn) = incoming else {
+                        // if this receiver is closed, the system must be shutting down
+                        return;
+                    };
+                    conn
+                }
+                _ = wait_for_disconnect(&outgoing_connection.sink) => {
+                    // While waiting for an incoming connection, the outgoing one disconnected.
+                    // Restart the loop to try connecting again.
                     continue;
                 }
-            }
+            };
+
+            // Ok! We finally have incoming and outgoing connections set up.
+            // Now we can actually handle messages from across the way
+            let mut outgoing_message_rx = outgoing_message_rx.lock().await;
+            self.handle_peer_connections(
+                &peer,
+                incoming_connection,
+                outgoing_connection,
+                &mut outgoing_message_rx,
+            )
+            .await;
         }
     }
 
-    // Handle sending messages to a specific connection
-    async fn handle_outgoing_connection(&self, stream: TcpStream) {
+    async fn connect_to_peer(&self, peer: &Peer) -> Result<OutgoingConnection> {
+        trace!("Attempting to connect to {} ({})", peer.id, peer.address);
+        let stream = TcpStream::connect(&peer.address)
+            .await
+            .context("error opening connection")?;
         trace!("Outgoing connection to: {}", stream.peer_addr().unwrap());
 
         let (read, write) = stream.into_split();
@@ -241,102 +375,168 @@ impl Core {
         let sink: WrappedSink = WrappedSink::new(write, LengthDelimitedCodec::new());
         let mut sink: DeSink = DeSink::new(sink, Cbor::default());
 
-        // First, send our ID, because they're waiting for it on connection
-        match sink.send(Message::Hello(self.id.to_string())).await {
-            Ok(_) => {
-                trace!("Outgoing Hello sent");
-            }
-            Err(e) => {
-                warn!("Failed to send hello: {}", e);
-                return;
-            }
-        }
-        // Now, read the expected `Hello` coming back, so we know their ID
-        let them = match stream.next().await {
-            Some(Ok(Message::Hello(other))) => {
-                trace!(them = other, "Outgoing Hello received");
-                NodeId::new(other)
-            }
+        // Generate our secret for ECDH
+        let ecdh_secret = {
+            let rng = thread_rng();
+            ecdh::EphemeralSecret::random_from_rng(rng)
+        };
+
+        // Generate the message with our ephemeral nonce and our public key
+        let id_public_key = self.private_key.verifying_key();
+        let ecdh_public_key = ecdh::PublicKey::from(&ecdh_secret);
+        let signature = self.private_key.sign(ecdh_public_key.as_bytes());
+
+        let message = OpenConnectionMessage {
+            id_public_key,
+            ecdh_public_key,
+            signature,
+        };
+        sink.send(Message::OpenConnection(Box::new(message)))
+            .await
+            .context("error sending open message")?;
+        trace!("Outgoing Open request sent");
+
+        // Wait for the other side to respond
+        let message = match stream.next().await {
+            Some(Ok(Message::ConfirmConnection(message))) => message,
             Some(Ok(other)) => {
-                warn!("Expected Hello, got {:?}", other);
-                return;
+                return Err(anyhow!("expected ConfirmConnection, got {:?}", other));
             }
             Some(Err(e)) => {
-                warn!("Failed to parse: {}", e);
-                return;
+                return Err(anyhow!("failed to parse: {}", e));
             }
             None => {
-                warn!("Outgoing connection disconnected");
-                return;
+                return Err(anyhow!("outgoing connection disconnected before handshake"));
             }
         };
 
-        // Now, setup a mpsc channel for outgoing messages
-        let (tx, mut rx) = mpsc::channel(10);
-        self.outgoing_connections.insert(them.clone(), tx.clone());
-
-        // Once both connections have been established, tell raft about it
-        // until we can both send and receive, it doesn't make sense to consider them for raft elections, for example
-        if self.incoming_connections.contains_key(&them) {
-            self.message_sender
-                .clone()
-                .send((them.clone(), AppMessage::Raft(RaftMessage::Connect)))
-                .await
-                .unwrap();
+        // They've signed our nonce, let's confirm they did it right
+        let signature = message.signature;
+        if let Err(e) = peer
+            .public_key
+            .verify(ecdh_public_key.as_bytes(), &signature)
+        {
+            return Err(anyhow!("signature does not match public key: {}", e));
         }
 
-        // So long as we have someone try to receive, and the socket isn't broken, we can send messages to the socket
-        while let Some(next) = rx.recv().await {
-            trace!("Sending message {:?} to {}", next, them);
-            if let Err(e) = sink.send(next).await {
-                warn!("Failed to send message: {}", e);
-                break;
-            }
-        }
-        // We got disconnected, so let the Raft protocol know to stop sending messages, and then return so we can try to connect again
-        warn!("Outgoing connection Disconnected");
-        self.outgoing_connections.remove(&them);
-        self.message_sender
-            .clone()
-            .send((them.clone(), AppMessage::Raft(RaftMessage::Disconnect)))
-            .await
-            .unwrap();
+        // and we're all set!
+        Ok(OutgoingConnection { ecdh_secret, sink })
     }
 
-    // send a message, by looking up the outgoing connection mpsc and sending to it
-    pub async fn send(&self, peer: &NodeId, message: AppMessage) -> Result<()> {
-        let message = Message::Application(message);
-        if let Some(sender) = self.outgoing_connections.get(peer) {
-            if let Err(e) = sender.send(message).await {
-                warn!(them = %peer, "Failed to send response: {}", e);
-                return Err(anyhow!("Failed to send response: {}", e));
-            }
-            Ok(())
-        } else {
-            let mut keys = vec![];
-            for kvp in self.outgoing_connections.iter() {
-                keys.push(kvp.key().clone());
-            }
-            warn!(
-                them = %peer,
-                nodes = format!("{:?}", keys),
-                "No connection to peer to send message"
-            );
-            Err(anyhow!("No connection to peer"))
-        }
-    }
+    async fn handle_peer_connections(
+        &self,
+        peer: &Peer,
+        incoming_connection: IncomingConnection,
+        outgoing_connection: OutgoingConnection,
+        outgoing_message_rx: &mut mpsc::Receiver<AppMessage>,
+    ) {
+        info!("Connected to {} ({})", peer.id, peer.address);
+        // try to tell Raft that we are definitely connected
+        let _ = self
+            .incoming_tx
+            .try_send((peer.id.clone(), AppMessage::Raft(RaftMessage::Connect)));
 
-    pub async fn broadcast(&self, message: AppMessage) {
-        for kvp in self.outgoing_connections.iter() {
-            let peer = kvp.key();
-            let sender = kvp.value();
-            let message = Message::Application(message.clone());
-            if let Err(e) = sender.send(message.clone()).await {
-                warn!(
-                    them = %peer,
-                    "No connection to peer to broadcast {:?}: {}", message, e
-                );
-            };
+        let shared_secret = outgoing_connection
+            .ecdh_secret
+            .diffie_hellman(&incoming_connection.ecdh_public_key);
+        let chacha_key = Key::from(shared_secret.to_bytes());
+        let chacha = XChaCha20Poly1305::new(&chacha_key);
+
+        let mut sink = outgoing_connection.sink;
+        let send_chacha = chacha.clone();
+        let them = peer.id.clone();
+        let send_task = async move {
+            while let Some(message) = outgoing_message_rx.recv().await {
+                let message = ApplicationMessage::encrypt(message, &send_chacha);
+                if let Err(e) = sink.send(Message::Application(message)).await {
+                    warn!(them = %them, "Failed to send message: {}", e);
+                    break;
+                }
+            }
+        };
+
+        let mut stream = incoming_connection.stream;
+        let incoming_message_tx = self.incoming_tx.clone();
+        let them = peer.id.clone();
+        let recv_task = async move {
+            while let Some(msg) = stream.next().await {
+                match msg {
+                    Ok(Message::Application(message)) => {
+                        let message = match message.decrypt(&chacha) {
+                            Ok(message) => message,
+                            Err(e) => {
+                                warn!(them = %them, "Failed to decrypt incoming message: {}", e);
+                                break;
+                            }
+                        };
+                        if let Err(e) = incoming_message_tx.send((them.clone(), message)).await {
+                            warn!(them = %them, "Failed to send message: {}", e);
+                            break;
+                        }
+                    }
+                    // If someone tries to Hello us again, break it off
+                    Ok(other) => {
+                        warn!(them = %them, "Unexpected message: {:?}", other);
+                        break;
+                    }
+                    // Someone is sending us messages that we can't parse
+                    Err(e) => {
+                        warn!(them = %them, "Failed to parse message: {}", e);
+                        break;
+                    }
+                }
+            }
+            warn!(them = %them, "Incomming connection Disconnected");
+        };
+
+        // Run until either the sender or receiver task stops running, then return so we can reconnect
+        select! {
+            _ = send_task => {},
+            _ = recv_task => {},
+        };
+
+        // try to warn raft that we aren't connected anymore
+        let _ = self
+            .incoming_tx
+            .try_send((peer.id.clone(), AppMessage::Raft(RaftMessage::Disconnect)));
+    }
+}
+
+async fn wait_for_disconnect(sink: &DeSink) {
+    let transport = sink.get_ref().get_ref();
+    loop {
+        sleep(Duration::from_millis(500)).await;
+        let Ok(ready) = transport.ready(Interest::WRITABLE).await else {
+            // if we get an error checking the stream's state, just assume it's closed
+            return;
+        };
+        if ready.is_write_closed() || ready.is_error() {
+            return;
         }
     }
+}
+
+fn parse_peer(config: &PeerConfig) -> Result<Peer> {
+    let public_key = {
+        let key_bytes = PublicKeyBytes::from_public_key_pem(&config.public_key)?;
+        PublicKey::from_bytes(&key_bytes.0)?
+    };
+    let id = compute_node_id(&public_key);
+    Ok(Peer {
+        id,
+        public_key,
+        address: config.address.clone(),
+    })
+}
+
+fn read_private_key() -> Result<PrivateKey> {
+    let key_path = env::var("PRIVATE_KEY_PATH").context("PRIVATE_KEY_PATH not set")?;
+    let key_pem_file = fs::read_to_string(key_path).context("could not load private key")?;
+    let decoded = KeypairBytes::from_pkcs8_pem(&key_pem_file)?;
+    let private_key = PrivateKey::from_bytes(&decoded.secret_key);
+    Ok(private_key)
+}
+
+fn compute_node_id(public_key: &PublicKey) -> NodeId {
+    NodeId::new(hex::encode(public_key.as_bytes()))
 }
