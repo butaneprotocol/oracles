@@ -44,7 +44,7 @@ services:
       --node-config, /config/config.json,
       --since, 49962542.b0f61babba6e357eee78cc4e55045a683eda0f1330a28333b6dc5af5320e3f76,
       --host, "0.0.0.0",
-      --match, "addr1w9qzpelu9hn45pefc0xr4ac4kdxeswq7pndul2vuj59u8tqaxdznu", # sundae
+      --match, "e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b/*", # sundae
       --match, "e1317b152faac13426e6a83e06ff88a4d62cce3c1634ab0a5ec13309/*", # minswap
       --match, "6b9c456aa650cb808a9ab54326e039d5235ed69f069c9664a8fe5b69/*", # spectrum
       --workdir, /db,

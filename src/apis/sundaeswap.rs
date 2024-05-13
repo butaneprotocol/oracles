@@ -70,8 +70,8 @@ impl SundaeSwapSource {
             .pools
             .iter()
             .map(|p| {
-                // the id of a pool in sundaeswap's API is the asset name (minus a two-byte prefix)
-                let prefix_len = config.sundaeswap.policy_id.len() + ".7020".len();
+                // the id of a pool in sundaeswap's API is the asset name (minus a four-byte prefix)
+                let prefix_len = config.sundaeswap.policy_id.len() + ".000de140".len();
                 let id = &p.asset_id[prefix_len..];
                 SundaeSwapPool {
                     token: p.token.clone(),

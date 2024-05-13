@@ -88,6 +88,7 @@ collateral:
     price: 45944.3
     digits: 8
   - name: BTN
+    asset_id: 016be5325fd988fea98ad422fcfd53e5352cacfced5c106a932a35a4.42544e
     price: 1.001
     digits: 6
   - name: DJED
@@ -141,28 +142,25 @@ bybit:
 sundaeswap:
   use_api: false
   kupo_address: http://kupo:1442
-  address: addr1w9qzpelu9hn45pefc0xr4ac4kdxeswq7pndul2vuj59u8tqaxdznu
-  policy_id: 0029cb7c88c7567b63d1a512c0ed626aa169688ec980730c0473b913
+  credential: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b/*
+  policy_id: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b
   pools:
-    - token: DJED
+    - token: BTN
       unit: ADA
-      asset_id: 0029cb7c88c7567b63d1a512c0ed626aa169688ec980730c0473b913.7020f803
-    - token: ENCS
+      asset_id: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b.000de1408e76c60dd3cbccdf8af264e560686078f05345d96d90c4af19c6c4f6
+    - token: iUSD
       unit: ADA
-      asset_id: 0029cb7c88c7567b63d1a512c0ed626aa169688ec980730c0473b913.70200d04
-    - token: LENFI
-      unit: ADA
-      asset_id: 0029cb7c88c7567b63d1a512c0ed626aa169688ec980730c0473b913.70201401
-    - token: MIN
-      unit: ADA
-      asset_id: 0029cb7c88c7567b63d1a512c0ed626aa169688ec980730c0473b913.702018
+      asset_id: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b.000de1401c34bd8d8fd17ee5594374277d40a0a1d082da41c97607a6ec13fb65
     - token: SNEK
       unit: ADA
-      asset_id: 0029cb7c88c7567b63d1a512c0ed626aa169688ec980730c0473b913.70201f04
+      asset_id: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b.000de140cacb7fd5f5b84bf876d40dc60d4991c72112d78d76132b1fb769e6ad
 minswap:
   kupo_address: http://kupo:1442
   credential: e1317b152faac13426e6a83e06ff88a4d62cce3c1634ab0a5ec13309/*
   pools:
+    - token: BTN
+      unit: ADA
+      asset_id: 0be55d262b29f564998ff81efe21bdc0022621c12f15af08d0f2ddb1.35b025a78482d2662e3b44fb8321996c6533faa48fb0f3fd81b11a034978e1e8
     - token: DJED
       unit: ADA
       asset_id: 0be55d262b29f564998ff81efe21bdc0022621c12f15af08d0f2ddb1.d944eda9d4fd8c26171a4362539bfd4ccf35f5a4d0cc7525b22327b997a4f4b9
@@ -188,6 +186,9 @@ spectrum:
   kupo_address: http://kupo:1442
   credential: 6b9c456aa650cb808a9ab54326e039d5235ed69f069c9664a8fe5b69/*
   pools:
+    - token: BTN
+      unit: ADA
+      asset_id: e8afc6fe1f4f3bef280bed8a9e3ba68dbc19c8dfade05d800c8bd3ed.42544e5f4144415f4e4654
     - token: ENCS
       unit: ADA
       asset_id: a209432e4f3aa5136521daa5c2be9bb12f52e3356359843620e26ea6.454e43535f4144415f4e4654
