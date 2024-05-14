@@ -304,7 +304,7 @@ mod tests {
                 is_inclusive: false,
             },
         };
-        let round_tripped = deserialize(&serialize(validity.clone())).unwrap();
+        let round_tripped = deserialize(&serialize(validity)).unwrap();
         assert_eq!(validity, round_tripped);
     }
 
@@ -314,7 +314,7 @@ mod tests {
             lower_bound: IntervalBound::unix_timestamp(1000000, true),
             upper_bound: IntervalBound::unix_timestamp(1005000, true),
         };
-        let round_tripped = deserialize(&serialize(validity.clone())).unwrap();
+        let round_tripped = deserialize(&serialize(validity)).unwrap();
         assert_eq!(validity, round_tripped);
     }
 

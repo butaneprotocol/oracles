@@ -628,12 +628,8 @@ mod tests {
         mpsc::Receiver<Vec<SignedPriceFeedEntry>>,
     )> {
         let mut rng = thread_rng();
-        let (shares, public_key) = keys::generate_with_dealer(
-            prices.len() as u16,
-            min,
-            IdentifierList::Default,
-            &mut rng,
-        )?;
+        let (shares, public_key) =
+            keys::generate_with_dealer(prices.len() as u16, min, IdentifierList::Default, rng)?;
 
         let mut network = TestNetwork::new();
         let (payload_sink, payload_source) = mpsc::channel(10);
@@ -704,7 +700,7 @@ mod tests {
             price: Decimal::from_f64(price).unwrap(),
             data: PriceFeed {
                 collateral_prices: collateral_prices
-                    .into_iter()
+                    .iter()
                     .map(|&p| BigUint::from(p))
                     .collect(),
                 synthetic: synthetic.into(),
