@@ -2389,7 +2389,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "oracles-offchain"
+name = "oracles"
 version = "0.1.0"
 dependencies = [
  "almost-raft",
