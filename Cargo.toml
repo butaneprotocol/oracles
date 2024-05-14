@@ -6,6 +6,7 @@ default-run = "oracles-offchain"
 description = "Oracles"
 homepage = "https://github.com/butaneprotocol/oracles"
 repository = "https://github.com/butaneprotocol/oracles"
+publish = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
