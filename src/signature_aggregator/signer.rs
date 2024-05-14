@@ -627,7 +627,7 @@ mod tests {
         TestNetwork<SignerMessage>,
         mpsc::Receiver<Vec<SignedPriceFeedEntry>>,
     )> {
-        let mut rng = thread_rng();
+        let rng = thread_rng();
         let (shares, public_key) =
             keys::generate_with_dealer(prices.len() as u16, min, IdentifierList::Default, rng)?;
 
