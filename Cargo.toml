@@ -1,8 +1,8 @@
 [package]
-name = "oracles-offchain"
+name = "oracles"
 version = "0.1.0"
 edition = "2021"
-default-run = "oracles-offchain"
+default-run = "oracles"
 description = "Oracles"
 homepage = "https://github.com/butaneprotocol/oracles"
 repository = "https://github.com/butaneprotocol/oracles"
@@ -46,6 +46,9 @@ tracing = "0.1.40"
 tracing-subscriber = { version = "0.3", features = ["json"] }
 uuid = { version = "1.7.0", features = ["v4"] }
 x25519-dalek = { version = "2", features = ["serde"] }
+
+[package.metadata.dist]
+dist = true
 
 # The profile that 'cargo dist' will build with
 [profile.dist]
