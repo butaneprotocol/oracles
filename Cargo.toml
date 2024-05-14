@@ -3,6 +3,9 @@ name = "oracles-offchain"
 version = "0.1.0"
 edition = "2021"
 default-run = "oracles-offchain"
+description = "Oracles"
+homepage = "https://github.com/butaneprotocol/oracles"
+repository = "https://github.com/butaneprotocol/oracles"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -35,10 +38,39 @@ serde_cbor = "0.11"
 serde_json = "1.0.114"
 tide = "0.16"
 tokio = { version = "1.36.0", features = ["full"] }
-tokio-serde = {version ="0.9", features = ["json", "cbor"] }
+tokio-serde = { version = "0.9", features = ["json", "cbor"] }
 tokio-tungstenite = { version = "0.21.0", features = ["native-tls"] }
 tokio-util = { version = "0.7", features = ["full"] }
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3", features = ["json"] }
 uuid = { version = "1.7.0", features = ["v4"] }
 x25519-dalek = { version = "2", features = ["serde"] }
+
+# The profile that 'cargo dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
+
+# Config for 'cargo dist'
+[workspace.metadata.dist]
+# The preferred cargo-dist version to use in CI (Cargo.toml SemVer syntax)
+cargo-dist-version = "0.14.1"
+# CI backends to support
+ci = "github"
+# The installers to generate for each app
+installers = ["shell", "powershell", "homebrew"]
+# A GitHub repo to push Homebrew formulas to
+tap = "butaneprotocol/homebrew-tap"
+# Target platforms to build apps for (Rust target-triple syntax)
+targets = [
+  "aarch64-apple-darwin",
+  "x86_64-apple-darwin",
+  "x86_64-unknown-linux-gnu",
+  "x86_64-pc-windows-msvc",
+]
+# Publish jobs to run in CI
+publish-jobs = ["homebrew"]
+# Publish jobs to run in CI
+pr-run-mode = "plan"
+# Whether to install an updater program
+install-updater = true
