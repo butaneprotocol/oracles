@@ -202,14 +202,14 @@ impl Core {
                         continue;
                     };
                     if let Err(e) = sender.send(message).await {
-                        warn!("Could not send message to node {}: {}", id, e);
+                        warn!("Could not send message to node {}: {:?}", id, e);
                     }
                 }
                 None => {
                     // Broadcasting to all nodes
                     for (id, sender) in outgoing_message_txs.iter() {
                         if let Err(e) = sender.send(message.clone()).await {
-                            warn!("Could not send message to node {}: {}", id, e);
+                            warn!("Could not send message to node {}: {:?}", id, e);
                         }
                     }
                 }
@@ -256,7 +256,7 @@ impl Core {
                 return;
             }
             Some(Err(e)) => {
-                warn!("Failed to parse: {}", e);
+                warn!("Failed to parse: {:?}", e);
                 return;
             }
             None => {
@@ -292,7 +292,7 @@ impl Core {
             })
             .await
         {
-            warn!(them = %them, "Could not send incoming connection: {}", e);
+            warn!(them = %them, "Could not send incoming connection: {:?}", e);
             return;
         }
 
@@ -308,7 +308,7 @@ impl Core {
                 trace!("Outgoing Hello sent");
             }
             Err(e) => {
-                warn!("Failed to send hello: {}", e);
+                warn!("Failed to send hello: {:?}", e);
             }
         }
     }
@@ -327,7 +327,7 @@ impl Core {
             let outgoing_connection = match self.connect_to_peer(&peer).await {
                 Ok(conn) => conn,
                 Err(e) => {
-                    warn!("error connecting to {}: {}", peer.id, e);
+                    warn!("error connecting to {}: {:#}", peer.id, e);
                     sleep(Duration::from_secs(1)).await;
                     continue;
                 }
@@ -403,7 +403,7 @@ impl Core {
                 return Err(anyhow!("expected ConfirmConnection, got {:?}", other));
             }
             Some(Err(e)) => {
-                return Err(anyhow!("failed to parse: {}", e));
+                return Err(anyhow!("failed to parse: {:?}", e));
             }
             None => {
                 return Err(anyhow!("outgoing connection disconnected before handshake"));
@@ -412,12 +412,9 @@ impl Core {
 
         // They've signed our nonce, let's confirm they did it right
         let signature = message.signature;
-        if let Err(e) = peer
-            .public_key
+        peer.public_key
             .verify(ecdh_public_key.as_bytes(), &signature)
-        {
-            return Err(anyhow!("signature does not match public key: {}", e));
-        }
+            .context("signature does not match public key")?;
 
         // and we're all set!
         Ok(OutgoingConnection { ecdh_secret, sink })
@@ -449,7 +446,7 @@ impl Core {
             while let Some(message) = outgoing_message_rx.recv().await {
                 let message = ApplicationMessage::encrypt(message, &send_chacha);
                 if let Err(e) = sink.send(Message::Application(message)).await {
-                    warn!(them = %them, "Failed to send message: {}", e);
+                    warn!(them = %them, "Failed to send message: {:?}", e);
                     break;
                 }
             }
@@ -465,12 +462,12 @@ impl Core {
                         let message = match message.decrypt(&chacha) {
                             Ok(message) => message,
                             Err(e) => {
-                                warn!(them = %them, "Failed to decrypt incoming message: {}", e);
+                                warn!(them = %them, "Failed to decrypt incoming message: {:#}", e);
                                 break;
                             }
                         };
                         if let Err(e) = incoming_message_tx.send((them.clone(), message)).await {
-                            warn!(them = %them, "Failed to send message: {}", e);
+                            warn!(them = %them, "Failed to send message: {:?}", e);
                             break;
                         }
                     }
@@ -481,12 +478,12 @@ impl Core {
                     }
                     // Someone is sending us messages that we can't parse
                     Err(e) => {
-                        warn!(them = %them, "Failed to parse message: {}", e);
+                        warn!(them = %them, "Failed to parse message: {:?}", e);
                         break;
                     }
                 }
             }
-            warn!(them = %them, "Incomming connection Disconnected");
+            warn!(them = %them, "Incoming connection Disconnected");
         };
 
         // Run until either the sender or receiver task stops running, then return so we can reconnect
