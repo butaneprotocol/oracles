@@ -1,7 +1,7 @@
 use std::{collections::HashMap, time::Duration};
 
 use anyhow::Result;
-use config::{Config, Environment, File};
+use config::{Config, Environment, File, FileFormat};
 use kupon::AssetId;
 use rust_decimal::Decimal;
 use serde::Deserialize;
@@ -159,7 +159,10 @@ pub struct HydratedPool {
 }
 
 pub fn load_config(config_files: &[String]) -> Result<OracleConfig> {
-    let mut builder = Config::builder().add_source(File::with_name("config.base.yaml"));
+    let mut builder = Config::builder().add_source(File::from_str(
+        include_str!("../config.base.yaml"),
+        FileFormat::Yaml,
+    ));
     for config_file in config_files {
         builder = builder.add_source(File::with_name(config_file));
     }
