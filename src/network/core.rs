@@ -339,6 +339,7 @@ impl Core {
         outgoing_message_rx: mpsc::Receiver<AppMessage>,
     ) {
         let outgoing_message_rx = Mutex::new(outgoing_message_rx);
+        let mut sleep_secs = 1u64;
         loop {
             // Every time the outgoing or incoming connections are closed, we need to reconnect to both.
             // Because we store both connections in local variables inside this loop,
@@ -347,10 +348,12 @@ impl Core {
                 Ok(conn) => conn,
                 Err(e) => {
                     warn!("error connecting to {}: {:#}", peer.id, e);
-                    sleep(Duration::from_secs(1)).await;
+                    sleep(Duration::from_secs(sleep_secs)).await;
+                    sleep_secs = if sleep_secs >= 8 { 8 } else { sleep_secs * 2 };
                     continue;
                 }
             };
+            sleep_secs = 1u64;
             let incoming_connection = select! {
                 incoming = incoming_connection_rx.recv() => {
                     let Some(conn) = incoming else {
