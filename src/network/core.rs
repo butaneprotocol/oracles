@@ -25,7 +25,7 @@ use tokio::{
 };
 use tokio_serde::{formats::Cbor, Framed};
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
-use tracing::{info, trace, warn};
+use tracing::{info, trace, warn, Instrument};
 use x25519_dalek as ecdh;
 
 type Nonce = chacha20poly1305::aead::generic_array::GenericArray<u8, chacha20poly1305::consts::U24>;
@@ -42,8 +42,12 @@ type WrappedSink = FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>;
 type SerStream = Framed<WrappedStream, Message, (), Cbor<Message, ()>>;
 type DeSink = Framed<WrappedSink, (), Message, Cbor<(), Message>>;
 
+const ORACLE_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 struct OpenConnectionMessage {
+    /// The app version of the other node
+    version: String,
     /// The other node's public key, used to identify them
     id_public_key: PublicKey,
     /// An ephemeral public key, used for ECDH
@@ -169,20 +173,28 @@ impl Core {
             let (outgoing_message_tx, outgoing_message_rx) = mpsc::channel(10);
             outgoing_message_txs.insert(peer.id.clone(), outgoing_message_tx);
 
-            set.spawn(async move {
-                core.handle_peer(peer, incoming_connection_rx, outgoing_message_rx)
-                    .await
-            });
+            set.spawn(
+                async move {
+                    core.handle_peer(peer, incoming_connection_rx, outgoing_message_rx)
+                        .await
+                }
+                .in_current_span(),
+            );
         }
 
         // One task listens for new connections and sends them to the appropriate peer task
         let core = self.clone();
-        set.spawn(async move { core.accept_connections(incoming_connection_txs).await });
+        set.spawn(
+            async move { core.accept_connections(incoming_connection_txs).await }.in_current_span(),
+        );
 
         // One task polls for outgoing messages, and tells the appropriate peer task to send them
-        set.spawn(async move {
-            self.send_messages(outgoing_message_txs).await;
-        });
+        set.spawn(
+            async move {
+                self.send_messages(outgoing_message_txs).await;
+            }
+            .in_current_span(),
+        );
 
         while let Some(x) = set.join_next().await {
             x?
@@ -202,14 +214,14 @@ impl Core {
                         continue;
                     };
                     if let Err(e) = sender.send(message).await {
-                        warn!("Could not send message to node {}: {}", id, e);
+                        warn!("Could not send message to node {}: {:?}", id, e);
                     }
                 }
                 None => {
                     // Broadcasting to all nodes
                     for (id, sender) in outgoing_message_txs.iter() {
                         if let Err(e) = sender.send(message.clone()).await {
-                            warn!("Could not send message to node {}: {}", id, e);
+                            warn!("Could not send message to node {}: {:?}", id, e);
                         }
                     }
                 }
@@ -230,9 +242,12 @@ impl Core {
             let core = self.clone();
             let txs = incoming_connection_txs.clone();
             // Each incoming connection spawns its own thread to handling incoming messages
-            tokio::spawn(async move {
-                core.handle_incoming_connection(stream, txs).await;
-            });
+            tokio::spawn(
+                async move {
+                    core.handle_incoming_connection(stream, txs).await;
+                }
+                .in_current_span(),
+            );
         }
     }
 
@@ -256,7 +271,7 @@ impl Core {
                 return;
             }
             Some(Err(e)) => {
-                warn!("Failed to parse: {}", e);
+                warn!("Failed to parse: {:?}", e);
                 return;
             }
             None => {
@@ -264,6 +279,13 @@ impl Core {
                 return;
             }
         };
+
+        if message.version != ORACLE_VERSION {
+            warn!(
+                other_version = message.version,
+                "Other node is running a different oracle version"
+            )
+        }
 
         // Grab the ecdh nonce they sent us
         let ecdh_public_key = message.ecdh_public_key;
@@ -292,7 +314,7 @@ impl Core {
             })
             .await
         {
-            warn!(them = %them, "Could not send incoming connection: {}", e);
+            warn!(them = %them, "Could not send incoming connection: {:?}", e);
             return;
         }
 
@@ -308,7 +330,7 @@ impl Core {
                 trace!("Outgoing Hello sent");
             }
             Err(e) => {
-                warn!("Failed to send hello: {}", e);
+                warn!("Failed to send hello: {:?}", e);
             }
         }
     }
@@ -320,6 +342,7 @@ impl Core {
         outgoing_message_rx: mpsc::Receiver<AppMessage>,
     ) {
         let outgoing_message_rx = Mutex::new(outgoing_message_rx);
+        let mut sleep_secs = 1u64;
         loop {
             // Every time the outgoing or incoming connections are closed, we need to reconnect to both.
             // Because we store both connections in local variables inside this loop,
@@ -327,11 +350,13 @@ impl Core {
             let outgoing_connection = match self.connect_to_peer(&peer).await {
                 Ok(conn) => conn,
                 Err(e) => {
-                    warn!("error connecting to {}: {}", peer.id, e);
-                    sleep(Duration::from_secs(1)).await;
+                    warn!("error connecting to {}: {:#}", peer.id, e);
+                    sleep(Duration::from_secs(sleep_secs)).await;
+                    sleep_secs = if sleep_secs >= 8 { 8 } else { sleep_secs * 2 };
                     continue;
                 }
             };
+            sleep_secs = 1u64;
             let incoming_connection = select! {
                 incoming = incoming_connection_rx.recv() => {
                     let Some(conn) = incoming else {
@@ -387,6 +412,7 @@ impl Core {
         let signature = self.private_key.sign(ecdh_public_key.as_bytes());
 
         let message = OpenConnectionMessage {
+            version: ORACLE_VERSION.to_string(),
             id_public_key,
             ecdh_public_key,
             signature,
@@ -403,7 +429,7 @@ impl Core {
                 return Err(anyhow!("expected ConfirmConnection, got {:?}", other));
             }
             Some(Err(e)) => {
-                return Err(anyhow!("failed to parse: {}", e));
+                return Err(anyhow!("failed to parse: {:?}", e));
             }
             None => {
                 return Err(anyhow!("outgoing connection disconnected before handshake"));
@@ -412,12 +438,9 @@ impl Core {
 
         // They've signed our nonce, let's confirm they did it right
         let signature = message.signature;
-        if let Err(e) = peer
-            .public_key
+        peer.public_key
             .verify(ecdh_public_key.as_bytes(), &signature)
-        {
-            return Err(anyhow!("signature does not match public key: {}", e));
-        }
+            .context("signature does not match public key")?;
 
         // and we're all set!
         Ok(OutgoingConnection { ecdh_secret, sink })
@@ -449,7 +472,7 @@ impl Core {
             while let Some(message) = outgoing_message_rx.recv().await {
                 let message = ApplicationMessage::encrypt(message, &send_chacha);
                 if let Err(e) = sink.send(Message::Application(message)).await {
-                    warn!(them = %them, "Failed to send message: {}", e);
+                    warn!(them = %them, "Failed to send message: {:?}", e);
                     break;
                 }
             }
@@ -465,12 +488,12 @@ impl Core {
                         let message = match message.decrypt(&chacha) {
                             Ok(message) => message,
                             Err(e) => {
-                                warn!(them = %them, "Failed to decrypt incoming message: {}", e);
+                                warn!(them = %them, "Failed to decrypt incoming message: {:#}", e);
                                 break;
                             }
                         };
                         if let Err(e) = incoming_message_tx.send((them.clone(), message)).await {
-                            warn!(them = %them, "Failed to send message: {}", e);
+                            warn!(them = %them, "Failed to send message: {:?}", e);
                             break;
                         }
                     }
@@ -481,12 +504,12 @@ impl Core {
                     }
                     // Someone is sending us messages that we can't parse
                     Err(e) => {
-                        warn!(them = %them, "Failed to parse message: {}", e);
+                        warn!(them = %them, "Failed to parse message: {:?}", e);
                         break;
                     }
                 }
             }
-            warn!(them = %them, "Incomming connection Disconnected");
+            warn!(them = %them, "Incoming connection Disconnected");
         };
 
         // Run until either the sender or receiver task stops running, then return so we can reconnect
