@@ -14,7 +14,7 @@ use tokio::{
     task::{JoinError, JoinSet},
     time::sleep,
 };
-use tracing::{info, Instrument, Level};
+use tracing::{info, info_span, Instrument, Level, Span};
 use tracing_subscriber::FmtSubscriber;
 
 pub mod apis;
@@ -186,7 +186,7 @@ where
     }
 }
 
-fn init_tracing(config: &LogConfig) -> Result<()> {
+fn init_tracing(config: &LogConfig) -> Result<Span> {
     let level = Level::from_str(&config.level)?;
     if config.json {
         let subscriber = FmtSubscriber::builder()
@@ -201,7 +201,8 @@ fn init_tracing(config: &LogConfig) -> Result<()> {
             .finish();
         tracing::subscriber::set_global_default(subscriber)?;
     }
-    Ok(())
+    let span = info_span!("oracles", version = env!("CARGO_PKG_VERSION"));
+    Ok(span)
 }
 
 #[tokio::main]
@@ -213,10 +214,11 @@ async fn main() -> Result<()> {
 
     let config = Arc::new(load_config(&args.config_file)?);
 
-    init_tracing(&config.logs)?;
+    let span = init_tracing(&config.logs)?;
+    span.in_scope(|| info!("Node starting..."));
 
     if config.keygen.enabled {
-        keygen::run(&config).await?;
+        keygen::run(&config).instrument(span).await?;
         return Ok(());
     }
 
@@ -225,9 +227,11 @@ async fn main() -> Result<()> {
     // Start the node, which will spawn a bunch of threads and infinite loop
     if debug {
         let restart_after = config.timeout() + Duration::from_secs(1);
-        run_debug(node_factory, restart_after).await?;
+        run_debug(node_factory, restart_after)
+            .instrument(span)
+            .await?;
     } else {
-        run(node_factory).await?;
+        run(node_factory).instrument(span).await?;
     }
     Ok(())
 }

@@ -25,7 +25,7 @@ use tokio::{
 };
 use tokio_serde::{formats::Cbor, Framed};
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
-use tracing::{info, trace, warn};
+use tracing::{info, trace, warn, Instrument};
 use x25519_dalek as ecdh;
 
 type Nonce = chacha20poly1305::aead::generic_array::GenericArray<u8, chacha20poly1305::consts::U24>;
@@ -169,20 +169,28 @@ impl Core {
             let (outgoing_message_tx, outgoing_message_rx) = mpsc::channel(10);
             outgoing_message_txs.insert(peer.id.clone(), outgoing_message_tx);
 
-            set.spawn(async move {
-                core.handle_peer(peer, incoming_connection_rx, outgoing_message_rx)
-                    .await
-            });
+            set.spawn(
+                async move {
+                    core.handle_peer(peer, incoming_connection_rx, outgoing_message_rx)
+                        .await
+                }
+                .in_current_span(),
+            );
         }
 
         // One task listens for new connections and sends them to the appropriate peer task
         let core = self.clone();
-        set.spawn(async move { core.accept_connections(incoming_connection_txs).await });
+        set.spawn(
+            async move { core.accept_connections(incoming_connection_txs).await }.in_current_span(),
+        );
 
         // One task polls for outgoing messages, and tells the appropriate peer task to send them
-        set.spawn(async move {
-            self.send_messages(outgoing_message_txs).await;
-        });
+        set.spawn(
+            async move {
+                self.send_messages(outgoing_message_txs).await;
+            }
+            .in_current_span(),
+        );
 
         while let Some(x) = set.join_next().await {
             x?
@@ -230,9 +238,12 @@ impl Core {
             let core = self.clone();
             let txs = incoming_connection_txs.clone();
             // Each incoming connection spawns its own thread to handling incoming messages
-            tokio::spawn(async move {
-                core.handle_incoming_connection(stream, txs).await;
-            });
+            tokio::spawn(
+                async move {
+                    core.handle_incoming_connection(stream, txs).await;
+                }
+                .in_current_span(),
+            );
         }
     }
 

@@ -13,7 +13,7 @@ use frost_ed25519::{
 use rand::thread_rng;
 use serde::{Deserialize, Serialize};
 use tokio::{sync::watch, time::sleep};
-use tracing::info;
+use tracing::{info, Instrument};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Part1Message {
@@ -44,7 +44,7 @@ pub async fn run(config: &OracleConfig) -> Result<()> {
 
     // Run our network layer in the background after setting up a "keygen" channel
     let channel = network.keygen_channel();
-    tokio::spawn(async move { network.listen().await.unwrap() });
+    tokio::spawn(async move { network.listen().await.unwrap() }.in_current_span());
     let (sender, mut receiver) = channel.split();
 
     // use our ID to get a stable/unique cryptographic identifier
@@ -63,34 +63,40 @@ pub async fn run(config: &OracleConfig) -> Result<()> {
 
     // Keep broadcasting our round 1 payload until everyone has finished (in case someone disconnects or joins late)
     let part1_sender = sender.clone();
-    tokio::spawn(async move {
-        loop {
-            let package = Box::new(round1_package.clone());
-            let message = Part1Message { package };
-            part1_sender.broadcast(KeygenMessage::Part1(message)).await;
-            sleep(Duration::from_secs(1)).await;
+    tokio::spawn(
+        async move {
+            loop {
+                let package = Box::new(round1_package.clone());
+                let message = Part1Message { package };
+                part1_sender.broadcast(KeygenMessage::Part1(message)).await;
+                sleep(Duration::from_secs(1)).await;
+            }
         }
-    });
+        .in_current_span(),
+    );
 
     // Also send our round 2 payloads (once we have them)
     let (outgoing_round2_packages_tx, outgoing_round2_packages_rx) =
         watch::channel(BTreeMap::new());
     let identifiers = identifier_lookup.clone();
     let part2_sender = sender.clone();
-    tokio::spawn(async move {
-        loop {
-            // clone this so we aren't holding a lock for too long
-            let round2_packages = outgoing_round2_packages_rx.borrow().clone();
-            for (identifier, package) in round2_packages {
-                let to: NodeId = identifiers.get(&identifier).unwrap().clone();
-                let message = Part2Message {
-                    package: Box::new(package),
-                };
-                part2_sender.send(to, KeygenMessage::Part2(message)).await;
+    tokio::spawn(
+        async move {
+            loop {
+                // clone this so we aren't holding a lock for too long
+                let round2_packages = outgoing_round2_packages_rx.borrow().clone();
+                for (identifier, package) in round2_packages {
+                    let to: NodeId = identifiers.get(&identifier).unwrap().clone();
+                    let message = Part2Message {
+                        package: Box::new(package),
+                    };
+                    part2_sender.send(to, KeygenMessage::Part2(message)).await;
+                }
+                sleep(Duration::from_secs(1)).await;
             }
-            sleep(Duration::from_secs(1)).await;
         }
-    });
+        .in_current_span(),
+    );
 
     let mut round1_packages = BTreeMap::new();
     let mut round2_secret_package: Option<round2::SecretPackage> = None;

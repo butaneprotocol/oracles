@@ -1,7 +1,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use tokio::{sync::mpsc, task::JoinSet};
-use tracing::{info, warn};
+use tracing::{info, warn, Instrument};
 
 use crate::config::OracleConfig;
 use crate::keygen::KeygenMessage;
@@ -81,25 +81,31 @@ impl Network {
         let signer_sender = send_messages(&mut set, &sender, self.signer, Message::Signer);
 
         let mut receiver = self.incoming_receiver;
-        set.spawn(async move {
-            while let Some((from, data)) = receiver.recv().await {
-                match data {
-                    Message::Keygen(data) => {
-                        receive_message(from, data, &keygen_sender).await;
-                    }
-                    Message::Raft(data) => {
-                        receive_message(from, data, &raft_sender).await;
-                    }
-                    Message::Signer(data) => {
-                        receive_message(from, data, &signer_sender).await;
+        set.spawn(
+            async move {
+                while let Some((from, data)) = receiver.recv().await {
+                    match data {
+                        Message::Keygen(data) => {
+                            receive_message(from, data, &keygen_sender).await;
+                        }
+                        Message::Raft(data) => {
+                            receive_message(from, data, &raft_sender).await;
+                        }
+                        Message::Signer(data) => {
+                            receive_message(from, data, &signer_sender).await;
+                        }
                     }
                 }
             }
-        });
+            .in_current_span(),
+        );
 
-        set.spawn(async move {
-            self.core.handle_network().await.unwrap();
-        });
+        set.spawn(
+            async move {
+                self.core.handle_network().await.unwrap();
+            }
+            .in_current_span(),
+        );
 
         while let Some(x) = set.join_next().await {
             x?;
