@@ -281,7 +281,10 @@ impl Core {
         };
 
         if message.version != ORACLE_VERSION {
-            warn!(other_version = message.version, "Other node is running a different oracle version")
+            warn!(
+                other_version = message.version,
+                "Other node is running a different oracle version"
+            )
         }
 
         // Grab the ecdh nonce they sent us
