@@ -42,8 +42,12 @@ type WrappedSink = FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>;
 type SerStream = Framed<WrappedStream, Message, (), Cbor<Message, ()>>;
 type DeSink = Framed<WrappedSink, (), Message, Cbor<(), Message>>;
 
+const ORACLE_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 struct OpenConnectionMessage {
+    /// The app version of the other node
+    version: String,
     /// The other node's public key, used to identify them
     id_public_key: PublicKey,
     /// An ephemeral public key, used for ECDH
@@ -276,6 +280,10 @@ impl Core {
             }
         };
 
+        if message.version != ORACLE_VERSION {
+            warn!(other_version = message.version, "Other node is running a different oracle version")
+        }
+
         // Grab the ecdh nonce they sent us
         let ecdh_public_key = message.ecdh_public_key;
 
@@ -398,6 +406,7 @@ impl Core {
         let signature = self.private_key.sign(ecdh_public_key.as_bytes());
 
         let message = OpenConnectionMessage {
+            version: ORACLE_VERSION.to_string(),
             id_public_key,
             ecdh_public_key,
             signature,
