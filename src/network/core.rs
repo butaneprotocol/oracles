@@ -471,6 +471,7 @@ impl Core {
         let shared_secret = outgoing_connection
             .ecdh_secret
             .diffie_hellman(&incoming_connection.ecdh_public_key);
+        info!("Shared secret: {}", hex::encode(shared_secret.as_bytes()));
         let chacha_key = Key::from(shared_secret.to_bytes());
         let chacha = XChaCha20Poly1305::new(&chacha_key);
 
