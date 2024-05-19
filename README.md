@@ -36,7 +36,7 @@ This oracle supports a "keygen mode". If every node is running in "keygen mode",
 
 To initiate DKG, set `keygen.enabled` to `true` in your `config.yaml`. Make sure that every node agrees on the value of `keygen.min_signers`, or DKG will fail.
 
-Once every node is online, they will finish DKG and store the keys to disk. Once those files exist, you should update your configuration with a new `frost_public_key` and disable keygen mode (by setting `keygen.enabled` to `false`).
+Once every node is online, they will finish DKG and store the keys to disk. Once those files exist, you should update your configuration with a new `frost_address` and disable keygen mode (by setting `keygen.enabled` to `false`).
 
 #### Without DKG 
 

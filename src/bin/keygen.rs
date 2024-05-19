@@ -27,19 +27,19 @@ pub fn main() -> Result<()> {
     )?;
 
     let keys_path = current_dir()?.join("keys");
-    let mut key_hash = None;
+    let mut address = None;
     for (index, share) in shares.into_values().enumerate() {
         let keys_dir = keys_path.join(format!("node{}", index));
         fs::create_dir_all(&keys_dir)?;
         let privkey_package: KeyPackage = share.try_into()?;
-        key_hash = Some(keys::write_frost_keys(
+        address = Some(keys::write_frost_keys(
             &keys_dir,
             privkey_package,
             pubkey_package.clone(),
         )?);
     }
 
-    println!("The new frost public key is: {}", key_hash.unwrap());
+    println!("The new frost address is: {}", address.unwrap());
 
     Ok(())
 }

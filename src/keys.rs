@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use bech32::{Hrp, NoChecksum};
+use bech32::{Bech32, Hrp};
 use frost_ed25519::keys::{KeyPackage, PublicKeyPackage};
 use pallas_crypto::hash::Hasher;
 use std::{
@@ -51,19 +51,23 @@ pub fn write_frost_keys(
     private_key: KeyPackage,
     public_key: PublicKeyPackage,
 ) -> Result<String> {
+    let verifying_key = public_key.verifying_key();
+    let address = compute_address(&verifying_key.serialize())?;
+    let frost_key_path = keys_dir.join(&address);
+    fs::create_dir_all(&frost_key_path)?;
+
     let private_key_bytes = private_key.serialize()?;
     let public_key_bytes = public_key.serialize()?;
-    let public_key_hash = encode(&public_key_bytes)?;
-    let frost_key_path = keys_dir.join(&public_key_hash);
-    fs::create_dir_all(&frost_key_path)?;
     fs::write(frost_key_path.join("frost.skey"), private_key_bytes)?;
     fs::write(frost_key_path.join("frost.vkey"), public_key_bytes)?;
-    Ok(public_key_hash)
+    Ok(address)
 }
 
 const ADDR_HRP: Hrp = Hrp::parse_unchecked("addr");
 
-fn encode(bytes: &[u8]) -> Result<String> {
-    let blake2b = Hasher::<224>::hash(bytes);
-    Ok(bech32::encode::<NoChecksum>(ADDR_HRP, blake2b.as_ref())?)
+fn compute_address(verifying_key: &[u8]) -> Result<String> {
+    let blake2b = Hasher::<224>::hash(verifying_key);
+    let mut bytes = vec![0x61];
+    bytes.extend_from_slice(blake2b.as_ref());
+    Ok(bech32::encode::<Bech32>(ADDR_HRP, &bytes)?)
 }
