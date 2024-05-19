@@ -4,7 +4,7 @@ use tokio::{sync::mpsc, task::JoinSet};
 use tracing::{info, warn, Instrument};
 
 use crate::config::OracleConfig;
-use crate::keygen::KeygenMessage;
+use crate::dkg::KeygenMessage;
 use crate::raft::RaftMessage;
 use crate::signature_aggregator::signer::SignerMessage;
 pub use channel::{NetworkChannel, NetworkReceiver, NetworkSender};
