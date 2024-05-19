@@ -1,6 +1,6 @@
-use std::{env, fs, time::Duration};
+use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Result};
 use frost_ed25519::keys::{KeyPackage, PublicKeyPackage};
 use tokio::{
     select,
@@ -13,6 +13,8 @@ use tokio::{
 use tracing::{warn, Instrument};
 
 use crate::{
+    config::OracleConfig,
+    keys,
     network::{NetworkChannel, NetworkReceiver, NodeId},
     price_feed::{PriceFeedEntry, SignedPriceFeedEntry},
     raft::RaftLeader,
@@ -27,13 +29,14 @@ pub struct ConsensusSignatureAggregator {
 }
 impl ConsensusSignatureAggregator {
     pub fn new(
+        config: &OracleConfig,
         id: NodeId,
         channel: NetworkChannel<SignerMessage>,
         price_source: Receiver<Vec<PriceFeedEntry>>,
         leader_source: Receiver<RaftLeader>,
         signed_price_sink: Sender<Vec<SignedPriceFeedEntry>>,
     ) -> Result<Self> {
-        let (key, public_key) = Self::load_keys()?;
+        let (key, public_key) = Self::load_keys(config)?;
         let (outgoing_message_sink, message_source) = channel.split();
         let signer = Signer::new(
             id,
@@ -117,15 +120,11 @@ impl ConsensusSignatureAggregator {
         }
     }
 
-    fn load_keys() -> Result<(KeyPackage, PublicKeyPackage)> {
-        let key_path = env::var("FROST_KEY_PATH").context("FROST_KEY_PATH not set")?;
-        let key_bytes = fs::read(key_path).context("could not load frost private key")?;
-        let key = KeyPackage::deserialize(&key_bytes)?;
-        let public_key_path =
-            env::var("FROST_PUBLIC_KEY_PATH").context("FROST_PUBLIC_KEY_PATH not set")?;
-        let public_key_bytes =
-            fs::read(public_key_path).context("could not load frost public key")?;
-        let public_key = PublicKeyPackage::deserialize(&public_key_bytes)?;
-        Ok((key, public_key))
+    fn load_keys(config: &OracleConfig) -> Result<(KeyPackage, PublicKeyPackage)> {
+        let keys_dir = keys::get_keys_directory()?;
+        let public_key_hash = config.frost_public_key.as_ref().ok_or_else(|| {
+            anyhow!("No frost_public_key found in config. Please generate frost keys.")
+        })?;
+        keys::read_frost_keys(&keys_dir, public_key_hash)
     }
 }

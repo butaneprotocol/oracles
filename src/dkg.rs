@@ -1,7 +1,8 @@
-use std::{collections::BTreeMap, env, fs, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use crate::{
     config::OracleConfig,
+    keys::{self, get_keys_directory},
     network::{Network, NodeId},
 };
 use anyhow::{anyhow, Context, Result};
@@ -35,10 +36,13 @@ pub async fn run(config: &OracleConfig) -> Result<()> {
     let mut network = Network::new(config)?;
     let id = network.id.clone();
 
-    // Fetch the paths to store the frost keys early, so we can fail fast on misconfiguration.
-    let key_path = env::var("FROST_KEY_PATH").context("FROST_KEY_PATH not set")?;
-    let public_key_path =
-        env::var("FROST_PUBLIC_KEY_PATH").context("FROST_PUBLIC_KEY_PATH not set")?;
+    let keys_dir = get_keys_directory()?;
+
+    // Log where the keys will be saved
+    info!(
+        "Running in DKG mode. Will generate frost keys into {}.",
+        keys_dir.display()
+    );
 
     let identifier_lookup: Arc<DashMap<Identifier, NodeId>> = Arc::new(DashMap::new());
 
@@ -141,10 +145,10 @@ pub async fn run(config: &OracleConfig) -> Result<()> {
                     let (key_package, public_key_package) =
                         part3(round2_secret_package, &round1_packages, &round2_packages)?;
                     info!("Key generation complete!");
-                    fs::write(&key_path, key_package.serialize()?)?;
-                    info!("Frost private key saved to {}", key_path);
-                    fs::write(&public_key_path, public_key_package.serialize()?)?;
-                    info!("Frost public key saved to {}", public_key_path);
+                    let key_hash =
+                        keys::write_frost_keys(&keys_dir, key_package, public_key_package)
+                            .context("Could not save frost keys")?;
+                    info!("The new frost public key is: {}", key_hash);
                 }
             }
         }
