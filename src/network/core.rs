@@ -283,6 +283,7 @@ impl Core {
                 return;
             }
         };
+        info!("open connect message received: {:?}", message);
 
         if message.version != ORACLE_VERSION {
             warn!(
@@ -329,6 +330,7 @@ impl Core {
 
         // And finally, acknowledge them (and prove who we are) by signing their nonce
         let signature = self.private_key.sign(ecdh_public_key.as_bytes());
+        info!("confirm connect message sent: {:?}", ConfirmConnectionMessage { signature: signature.clone() });
         match sink
             .send(Message::ConfirmConnection(ConfirmConnectionMessage {
                 signature,
@@ -426,6 +428,7 @@ impl Core {
             ecdh_public_key,
             signature,
         };
+        info!("open connect message sent: {:?}", message);
         sink.send(Message::OpenConnection(Box::new(message)))
             .await
             .context("error sending open message")?;
@@ -444,6 +447,7 @@ impl Core {
                 return Err(anyhow!("outgoing connection disconnected before handshake"));
             }
         };
+        info!("confirm connect message received: {:?}", message);
 
         // They've signed our nonce, let's confirm they did it right
         let signature = message.signature;
@@ -493,6 +497,7 @@ impl Core {
         let them = peer.label.clone();
         let recv_task = async move {
             while let Some(msg) = stream.next().await {
+                info!("post-handshake message received: {:?}", msg);
                 match msg {
                     Ok(Message::Application(message)) => {
                         let message = match message.decrypt(&chacha) {
