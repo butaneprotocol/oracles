@@ -144,7 +144,7 @@ pub async fn run(config: &OracleConfig) -> Result<()> {
                     fs::write(&key_path, key_package.serialize()?)?;
                     info!("Frost private key saved to {}", key_path);
                     fs::write(&public_key_path, public_key_package.serialize()?)?;
-                    info!("Frost public key saved to {}", key_path);
+                    info!("Frost public key saved to {}", public_key_path);
                 }
             }
         }

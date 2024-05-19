@@ -3,11 +3,13 @@ keygen:
   min_signers: 2 # How many signers do we need to publish a package? Every node must agree on this.
 peers:
   - address: 127.0.0.1:8001
+    label: Descriptive label
     public_key: |
       -----BEGIN PUBLIC KEY-----
       MCowBQYDK2VwAyEAtYoVpsW+gRlzXM9Iu3OBoopNj6y5OB8oeOJIWD10G/U=
       -----END PUBLIC KEY-----
   - address: 127.0.0.1:8002
+    label: Who's this
     public_key: |
       -----BEGIN PUBLIC KEY-----
       MCowBQYDK2VwAyEAg1sXWpm7CUeBGj9pdCgAVjKtJhEwL9s3BH1Ua9y6Nm0=

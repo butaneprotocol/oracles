@@ -18,7 +18,7 @@ services:
       timeout: 10s
       retries: 1
     ports:
-      - 8000:8000
+      - 31415:31415
       - 18000:18000
     restart: unless-stopped
     secrets:

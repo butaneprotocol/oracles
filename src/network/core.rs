@@ -105,6 +105,7 @@ enum Message {
 struct Peer {
     id: NodeId,
     public_key: PublicKey,
+    label: String,
     address: String,
 }
 
@@ -138,6 +139,8 @@ impl Core {
     ) -> Result<Self> {
         let private_key = Arc::new(read_private_key()?);
         let id = compute_node_id(&private_key.verifying_key());
+        info!("This node has ID {}", id);
+
         let peers = {
             let peers: Result<Vec<Peer>> = config.peers.iter().map(parse_peer).collect();
             Arc::new(peers?)
@@ -292,19 +295,24 @@ impl Core {
 
         // Figure out who they are based on the public key they sent us
         let id_public_key = message.id_public_key;
-        let them = compute_node_id(&id_public_key);
+        let peer_id = compute_node_id(&id_public_key);
+        let Some(peer) = self.peers.iter().find(|p| p.id == peer_id) else {
+            warn!("Unrecognized peer {}", peer_id);
+            return;
+        };
+        let them = peer.label.clone();
 
         // Confirm that they are who they say they are; they should have signed the ecdh nonce with their private key
         let signature = message.signature;
         if let Err(e) = id_public_key.verify(ecdh_public_key.as_bytes(), &signature) {
-            warn!(them = %them, "Signature does not match public key: {}", e);
+            warn!(them, "Signature does not match public key: {}", e);
             return;
         }
 
         // Notify whoever's listening that we have a new connection
         // (We look up the "incoming connection" sender, so if we don't recognize them we fail here)
-        let Some(connection_tx) = txs.get(&them) else {
-            warn!(them = %them, "Other node not recognized");
+        let Some(connection_tx) = txs.get(&peer_id) else {
+            warn!(them, "Other node not recognized");
             return;
         };
         if let Err(e) = connection_tx
@@ -314,7 +322,7 @@ impl Core {
             })
             .await
         {
-            warn!(them = %them, "Could not send incoming connection: {:?}", e);
+            warn!(them, "Could not send incoming connection: {:?}", e);
             return;
         }
 
@@ -350,7 +358,7 @@ impl Core {
             let outgoing_connection = match self.connect_to_peer(&peer).await {
                 Ok(conn) => conn,
                 Err(e) => {
-                    warn!("error connecting to {}: {:#}", peer.id, e);
+                    warn!("error connecting to {}: {:#}", peer.label, e);
                     sleep(Duration::from_secs(sleep_secs)).await;
                     sleep_secs = if sleep_secs >= 8 { 8 } else { sleep_secs * 2 };
                     continue;
@@ -386,7 +394,7 @@ impl Core {
     }
 
     async fn connect_to_peer(&self, peer: &Peer) -> Result<OutgoingConnection> {
-        trace!("Attempting to connect to {} ({})", peer.id, peer.address);
+        trace!("Attempting to connect to {} ({})", peer.id, peer.label);
         let stream = TcpStream::connect(&peer.address)
             .await
             .context("error opening connection")?;
@@ -453,7 +461,7 @@ impl Core {
         outgoing_connection: OutgoingConnection,
         outgoing_message_rx: &mut mpsc::Receiver<AppMessage>,
     ) {
-        info!("Connected to {} ({})", peer.id, peer.address);
+        info!("Connected to {} ({})", peer.id, peer.label);
         // try to tell Raft that we are definitely connected
         let _ = self
             .incoming_tx
@@ -480,7 +488,7 @@ impl Core {
 
         let mut stream = incoming_connection.stream;
         let incoming_message_tx = self.incoming_tx.clone();
-        let them = peer.id.clone();
+        let them = peer.label.clone();
         let recv_task = async move {
             while let Some(msg) = stream.next().await {
                 match msg {
@@ -488,28 +496,28 @@ impl Core {
                         let message = match message.decrypt(&chacha) {
                             Ok(message) => message,
                             Err(e) => {
-                                warn!(them = %them, "Failed to decrypt incoming message: {:#}", e);
+                                warn!(them, "Failed to decrypt incoming message: {:#}", e);
                                 break;
                             }
                         };
-                        if let Err(e) = incoming_message_tx.send((them.clone(), message)).await {
-                            warn!(them = %them, "Failed to send message: {:?}", e);
+                        if let Err(e) = incoming_message_tx.send((peer.id.clone(), message)).await {
+                            warn!(them, "Failed to send message: {:?}", e);
                             break;
                         }
                     }
                     // If someone tries to Hello us again, break it off
                     Ok(other) => {
-                        warn!(them = %them, "Unexpected message: {:?}", other);
+                        warn!(them, "Unexpected message: {:?}", other);
                         break;
                     }
                     // Someone is sending us messages that we can't parse
                     Err(e) => {
-                        warn!(them = %them, "Failed to parse message: {:?}", e);
+                        warn!(them, "Failed to parse message: {:?}", e);
                         break;
                     }
                 }
             }
-            warn!(them = %them, "Incoming connection Disconnected");
+            warn!(them, "Incoming connection Disconnected");
         };
 
         // Run until either the sender or receiver task stops running, then return so we can reconnect
@@ -545,9 +553,11 @@ fn parse_peer(config: &PeerConfig) -> Result<Peer> {
         PublicKey::from_bytes(&key_bytes.0)?
     };
     let id = compute_node_id(&public_key);
+    let label = config.label.as_ref().unwrap_or(&config.address).clone();
     Ok(Peer {
         id,
         public_key,
+        label,
         address: config.address.clone(),
     })
 }
