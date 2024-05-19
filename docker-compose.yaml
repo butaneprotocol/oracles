@@ -4,11 +4,9 @@ services:
     command: ["./oracles", "-c", "/app/config.yaml"]
     volumes:
       - ./config.yaml:/app/config.yaml
-      - ./keys/frost:/app/frost
+      - ./keys:/app/keys
     environment:
-      PRIVATE_KEY_PATH: /run/secrets/private_key
-      FROST_KEY_PATH: /app/frost/frost_key
-      FROST_PUBLIC_KEY_PATH: /app/frost/frost_public_key
+      KEY_DIRECTORY: /app/keys
     env_file:
       - path: .env
         required: false
@@ -21,8 +19,6 @@ services:
       - 31415:31415
       - 18000:18000
     restart: unless-stopped
-    secrets:
-      - private_key
   cardano-node:
     command: [
       run,
@@ -58,6 +54,3 @@ services:
       - ./mainnet-config:/config
       - ./volumes/kupo-db:/db
       - ${IPC_DIR:-./volumes/node-ipc}:/ipc
-secrets:
-  private_key:
-    file: keys/private.pem
