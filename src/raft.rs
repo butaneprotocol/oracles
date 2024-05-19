@@ -121,6 +121,10 @@ impl RaftState {
             RaftMessage::Disconnect => {
                 info!("Peer disconnected {}", from);
                 self.peers.remove(&from);
+                if self.peers.len() < self.quorum - 1 {
+                    info!("Too few peers connected, raft status unknown");
+                    self.clear_status();
+                }
                 vec![]
             }
             RaftMessage::Heartbeat { term } => {
@@ -304,6 +308,13 @@ impl RaftState {
         } else {
             vec![]
         }
+    }
+
+    fn clear_status(&mut self) {
+        self.set_status(RaftStatus::Follower {
+            leader: None,
+            voted_for: None,
+        });
     }
 
     fn set_status(&mut self, status: RaftStatus) {
