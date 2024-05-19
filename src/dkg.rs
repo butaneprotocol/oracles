@@ -145,10 +145,10 @@ pub async fn run(config: &OracleConfig) -> Result<()> {
                     let (key_package, public_key_package) =
                         part3(round2_secret_package, &round1_packages, &round2_packages)?;
                     info!("Key generation complete!");
-                    let key_hash =
+                    let address =
                         keys::write_frost_keys(&keys_dir, key_package, public_key_package)
                             .context("Could not save frost keys")?;
-                    info!("The new frost public key is: {}", key_hash);
+                    info!("The new frost address is: {}", address);
                 }
             }
         }

@@ -122,8 +122,8 @@ impl ConsensusSignatureAggregator {
 
     fn load_keys(config: &OracleConfig) -> Result<(KeyPackage, PublicKeyPackage)> {
         let keys_dir = keys::get_keys_directory()?;
-        let public_key_hash = config.frost_public_key.as_ref().ok_or_else(|| {
-            anyhow!("No frost_public_key found in config. Please generate frost keys.")
+        let public_key_hash = config.frost_address.as_ref().ok_or_else(|| {
+            anyhow!("No frost_address found in config. Please generate frost keys.")
         })?;
         keys::read_frost_keys(&keys_dir, public_key_hash)
     }
