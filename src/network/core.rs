@@ -497,7 +497,6 @@ impl Core {
         let them = peer.label.clone();
         let recv_task = async move {
             while let Some(msg) = stream.next().await {
-                info!("post-handshake message received: {:?}", msg);
                 match msg {
                     Ok(Message::Application(message)) => {
                         let message = match message.decrypt(&chacha) {
