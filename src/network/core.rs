@@ -330,7 +330,10 @@ impl Core {
 
         // And finally, acknowledge them (and prove who we are) by signing their nonce
         let signature = self.private_key.sign(ecdh_public_key.as_bytes());
-        info!("confirm connect message sent: {:?}", ConfirmConnectionMessage { signature: signature.clone() });
+        info!(
+            "confirm connect message sent: {:?}",
+            ConfirmConnectionMessage { signature }
+        );
         match sink
             .send(Message::ConfirmConnection(ConfirmConnectionMessage {
                 signature,

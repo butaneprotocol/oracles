@@ -558,10 +558,10 @@ fn should_sign(leader_feed: &PriceFeed, my_feed: &PriceFeed) -> Result<(), Strin
         let min_value = leader_value.min(my_value);
         let difference = &max_value - min_value;
         if difference * 100u32 > max_value {
-            return Err(format!(
+            warn!(
                 "collateral prices are too distant: leader has {}/{}, we have {}/{}",
                 leader_price, leader_feed.denominator, my_price, my_feed.denominator
-            ));
+            );
         }
     }
     Ok(())
