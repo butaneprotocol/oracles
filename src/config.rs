@@ -15,6 +15,7 @@ pub struct OracleConfig {
     pub heartbeat_ms: u64,
     pub timeout_ms: u64,
     pub logs: LogConfig,
+    pub frost_address: Option<String>,
     pub keygen: KeygenConfig,
     pub synthetics: Vec<SyntheticConfig>,
     pub collateral: Vec<CollateralConfig>,

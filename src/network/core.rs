@@ -32,6 +32,7 @@ type Nonce = chacha20poly1305::aead::generic_array::GenericArray<u8, chacha20pol
 
 use crate::{
     config::{OracleConfig, PeerConfig},
+    keys::get_keys_directory,
     raft::RaftMessage,
 };
 
@@ -563,8 +564,11 @@ fn parse_peer(config: &PeerConfig) -> Result<Peer> {
 }
 
 fn read_private_key() -> Result<PrivateKey> {
-    let key_path = env::var("PRIVATE_KEY_PATH").context("PRIVATE_KEY_PATH not set")?;
-    let key_pem_file = fs::read_to_string(key_path).context("could not load private key")?;
+    let key_path = get_keys_directory()?.join("private.pem");
+    let key_pem_file = fs::read_to_string(&key_path).context(format!(
+        "Could not load private key from {}",
+        key_path.display()
+    ))?;
     let decoded = KeypairBytes::from_pkcs8_pem(&key_pem_file)?;
     let private_key = PrivateKey::from_bytes(&decoded.secret_key);
     Ok(private_key)

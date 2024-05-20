@@ -2,9 +2,13 @@
 
 ## Setup
 
+### Pick a key directory
+
+The oracle uses several sets of private/public keys. By default, these are stored in a `keys` directory relative to your PWD, but you can set a `KEYS_DIRECTORY` env var to change that.
+
 ### Generate a private key
 
-Generate an ED25519 private key, stored in PEM format. The docker-compose file expects it in `keys/private.pem`.
+Generate an ED25519 private key, stored in PEM format. The oracle will look for this in `${KEYS_DIRECTORY}/private.pem`.
 
 ```sh
 openssl genpkey -algorithm ed25519 -out ./keys/private.pem
@@ -24,7 +28,7 @@ If you want, you can also override any default config settings (which are define
 
 ### Generate FROST keys
 
-The oracle needs a FROST key pair in order to sign payloads. The docker-compose file expects the private key in `keys/frost/private`, and the shared public key in `keys/frost/public`. You have two ways to get these keys:
+The oracle needs a FROST key pair in order to sign payloads. These keys are stored in `KEYS_DIRECTORY`. You have two ways to generate these keys:
 
 #### With DKG
 
@@ -32,7 +36,7 @@ This oracle supports a "keygen mode". If every node is running in "keygen mode",
 
 To initiate DKG, set `keygen.enabled` to `true` in your `config.yaml`. Make sure that every node agrees on the value of `keygen.min_signers`, or DKG will fail.
 
-Once every node is online, they will finish DKG and store the keys to disk. Once those files exist, it is safe to restart your node with keygen mode disabled.
+Once every node is online, they will finish DKG and store the keys to disk. Once those files exist, you should update your configuration with a new `frost_address` and disable keygen mode (by setting `keygen.enabled` to `false`).
 
 #### Without DKG 
 
@@ -41,6 +45,8 @@ You can generate a set of FROST keys with the keygen command:
 ```sh
 cargo run --bin keygen -- --min-signers 2 --max-signers 3
 ```
+
+These will be saved in subdirectories of `KEYS_DIRECTORY`.
 
 ### Set up Maestro
 

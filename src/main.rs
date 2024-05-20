@@ -2,13 +2,16 @@ use std::{str::FromStr, sync::Arc, time::Duration};
 
 use anyhow::Result;
 use clap::Parser;
-use config::{load_config, LogConfig, OracleConfig};
-use health::{HealthServer, HealthSink};
-use network::Network;
-use price_aggregator::PriceAggregator;
-use publisher::Publisher;
-use raft::{Raft, RaftLeader};
-use signature_aggregator::SignatureAggregator;
+use oracles::{
+    config::{load_config, LogConfig, OracleConfig},
+    dkg,
+    health::{HealthServer, HealthSink},
+    network::Network,
+    price_aggregator::PriceAggregator,
+    publisher::Publisher,
+    raft::{Raft, RaftLeader},
+    signature_aggregator::SignatureAggregator,
+};
 use tokio::{
     sync::{mpsc, watch},
     task::{JoinError, JoinSet},
@@ -16,17 +19,6 @@ use tokio::{
 };
 use tracing::{info, info_span, Instrument, Level, Span};
 use tracing_subscriber::FmtSubscriber;
-
-pub mod apis;
-pub mod config;
-pub mod health;
-pub mod keygen;
-pub mod network;
-pub mod price_aggregator;
-pub mod price_feed;
-pub mod publisher;
-pub mod raft;
-pub mod signature_aggregator;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -69,7 +61,7 @@ impl Node {
         let (result_tx, result_rx) = mpsc::channel(10);
 
         let signature_aggregator = if config.consensus {
-            SignatureAggregator::consensus(&mut network, pa_rx, leader_rx, result_tx)?
+            SignatureAggregator::consensus(&config, &mut network, pa_rx, leader_rx, result_tx)?
         } else {
             SignatureAggregator::single(pa_rx, leader_rx, result_tx)?
         };
@@ -218,7 +210,7 @@ async fn main() -> Result<()> {
     span.in_scope(|| info!("Node starting..."));
 
     if config.keygen.enabled {
-        keygen::run(&config).instrument(span).await?;
+        dkg::run(&config).instrument(span).await?;
         return Ok(());
     }
 

@@ -16,6 +16,7 @@ use tokio::{
 use tracing::{warn, Instrument};
 
 use crate::{
+    config::OracleConfig,
     network::Network,
     price_feed::{PriceFeedEntry, SignedPriceFeedEntry},
     raft::RaftLeader,
@@ -48,6 +49,7 @@ impl SignatureAggregator {
     }
 
     pub fn consensus(
+        config: &OracleConfig,
         network: &mut Network,
         price_source: Receiver<Vec<PriceFeedEntry>>,
         leader_source: Receiver<RaftLeader>,
@@ -55,6 +57,7 @@ impl SignatureAggregator {
     ) -> Result<Self> {
         let (signed_price_sink, signed_price_source) = mpsc::channel(10);
         let aggregator = ConsensusSignatureAggregator::new(
+            config,
             network.id.clone(),
             network.signer_channel(),
             price_source,
