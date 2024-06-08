@@ -18,7 +18,7 @@ use frost_ed25519::{
 use futures::{channel::mpsc, SinkExt, StreamExt};
 use rand::thread_rng;
 use serde::{Deserialize, Serialize};
-use tokio::{select, sync::watch, time::sleep};
+use tokio::{select, sync::watch, task::spawn_blocking, time::sleep};
 use tracing::{info, Instrument};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -175,8 +175,11 @@ pub async fn run(config: &OracleConfig) -> Result<()> {
             KeygenMessage::Done => {
                 done_set.insert(from);
                 if done_set.len() == peers_count {
-                    info!("All peers have generated their keys! Shutting down.");
                     done_tx.send(()).await.unwrap();
+                    info!("All peers have generated their keys! Press enter to shut down.");
+                    spawn_blocking(|| {
+                        std::io::stdin().read_line(&mut String::new()).unwrap();
+                    }).await.unwrap();
                 }
             }
         }
