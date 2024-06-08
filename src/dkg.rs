@@ -170,8 +170,6 @@ pub async fn run(config: &OracleConfig) -> Result<()> {
                             .context("Could not save frost keys")?;
                     info!("The new frost address is: {}", address);
                     sender.broadcast(KeygenMessage::Done).await;
-                    part1_broadcast_handle.abort();
-                    part2_broadcast_handle.abort();
                 }
             }
             KeygenMessage::Done => {
@@ -179,6 +177,8 @@ pub async fn run(config: &OracleConfig) -> Result<()> {
                 if done_set.len() == peers_count {
                     done_tx.send(()).await.unwrap();
                     info!("All peers have generated their keys! Press enter to shut down.");
+                    part1_broadcast_handle.abort();
+                    part2_broadcast_handle.abort();
                     spawn_blocking(|| {
                         std::io::stdin().read_line(&mut String::new()).unwrap();
                     })
