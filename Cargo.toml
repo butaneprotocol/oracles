@@ -43,7 +43,7 @@ tokio-serde = { version = "0.9", features = ["json", "cbor"] }
 tokio-tungstenite = { version = "0.21.0", features = ["native-tls"] }
 tokio-util = { version = "0.7", features = ["full"] }
 tracing = "0.1.40"
-tracing-subscriber = { version = "0.3", features = ["json"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 uuid = { version = "1.7.0", features = ["v4"] }
 x25519-dalek = { version = "2", features = ["serde"] }
 
