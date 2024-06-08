@@ -42,8 +42,6 @@ struct Node {
 
 impl Node {
     pub fn new(config: Arc<OracleConfig>) -> Result<Self> {
-        // quorum is set to a majority of expected nodes (which includes ourself!)
-        let quorum = ((config.peers.len() + 1) / 2) + 1;
         let heartbeat = config.heartbeat();
         let timeout = config.timeout();
 
@@ -51,6 +49,9 @@ impl Node {
 
         // Construct a peer-to-peer network that can connect to peers, and dispatch messages to the correct state machine
         let mut network = Network::new(&config)?;
+
+        // quorum is set to a majority of expected nodes (which includes ourself!)
+        let quorum = ((network.peers_count() + 1) / 2) + 1;
 
         let (pa_tx, pa_rx) = watch::channel(vec![]);
 

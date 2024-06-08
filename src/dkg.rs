@@ -34,6 +34,7 @@ pub enum KeygenMessage {
 
 pub async fn run(config: &OracleConfig) -> Result<()> {
     let mut network = Network::new(config)?;
+    let peers_count = network.peers_count();
     let id = network.id.clone();
 
     let keys_dir = get_keys_directory()?;
@@ -57,7 +58,7 @@ pub async fn run(config: &OracleConfig) -> Result<()> {
     // DKG has three rounds. We can perform round 1 on our own, it gets us information needed for round 2
     let (round1_secret_package, round1_package) = {
         let rng = thread_rng();
-        let max_signers = 1 + config.peers.len() as u16;
+        let max_signers = 1 + peers_count as u16;
         let min_signers = config
             .keygen
             .min_signers
@@ -123,7 +124,7 @@ pub async fn run(config: &OracleConfig) -> Result<()> {
                 }
 
                 round1_packages.insert(from_id, *package);
-                if round1_packages.len() == config.peers.len() {
+                if round1_packages.len() == peers_count {
                     info!("Round 1 complete! Beginning round 2");
                     // We have packages from every peer, and now we can start (or re-start) round 2
                     let (secret_package, outgoing_packages) =
@@ -139,7 +140,7 @@ pub async fn run(config: &OracleConfig) -> Result<()> {
                 }
 
                 round2_packages.insert(from_id, *package);
-                if round2_packages.len() == config.peers.len() {
+                if round2_packages.len() == peers_count {
                     // We have everything we need to compute our frost keys
                     let round2_secret_package = round2_secret_package.as_ref().unwrap();
                     let (key_package, public_key_package) =

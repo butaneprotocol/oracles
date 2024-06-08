@@ -145,7 +145,7 @@ impl Core {
 
         let peers = {
             let peers: Result<Vec<Peer>> = config.peers.iter().map(parse_peer).collect();
-            Arc::new(peers?)
+            Arc::new(peers?.into_iter().filter(|p| p.id != id).collect())
         };
         Ok(Self {
             id,
@@ -155,6 +155,10 @@ impl Core {
             outgoing_rx: Arc::new(Mutex::new(outgoing_rx)),
             incoming_tx: Arc::new(incoming_tx),
         })
+    }
+
+    pub fn peers_count(&self) -> usize {
+        self.peers.len()
     }
 
     pub async fn handle_network(self) -> Result<()> {
