@@ -179,7 +179,9 @@ pub async fn run(config: &OracleConfig) -> Result<()> {
                     info!("All peers have generated their keys! Press enter to shut down.");
                     spawn_blocking(|| {
                         std::io::stdin().read_line(&mut String::new()).unwrap();
-                    }).await.unwrap();
+                    })
+                    .await
+                    .unwrap();
                 }
             }
         }
