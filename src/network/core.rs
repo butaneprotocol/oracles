@@ -336,10 +336,10 @@ impl Core {
             .await
         {
             Ok(_) => {
-                trace!("Outgoing Hello sent");
+                trace!(them, "Outgoing Hello sent");
             }
             Err(e) => {
-                warn!("Failed to send hello: {:?}", e);
+                warn!(them, "Failed to send hello: {:?}", e);
             }
         }
     }
