@@ -176,7 +176,9 @@ pub async fn run(config: &OracleConfig) -> Result<()> {
                 done_set.insert(from);
                 if done_set.len() == peers_count {
                     done_tx.send(()).await.unwrap();
-                    info!("All peers have generated their keys! Press enter to shut down.");
+                    info!("All peers have generated their keys!");
+                    sleep(Duration::from_secs(3)).await;
+                    info!("Press enter to shut down.");
                     part1_broadcast_handle.abort();
                     part2_broadcast_handle.abort();
                     spawn_blocking(|| {
