@@ -18,7 +18,7 @@ use tokio::{
     time::sleep,
 };
 use tracing::{info, info_span, Instrument, Level, Span};
-use tracing_subscriber::FmtSubscriber;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, FmtSubscriber};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -42,8 +42,6 @@ struct Node {
 
 impl Node {
     pub fn new(config: Arc<OracleConfig>) -> Result<Self> {
-        // quorum is set to a majority of expected nodes (which includes ourself!)
-        let quorum = ((config.peers.len() + 1) / 2) + 1;
         let heartbeat = config.heartbeat();
         let timeout = config.timeout();
 
@@ -51,6 +49,9 @@ impl Node {
 
         // Construct a peer-to-peer network that can connect to peers, and dispatch messages to the correct state machine
         let mut network = Network::new(&config)?;
+
+        // quorum is set to a majority of expected nodes (which includes ourself!)
+        let quorum = ((network.peers_count() + 1) / 2) + 1;
 
         let (pa_tx, pa_rx) = watch::channel(vec![]);
 
@@ -180,18 +181,24 @@ where
 
 fn init_tracing(config: &LogConfig) -> Result<Span> {
     let level = Level::from_str(&config.level)?;
+    let env_filter = EnvFilter::builder()
+        .with_default_directive(level.into())
+        .from_env_lossy()
+        .add_directive("tokio_util::codec::framed_impl=info".parse()?);
     if config.json {
-        let subscriber = FmtSubscriber::builder()
+        FmtSubscriber::builder()
             .json()
             .with_max_level(level)
-            .finish();
-        tracing::subscriber::set_global_default(subscriber)?;
+            .finish()
+            .with(env_filter)
+            .init();
     } else {
-        let subscriber = FmtSubscriber::builder()
+        FmtSubscriber::builder()
             .compact()
             .with_max_level(level)
-            .finish();
-        tracing::subscriber::set_global_default(subscriber)?;
+            .finish()
+            .with(env_filter)
+            .init();
     }
     let span = info_span!("oracles", version = env!("CARGO_PKG_VERSION"));
     Ok(span)

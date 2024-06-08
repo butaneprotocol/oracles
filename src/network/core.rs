@@ -19,7 +19,7 @@ use tokio::{
         TcpListener, TcpStream,
     },
     select,
-    sync::{mpsc, Mutex},
+    sync::{mpsc, oneshot, Mutex},
     task::JoinSet,
     time::sleep,
 };
@@ -100,6 +100,7 @@ enum Message {
     OpenConnection(Box<OpenConnectionMessage>), // boxed because it's big
     ConfirmConnection(ConfirmConnectionMessage),
     Application(ApplicationMessage),
+    Disconnect(String),
 }
 
 #[derive(Clone)]
@@ -144,7 +145,7 @@ impl Core {
 
         let peers = {
             let peers: Result<Vec<Peer>> = config.peers.iter().map(parse_peer).collect();
-            Arc::new(peers?)
+            Arc::new(peers?.into_iter().filter(|p| p.id != id).collect())
         };
         Ok(Self {
             id,
@@ -154,6 +155,10 @@ impl Core {
             outgoing_rx: Arc::new(Mutex::new(outgoing_rx)),
             incoming_tx: Arc::new(incoming_tx),
         })
+    }
+
+    pub fn peers_count(&self) -> usize {
+        self.peers.len()
     }
 
     pub async fn handle_network(self) -> Result<()> {
@@ -270,6 +275,13 @@ impl Core {
 
         let message = match stream.next().await {
             Some(Ok(Message::OpenConnection(message))) => message,
+            Some(Ok(Message::Disconnect(reason))) => {
+                warn!(
+                    "Other party disconnected immediately on connection: {}",
+                    reason
+                );
+                return;
+            }
             Some(Ok(other)) => {
                 warn!("Expected Hello, got {:?}", other);
                 return;
@@ -299,6 +311,12 @@ impl Core {
         let peer_id = compute_node_id(&id_public_key);
         let Some(peer) = self.peers.iter().find(|p| p.id == peer_id) else {
             warn!("Unrecognized peer {}", peer_id);
+            let _ = sink
+                .send(Message::Disconnect(format!(
+                    "Unrecognized peer {}",
+                    peer_id
+                )))
+                .await;
             return;
         };
         let them = peer.label.clone();
@@ -307,6 +325,12 @@ impl Core {
         let signature = message.signature;
         if let Err(e) = id_public_key.verify(ecdh_public_key.as_bytes(), &signature) {
             warn!(them, "Signature does not match public key: {}", e);
+            let _ = sink
+                .send(Message::Disconnect(format!(
+                    "Signature does not match public key: {}",
+                    e
+                )))
+                .await;
             return;
         }
 
@@ -314,6 +338,9 @@ impl Core {
         // (We look up the "incoming connection" sender, so if we don't recognize them we fail here)
         let Some(connection_tx) = txs.get(&peer_id) else {
             warn!(them, "Other node not recognized");
+            let _ = sink
+                .send(Message::Disconnect("Other node not recognized".into()))
+                .await;
             return;
         };
         if let Err(e) = connection_tx
@@ -336,10 +363,10 @@ impl Core {
             .await
         {
             Ok(_) => {
-                trace!("Outgoing Hello sent");
+                trace!(them, "Outgoing Hello sent");
             }
             Err(e) => {
-                warn!("Failed to send hello: {:?}", e);
+                warn!(them, "Failed to send hello: {:?}", e);
             }
         }
     }
@@ -395,7 +422,8 @@ impl Core {
     }
 
     async fn connect_to_peer(&self, peer: &Peer) -> Result<OutgoingConnection> {
-        trace!("Attempting to connect to {} ({})", peer.id, peer.label);
+        let them = &peer.id;
+        trace!("Attempting to connect to {} ({})", them, peer.label);
         let stream = TcpStream::connect(&peer.address)
             .await
             .context("error opening connection")?;
@@ -429,11 +457,14 @@ impl Core {
         sink.send(Message::OpenConnection(Box::new(message)))
             .await
             .context("error sending open message")?;
-        trace!("Outgoing Open request sent");
+        trace!(%them, "Outgoing Open request sent");
 
         // Wait for the other side to respond
         let message = match stream.next().await {
             Some(Ok(Message::ConfirmConnection(message))) => message,
+            Some(Ok(Message::Disconnect(reason))) => {
+                return Err(anyhow!("other side disconnected: {}", reason))
+            }
             Some(Ok(other)) => {
                 return Err(anyhow!("expected ConfirmConnection, got {:?}", other));
             }
@@ -447,9 +478,18 @@ impl Core {
 
         // They've signed our nonce, let's confirm they did it right
         let signature = message.signature;
-        peer.public_key
+        let verification_result = peer
+            .public_key
             .verify(ecdh_public_key.as_bytes(), &signature)
-            .context("signature does not match public key")?;
+            .context("signature does not match public key");
+        if verification_result.is_err() {
+            sink.send(Message::Disconnect(
+                "signature does not match public key".into(),
+            ))
+            .await
+            .context("error sending disconnect message")?;
+            verification_result?;
+        }
 
         // and we're all set!
         Ok(OutgoingConnection { ecdh_secret, sink })
@@ -477,6 +517,7 @@ impl Core {
         let mut sink = outgoing_connection.sink;
         let send_chacha = chacha.clone();
         let them = peer.id.clone();
+        let (last_message_tx, last_message_rx) = oneshot::channel();
         let send_task = async move {
             while let Some(message) = outgoing_message_rx.recv().await {
                 let message = ApplicationMessage::encrypt(message, &send_chacha);
@@ -484,6 +525,9 @@ impl Core {
                     warn!(them = %them, "Failed to send message: {:?}", e);
                     break;
                 }
+            }
+            if let Ok(dc_reason) = last_message_rx.await {
+                let _ = sink.send(Message::Disconnect(dc_reason)).await;
             }
         };
 
@@ -497,34 +541,33 @@ impl Core {
                         let message = match message.decrypt(&chacha) {
                             Ok(message) => message,
                             Err(e) => {
-                                warn!(them, "Failed to decrypt incoming message: {:#}", e);
-                                break;
+                                return format!("Failed to decrypt incoming message: {:#}", e);
                             }
                         };
                         if let Err(e) = incoming_message_tx.send((peer.id.clone(), message)).await {
-                            warn!(them, "Failed to send message: {:?}", e);
-                            break;
+                            return format!("Failed to send message: {:?}", e);
                         }
                     }
                     // If someone tries to Hello us again, break it off
                     Ok(other) => {
-                        warn!(them, "Unexpected message: {:?}", other);
-                        break;
+                        return format!("Unexpected message: {:?}", other);
                     }
                     // Someone is sending us messages that we can't parse
                     Err(e) => {
-                        warn!(them, "Failed to parse message: {:?}", e);
-                        break;
+                        return format!("Failed to parse message: {:?}", e);
                     }
                 }
             }
-            warn!(them, "Incoming connection Disconnected");
+            "Other side disconnected".into()
         };
 
         // Run until either the sender or receiver task stops running, then return so we can reconnect
         select! {
             _ = send_task => {},
-            _ = recv_task => {},
+            dc_reason = recv_task => {
+                warn!(them, "we disconnected: {}", dc_reason);
+                let _ = last_message_tx.send(dc_reason);
+            },
         };
 
         // try to warn raft that we aren't connected anymore

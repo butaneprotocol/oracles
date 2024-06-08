@@ -58,6 +58,10 @@ impl Network {
         })
     }
 
+    pub fn peers_count(&self) -> usize {
+        self.core.peers_count()
+    }
+
     pub fn keygen_channel(&mut self) -> NetworkChannel<KeygenMessage> {
         create_channel(&mut self.keygen)
     }
