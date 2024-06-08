@@ -1,4 +1,8 @@
-use std::{collections::BTreeMap, sync::Arc, time::Duration};
+use std::{
+    collections::{BTreeMap, HashSet},
+    sync::Arc,
+    time::Duration,
+};
 
 use crate::{
     config::OracleConfig,
@@ -11,9 +15,10 @@ use frost_ed25519::{
     keys::dkg::{part1, part2, part3, round1, round2},
     Identifier,
 };
+use futures::{channel::mpsc, SinkExt, StreamExt};
 use rand::thread_rng;
 use serde::{Deserialize, Serialize};
-use tokio::{sync::watch, time::sleep};
+use tokio::{select, sync::watch, time::sleep};
 use tracing::{info, Instrument};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -30,6 +35,7 @@ pub struct Part2Message {
 pub enum KeygenMessage {
     Part1(Part1Message),
     Part2(Part2Message),
+    Done,
 }
 
 pub async fn run(config: &OracleConfig) -> Result<()> {
@@ -47,9 +53,19 @@ pub async fn run(config: &OracleConfig) -> Result<()> {
 
     let identifier_lookup: Arc<DashMap<Identifier, NodeId>> = Arc::new(DashMap::new());
 
+    let (mut done_tx, mut done_rx) = mpsc::channel(1);
+
     // Run our network layer in the background after setting up a "keygen" channel
     let channel = network.keygen_channel();
-    tokio::spawn(async move { network.listen().await.unwrap() }.in_current_span());
+    tokio::spawn(
+        async move {
+            select! {
+                result = network.listen() => { result.unwrap(); }
+                _ = done_rx.next() => {  }
+            };
+        }
+        .in_current_span(),
+    );
     let (sender, mut receiver) = channel.split();
 
     // use our ID to get a stable/unique cryptographic identifier
@@ -107,6 +123,9 @@ pub async fn run(config: &OracleConfig) -> Result<()> {
     let mut round2_secret_package: Option<round2::SecretPackage> = None;
     let mut round2_packages = BTreeMap::new();
 
+    // track which nodes have said they've finished, so that we know when to disconnect the network.
+    let mut done_set = HashSet::new();
+
     // And now that we've got our senders all set up, we're ready to run our receiver logic
     while let Some(message) = receiver.recv().await {
         let from = message.from;
@@ -114,7 +133,7 @@ pub async fn run(config: &OracleConfig) -> Result<()> {
         // The DKG algorithm uses Identifier to identify a node, but our network uses NodeId
         // Maintain a lookup for later.
         let from_id = Identifier::derive(from.as_bytes())?;
-        identifier_lookup.insert(from_id, from);
+        identifier_lookup.insert(from_id, from.clone());
 
         match message.data {
             KeygenMessage::Part1(Part1Message { package }) => {
@@ -150,6 +169,15 @@ pub async fn run(config: &OracleConfig) -> Result<()> {
                         keys::write_frost_keys(&keys_dir, key_package, public_key_package)
                             .context("Could not save frost keys")?;
                     info!("The new frost address is: {}", address);
+                }
+            }
+            KeygenMessage::Done => {
+                done_set.insert(from);
+                if done_set.len() == peers_count {
+                    info!("All peers have generated their keys!");
+                    sender.broadcast(KeygenMessage::Done).await;
+                    info!("Shutting down");
+                    done_tx.send(()).await.unwrap();
                 }
             }
         }
