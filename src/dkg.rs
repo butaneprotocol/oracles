@@ -176,7 +176,8 @@ pub async fn run(config: &OracleConfig) -> Result<()> {
                 if done_set.len() == peers_count {
                     info!("All peers have generated their keys!");
                     sender.broadcast(KeygenMessage::Done).await;
-                    info!("Shutting down");
+                    info!("Shutting down in 10 seconds");
+                    sleep(Duration::from_secs(10)).await;
                     done_tx.send(()).await.unwrap();
                 }
             }
