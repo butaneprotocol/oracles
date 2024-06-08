@@ -84,7 +84,7 @@ pub async fn run(config: &OracleConfig) -> Result<()> {
 
     // Keep broadcasting our round 1 payload until everyone has finished (in case someone disconnects or joins late)
     let part1_sender = sender.clone();
-    tokio::spawn(
+    let part1_broadcast_handle = tokio::spawn(
         async move {
             loop {
                 let package = Box::new(round1_package.clone());
@@ -101,7 +101,7 @@ pub async fn run(config: &OracleConfig) -> Result<()> {
         watch::channel(BTreeMap::new());
     let identifiers = identifier_lookup.clone();
     let part2_sender = sender.clone();
-    tokio::spawn(
+    let part2_broadcast_handle = tokio::spawn(
         async move {
             loop {
                 // clone this so we aren't holding a lock for too long
@@ -170,6 +170,8 @@ pub async fn run(config: &OracleConfig) -> Result<()> {
                             .context("Could not save frost keys")?;
                     info!("The new frost address is: {}", address);
                     sender.broadcast(KeygenMessage::Done).await;
+                    part1_broadcast_handle.abort();
+                    part2_broadcast_handle.abort();
                 }
             }
             KeygenMessage::Done => {
