@@ -169,15 +169,13 @@ pub async fn run(config: &OracleConfig) -> Result<()> {
                         keys::write_frost_keys(&keys_dir, key_package, public_key_package)
                             .context("Could not save frost keys")?;
                     info!("The new frost address is: {}", address);
+                    sender.broadcast(KeygenMessage::Done).await;
                 }
             }
             KeygenMessage::Done => {
                 done_set.insert(from);
                 if done_set.len() == peers_count {
-                    info!("All peers have generated their keys!");
-                    sender.broadcast(KeygenMessage::Done).await;
-                    info!("Shutting down in 10 seconds");
-                    sleep(Duration::from_secs(10)).await;
+                    info!("All peers have generated their keys! Shutting down.");
                     done_tx.send(()).await.unwrap();
                 }
             }
