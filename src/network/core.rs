@@ -515,7 +515,7 @@ impl Core {
         outgoing_message_rx: &mut mpsc::Receiver<AppMessage>,
     ) {
         let them = peer.label.clone();
-        info!("Connected to {} ({})", them, peer.id);
+        info!(them, "Connected to {}", peer.id);
         // try to tell Raft that we are definitely connected
         let _ = self
             .incoming_tx
