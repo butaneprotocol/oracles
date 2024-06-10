@@ -296,13 +296,6 @@ impl Core {
             }
         };
 
-        if message.version != ORACLE_VERSION {
-            warn!(
-                other_version = message.version,
-                "Other node is running a different oracle version"
-            )
-        }
-
         // Grab the ecdh nonce they sent us
         let ecdh_public_key = message.ecdh_public_key;
 
@@ -319,7 +312,15 @@ impl Core {
                 .await;
             return;
         };
+
         let them = peer.label.clone();
+        if message.version != ORACLE_VERSION {
+            warn!(
+                them,
+                other_version = message.version,
+                "Other node is running a different oracle version"
+            )
+        }
 
         // Confirm that they are who they say they are; they should have signed the ecdh nonce with their private key
         let signature = message.signature;
@@ -377,6 +378,7 @@ impl Core {
         mut incoming_connection_rx: mpsc::Receiver<IncomingConnection>,
         outgoing_message_rx: mpsc::Receiver<AppMessage>,
     ) {
+        let them = peer.label.clone();
         let outgoing_message_rx = Mutex::new(outgoing_message_rx);
         let mut sleep_secs = 1u64;
         loop {
@@ -386,7 +388,7 @@ impl Core {
             let outgoing_connection = match self.connect_to_peer(&peer).await {
                 Ok(conn) => conn,
                 Err(e) => {
-                    warn!("error connecting to {}: {:#}", peer.label, e);
+                    warn!(them, "error connecting: {:#}", e);
                     sleep(Duration::from_secs(sleep_secs)).await;
                     sleep_secs = if sleep_secs >= 8 { 8 } else { sleep_secs * 2 };
                     continue;
@@ -422,12 +424,17 @@ impl Core {
     }
 
     async fn connect_to_peer(&self, peer: &Peer) -> Result<OutgoingConnection> {
-        let them = &peer.id;
-        trace!("Attempting to connect to {} ({})", them, peer.label);
+        let them = peer.label.clone();
+        trace!(them, "Attempting to connect to {}", peer.id);
         let stream = TcpStream::connect(&peer.address)
             .await
             .context("error opening connection")?;
-        trace!("Outgoing connection to: {}", stream.peer_addr().unwrap());
+
+        trace!(
+            them,
+            "Outgoing connection to: {}",
+            stream.peer_addr().unwrap()
+        );
 
         let (read, write) = stream.into_split();
 
@@ -457,7 +464,7 @@ impl Core {
         sink.send(Message::OpenConnection(Box::new(message)))
             .await
             .context("error sending open message")?;
-        trace!(%them, "Outgoing Open request sent");
+        trace!(them, "Outgoing Open request sent");
 
         // Wait for the other side to respond
         let message = match stream.next().await {
@@ -475,6 +482,7 @@ impl Core {
                 return Err(anyhow!("outgoing connection disconnected before handshake"));
             }
         };
+        trace!(them, "Outgoing open response received");
 
         // They've signed our nonce, let's confirm they did it right
         let signature = message.signature;
@@ -502,7 +510,8 @@ impl Core {
         outgoing_connection: OutgoingConnection,
         outgoing_message_rx: &mut mpsc::Receiver<AppMessage>,
     ) {
-        info!("Connected to {} ({})", peer.id, peer.label);
+        let them = peer.label.clone();
+        info!("Connected to {} ({})", them, peer.id);
         // try to tell Raft that we are definitely connected
         let _ = self
             .incoming_tx
@@ -516,13 +525,12 @@ impl Core {
 
         let mut sink = outgoing_connection.sink;
         let send_chacha = chacha.clone();
-        let them = peer.id.clone();
         let (last_message_tx, last_message_rx) = oneshot::channel();
         let send_task = async move {
             while let Some(message) = outgoing_message_rx.recv().await {
                 let message = ApplicationMessage::encrypt(message, &send_chacha);
                 if let Err(e) = sink.send(Message::Application(message)).await {
-                    warn!(them = %them, "Failed to send message: {:?}", e);
+                    warn!(them, "Failed to send message: {:?}", e);
                     break;
                 }
             }
