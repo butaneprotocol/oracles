@@ -435,6 +435,10 @@ impl Core {
             "Outgoing connection to: {}",
             stream.peer_addr().unwrap()
         );
+        stream
+            .set_nodelay(true)
+            .context("error setting TCP_NODELAY")?;
+        trace!(them, "Set TCP_NODELAY");
 
         let (read, write) = stream.into_split();
 
