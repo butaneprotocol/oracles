@@ -280,8 +280,6 @@ impl Core {
         trace!("Incoming connection from: {}", stream.peer_addr().unwrap());
 
         let (read, write) = stream.into_split();
-        //let stream: WrappedStream = WrappedStream::new(read, LengthDelimitedCodec::new());
-        //let sink: WrappedSink = WrappedSink::new(write, LengthDelimitedCodec::new());
         let mut stream: DecodeStream = DecodeStream::new(read.compat());
         let mut sink: EncodeSink = EncodeSink::new(write.compat());
 
@@ -299,11 +297,11 @@ impl Core {
                 return;
             }
             Ok(None) => {
-                warn!("Incoming Connection disconnected before handshake");
+                warn!("Expected Hello, got empty message");
                 return;
             }
             Err(e) => {
-                warn!("Failed to parse: {:?}", e);
+                warn!("Error waiting for handshake: {:?}", e);
                 return;
             }
         };
@@ -489,10 +487,13 @@ impl Core {
                 return Err(anyhow!("expected ConfirmConnection, got {:?}", other));
             }
             Ok(None) => {
-                return Err(anyhow!("outgoing connection disconnected before handshake"));
+                return Err(anyhow!("outgoing connection returned empty message"));
             }
             Err(e) => {
-                return Err(anyhow!("failed to parse: {:?}", e));
+                return Err(anyhow!(
+                    "error waiting for response from outgoing connection: {:?}",
+                    e
+                ));
             }
         };
         trace!(them, "Outgoing open response received");
@@ -573,10 +574,13 @@ impl Core {
                     Ok(Some(other)) => {
                         return format!("Unexpected message: {:?}", other);
                     }
-                    Ok(None) => return "Other side disconnected".into(),
-                    // Someone is sending us messages that we can't parse
+                    Ok(None) => {
+                        // someone sent an empty message
+                        continue;
+                    }
+                    // Either someone is sending messages we can't parse, or the connection is broken
                     Err(e) => {
-                        return format!("Failed to parse message: {:?}", e);
+                        return format!("error reading from stream: {:?}", e);
                     }
                 }
             }
