@@ -1,4 +1,5 @@
 pub mod apis;
+pub mod cbor;
 pub mod config;
 pub mod dkg;
 pub mod health;

@@ -183,8 +183,7 @@ fn init_tracing(config: &LogConfig) -> Result<Span> {
     let level = Level::from_str(&config.level)?;
     let env_filter = EnvFilter::builder()
         .with_default_directive(level.into())
-        .from_env_lossy()
-        .add_directive("tokio_util::codec::framed_impl=info".parse()?);
+        .from_env_lossy();
     if config.json {
         FmtSubscriber::builder()
             .json()

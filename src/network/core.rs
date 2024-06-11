@@ -1,6 +1,7 @@
 use std::{collections::HashMap, env, fs, sync::Arc, time::Duration};
 
 use anyhow::{anyhow, Context, Result};
+use async_compat::{Compat, CompatExt};
 use chacha20poly1305::{aead::Aead, AeadCore, Key, KeyInit, XChaCha20Poly1305};
 use dashmap::DashMap;
 use ed25519::{
@@ -9,9 +10,9 @@ use ed25519::{
     KeypairBytes, PublicKeyBytes, Signature,
 };
 use ed25519_dalek::{SigningKey as PrivateKey, Verifier, VerifyingKey as PublicKey};
-use futures::{SinkExt, StreamExt};
+use minicbor::{bytes::ByteVec, Decode, Decoder, Encode, Encoder};
+use minicbor_io::{AsyncReader, AsyncWriter};
 use rand::thread_rng;
-use serde::{Deserialize, Serialize};
 use tokio::{
     io::Interest,
     net::{
@@ -23,50 +24,53 @@ use tokio::{
     task::JoinSet,
     time::sleep,
 };
-use tokio_serde::{formats::Cbor, Framed};
-use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use tracing::{info, trace, warn, Instrument};
 use x25519_dalek as ecdh;
 
 type Nonce = chacha20poly1305::aead::generic_array::GenericArray<u8, chacha20poly1305::consts::U24>;
 
 use crate::{
+    cbor::{CborEcdhPublicKey, CborSignature, CborVerifyingKey},
     config::{OracleConfig, PeerConfig},
     keys::get_keys_directory,
     raft::RaftMessage,
 };
 
 use super::{Message as AppMessage, NodeId};
-type WrappedStream = FramedRead<OwnedReadHalf, LengthDelimitedCodec>;
-type WrappedSink = FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>;
-
-type SerStream = Framed<WrappedStream, Message, (), Cbor<Message, ()>>;
-type DeSink = Framed<WrappedSink, (), Message, Cbor<(), Message>>;
+type EncodeSink = AsyncWriter<Compat<OwnedWriteHalf>>;
+type DecodeStream = AsyncReader<Compat<OwnedReadHalf>>;
 
 const ORACLE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Decode, Encode, Clone, Debug)]
 struct OpenConnectionMessage {
     /// The app version of the other node
+    #[n(0)]
     version: String,
     /// The other node's public key, used to identify them
-    id_public_key: PublicKey,
+    #[n(1)]
+    id_public_key: CborVerifyingKey,
     /// An ephemeral public key, used for ECDH
-    ecdh_public_key: ecdh::PublicKey,
+    #[n(2)]
+    ecdh_public_key: CborEcdhPublicKey,
     /// The ecdh_public_key, signed with the other node's private key
-    signature: Signature,
+    #[n(3)]
+    signature: CborSignature,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Decode, Encode, Clone, Debug)]
 struct ConfirmConnectionMessage {
     /// The ecdh_public_key we sent, signed with the other node's private key
-    signature: Signature,
+    #[n(0)]
+    signature: CborSignature,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Decode, Encode, Clone, Debug)]
 struct ApplicationMessage {
-    nonce: Vec<u8>,
-    payload: Vec<u8>,
+    #[n(0)]
+    nonce: ByteVec,
+    #[n(1)]
+    payload: ByteVec,
 }
 
 impl ApplicationMessage {
@@ -76,13 +80,15 @@ impl ApplicationMessage {
             XChaCha20Poly1305::generate_nonce(&mut rng)
         };
         let payload: Vec<u8> = {
-            let bytes = serde_cbor::to_vec(&message).unwrap();
+            let mut encoder = Encoder::new(vec![]);
+            encoder.encode(&message).expect("infallible");
+            let bytes = encoder.into_writer();
             cipher.encrypt(&nonce, bytes.as_slice()).unwrap()
         };
         let nonce_bytes: Vec<u8> = nonce.into_iter().collect();
         Self {
-            nonce: nonce_bytes,
-            payload,
+            nonce: nonce_bytes.into(),
+            payload: payload.into(),
         }
     }
 
@@ -91,16 +97,22 @@ impl ApplicationMessage {
         let decrypted_bytes: Vec<u8> = cipher
             .decrypt(nonce, self.payload.as_slice())
             .map_err(|_| anyhow!("could not decipher message"))?;
-        serde_cbor::from_slice(&decrypted_bytes).context("could not deserialize message")
+        Decoder::new(&decrypted_bytes)
+            .decode()
+            .context("could not deserialize message")
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Decode, Encode, Clone, Debug)]
 enum Message {
-    OpenConnection(Box<OpenConnectionMessage>), // boxed because it's big
-    ConfirmConnection(ConfirmConnectionMessage),
-    Application(ApplicationMessage),
-    Disconnect(String),
+    #[n(0)]
+    OpenConnection(#[n(0)] Box<OpenConnectionMessage>), // boxed because it's big
+    #[n(1)]
+    ConfirmConnection(#[n(0)] ConfirmConnectionMessage),
+    #[n(2)]
+    Application(#[n(0)] ApplicationMessage),
+    #[n(3)]
+    Disconnect(#[n(0)] String),
 }
 
 #[derive(Clone)]
@@ -113,11 +125,11 @@ struct Peer {
 
 struct IncomingConnection {
     ecdh_public_key: ecdh::PublicKey,
-    stream: SerStream,
+    stream: DecodeStream,
 }
 struct OutgoingConnection {
     ecdh_secret: ecdh::EphemeralSecret,
-    sink: DeSink,
+    sink: EncodeSink,
 }
 
 type OutgoingMessageReceiver = mpsc::Receiver<(Option<NodeId>, AppMessage)>;
@@ -268,44 +280,44 @@ impl Core {
         trace!("Incoming connection from: {}", stream.peer_addr().unwrap());
 
         let (read, write) = stream.into_split();
-        let stream: WrappedStream = WrappedStream::new(read, LengthDelimitedCodec::new());
-        let sink: WrappedSink = WrappedSink::new(write, LengthDelimitedCodec::new());
-        let mut stream: SerStream = SerStream::new(stream, Cbor::default());
-        let mut sink: DeSink = DeSink::new(sink, Cbor::default());
+        //let stream: WrappedStream = WrappedStream::new(read, LengthDelimitedCodec::new());
+        //let sink: WrappedSink = WrappedSink::new(write, LengthDelimitedCodec::new());
+        let mut stream: DecodeStream = DecodeStream::new(read.compat());
+        let mut sink: EncodeSink = EncodeSink::new(write.compat());
 
-        let message = match stream.next().await {
-            Some(Ok(Message::OpenConnection(message))) => message,
-            Some(Ok(Message::Disconnect(reason))) => {
+        let message = match stream.read().await {
+            Ok(Some(Message::OpenConnection(message))) => message,
+            Ok(Some(Message::Disconnect(reason))) => {
                 warn!(
                     "Other party disconnected immediately on connection: {}",
                     reason
                 );
                 return;
             }
-            Some(Ok(other)) => {
+            Ok(Some(other)) => {
                 warn!("Expected Hello, got {:?}", other);
                 return;
             }
-            Some(Err(e)) => {
-                warn!("Failed to parse: {:?}", e);
+            Ok(None) => {
+                warn!("Incoming Connection disconnected before handshake");
                 return;
             }
-            None => {
-                warn!("Incoming Connection disconnected before handshake");
+            Err(e) => {
+                warn!("Failed to parse: {:?}", e);
                 return;
             }
         };
 
         // Grab the ecdh nonce they sent us
-        let ecdh_public_key = message.ecdh_public_key;
+        let ecdh_public_key: ecdh::PublicKey = message.ecdh_public_key.into();
 
         // Figure out who they are based on the public key they sent us
-        let id_public_key = message.id_public_key;
+        let id_public_key = message.id_public_key.into();
         let peer_id = compute_node_id(&id_public_key);
         let Some(peer) = self.peers.iter().find(|p| p.id == peer_id) else {
             warn!("Unrecognized peer {}", peer_id);
             let _ = sink
-                .send(Message::Disconnect(format!(
+                .write(Message::Disconnect(format!(
                     "Unrecognized peer {}",
                     peer_id
                 )))
@@ -323,11 +335,11 @@ impl Core {
         }
 
         // Confirm that they are who they say they are; they should have signed the ecdh nonce with their private key
-        let signature = message.signature;
+        let signature: Signature = message.signature.into();
         if let Err(e) = id_public_key.verify(ecdh_public_key.as_bytes(), &signature) {
             warn!(them, "Signature does not match public key: {}", e);
             let _ = sink
-                .send(Message::Disconnect(format!(
+                .write(Message::Disconnect(format!(
                     "Signature does not match public key: {}",
                     e
                 )))
@@ -340,7 +352,7 @@ impl Core {
         let Some(connection_tx) = txs.get(&peer_id) else {
             warn!(them, "Other node not recognized");
             let _ = sink
-                .send(Message::Disconnect("Other node not recognized".into()))
+                .write(Message::Disconnect("Other node not recognized".into()))
                 .await;
             return;
         };
@@ -358,8 +370,8 @@ impl Core {
         // And finally, acknowledge them (and prove who we are) by signing their nonce
         let signature = self.private_key.sign(ecdh_public_key.as_bytes());
         match sink
-            .send(Message::ConfirmConnection(ConfirmConnectionMessage {
-                signature,
+            .write(Message::ConfirmConnection(ConfirmConnectionMessage {
+                signature: signature.into(),
             }))
             .await
         {
@@ -442,11 +454,8 @@ impl Core {
 
         let (read, write) = stream.into_split();
 
-        let stream: WrappedStream = WrappedStream::new(read, LengthDelimitedCodec::new());
-        let mut stream: SerStream = SerStream::new(stream, Cbor::default());
-
-        let sink: WrappedSink = WrappedSink::new(write, LengthDelimitedCodec::new());
-        let mut sink: DeSink = DeSink::new(sink, Cbor::default());
+        let mut stream = DecodeStream::new(read.compat());
+        let mut sink = EncodeSink::new(write.compat());
 
         // Generate our secret for ECDH
         let ecdh_secret = {
@@ -461,41 +470,41 @@ impl Core {
 
         let message = OpenConnectionMessage {
             version: ORACLE_VERSION.to_string(),
-            id_public_key,
-            ecdh_public_key,
-            signature,
+            id_public_key: id_public_key.into(),
+            ecdh_public_key: ecdh_public_key.into(),
+            signature: signature.into(),
         };
-        sink.send(Message::OpenConnection(Box::new(message)))
+        sink.write(Message::OpenConnection(Box::new(message)))
             .await
             .context("error sending open message")?;
         trace!(them, "Outgoing Open request sent");
 
         // Wait for the other side to respond
-        let message = match stream.next().await {
-            Some(Ok(Message::ConfirmConnection(message))) => message,
-            Some(Ok(Message::Disconnect(reason))) => {
+        let message = match stream.read().await {
+            Ok(Some(Message::ConfirmConnection(message))) => message,
+            Ok(Some(Message::Disconnect(reason))) => {
                 return Err(anyhow!("other side disconnected: {}", reason))
             }
-            Some(Ok(other)) => {
+            Ok(Some(other)) => {
                 return Err(anyhow!("expected ConfirmConnection, got {:?}", other));
             }
-            Some(Err(e)) => {
-                return Err(anyhow!("failed to parse: {:?}", e));
-            }
-            None => {
+            Ok(None) => {
                 return Err(anyhow!("outgoing connection disconnected before handshake"));
+            }
+            Err(e) => {
+                return Err(anyhow!("failed to parse: {:?}", e));
             }
         };
         trace!(them, "Outgoing open response received");
 
         // They've signed our nonce, let's confirm they did it right
-        let signature = message.signature;
+        let signature = message.signature.into();
         let verification_result = peer
             .public_key
             .verify(ecdh_public_key.as_bytes(), &signature)
             .context("signature does not match public key");
         if verification_result.is_err() {
-            sink.send(Message::Disconnect(
+            sink.write(Message::Disconnect(
                 "signature does not match public key".into(),
             ))
             .await
@@ -533,13 +542,13 @@ impl Core {
         let send_task = async move {
             while let Some(message) = outgoing_message_rx.recv().await {
                 let message = ApplicationMessage::encrypt(message, &send_chacha);
-                if let Err(e) = sink.send(Message::Application(message)).await {
+                if let Err(e) = sink.write(Message::Application(message)).await {
                     warn!(them, "Failed to send message: {:?}", e);
                     break;
                 }
             }
             if let Ok(dc_reason) = last_message_rx.await {
-                let _ = sink.send(Message::Disconnect(dc_reason)).await;
+                let _ = sink.write(Message::Disconnect(dc_reason)).await;
             }
         };
 
@@ -547,9 +556,9 @@ impl Core {
         let incoming_message_tx = self.incoming_tx.clone();
         let them = peer.label.clone();
         let recv_task = async move {
-            while let Some(msg) = stream.next().await {
-                match msg {
-                    Ok(Message::Application(message)) => {
+            loop {
+                match stream.read().await {
+                    Ok(Some(Message::Application(message))) => {
                         let message = match message.decrypt(&chacha) {
                             Ok(message) => message,
                             Err(e) => {
@@ -561,16 +570,16 @@ impl Core {
                         }
                     }
                     // If someone tries to Hello us again, break it off
-                    Ok(other) => {
+                    Ok(Some(other)) => {
                         return format!("Unexpected message: {:?}", other);
                     }
+                    Ok(None) => return "Other side disconnected".into(),
                     // Someone is sending us messages that we can't parse
                     Err(e) => {
                         return format!("Failed to parse message: {:?}", e);
                     }
                 }
             }
-            "Other side disconnected".into()
         };
 
         // Run until either the sender or receiver task stops running, then return so we can reconnect
@@ -589,8 +598,8 @@ impl Core {
     }
 }
 
-async fn wait_for_disconnect(sink: &DeSink) {
-    let transport = sink.get_ref().get_ref();
+async fn wait_for_disconnect(sink: &EncodeSink) {
+    let transport = sink.writer().get_ref();
     loop {
         sleep(Duration::from_millis(500)).await;
         let Ok(ready) = transport.ready(Interest::WRITABLE).await else {

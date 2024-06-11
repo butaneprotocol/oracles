@@ -16,25 +16,30 @@ use frost_ed25519::{
     Identifier,
 };
 use futures::{channel::mpsc, SinkExt, StreamExt};
+use minicbor::{Decode, Encode};
 use rand::thread_rng;
-use serde::{Deserialize, Serialize};
 use tokio::{select, sync::watch, task::spawn_blocking, time::sleep};
 use tracing::{info, Instrument};
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Decode, Encode, Clone, Debug)]
 pub struct Part1Message {
-    package: Box<round1::Package>,
+    #[n(0)]
+    package: Vec<u8>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Decode, Encode, Clone, Debug)]
 pub struct Part2Message {
-    package: Box<round2::Package>,
+    #[n(0)]
+    package: Vec<u8>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Decode, Encode, Clone, Debug)]
 pub enum KeygenMessage {
-    Part1(Part1Message),
-    Part2(Part2Message),
+    #[n(0)]
+    Part1(#[n(0)] Part1Message),
+    #[n(1)]
+    Part2(#[n(0)] Part2Message),
+    #[n(2)]
     Done,
 }
 
@@ -87,7 +92,9 @@ pub async fn run(config: &OracleConfig) -> Result<()> {
     let part1_broadcast_handle = tokio::spawn(
         async move {
             loop {
-                let package = Box::new(round1_package.clone());
+                let package = round1_package
+                    .serialize()
+                    .expect("error serializing round 1 package");
                 let message = Part1Message { package };
                 part1_sender.broadcast(KeygenMessage::Part1(message)).await;
                 sleep(Duration::from_secs(1)).await;
@@ -98,7 +105,7 @@ pub async fn run(config: &OracleConfig) -> Result<()> {
 
     // Also send our round 2 payloads (once we have them)
     let (outgoing_round2_packages_tx, outgoing_round2_packages_rx) =
-        watch::channel(BTreeMap::new());
+        watch::channel(BTreeMap::<Identifier, round2::Package>::new());
     let identifiers = identifier_lookup.clone();
     let part2_sender = sender.clone();
     let part2_broadcast_handle = tokio::spawn(
@@ -109,7 +116,9 @@ pub async fn run(config: &OracleConfig) -> Result<()> {
                 for (identifier, package) in round2_packages {
                     let to: NodeId = identifiers.get(&identifier).unwrap().clone();
                     let message = Part2Message {
-                        package: Box::new(package),
+                        package: package
+                            .serialize()
+                            .expect("error serializing round 2 package"),
                     };
                     part2_sender.send(to, KeygenMessage::Part2(message)).await;
                 }
@@ -137,12 +146,14 @@ pub async fn run(config: &OracleConfig) -> Result<()> {
 
         match message.data {
             KeygenMessage::Part1(Part1Message { package }) => {
-                if round1_packages.get(&from_id) == Some(&*package) {
+                let package =
+                    round1::Package::deserialize(&package).expect("error deserializing package");
+                if round1_packages.get(&from_id) == Some(&package) {
                     // We've seen this one
                     continue;
                 }
 
-                round1_packages.insert(from_id, *package);
+                round1_packages.insert(from_id, package);
                 if round1_packages.len() == peers_count {
                     info!("Round 1 complete! Beginning round 2");
                     // We have packages from every peer, and now we can start (or re-start) round 2
@@ -153,12 +164,14 @@ pub async fn run(config: &OracleConfig) -> Result<()> {
                 }
             }
             KeygenMessage::Part2(Part2Message { package }) => {
-                if round2_packages.get(&from_id) == Some(&*package) {
+                let package =
+                    round2::Package::deserialize(&package).expect("error deserializing package");
+                if round2_packages.get(&from_id) == Some(&package) {
                     // We've seen this one
                     continue;
                 }
 
-                round2_packages.insert(from_id, *package);
+                round2_packages.insert(from_id, package);
                 if round2_packages.len() == peers_count {
                     // We have everything we need to compute our frost keys
                     let round2_secret_package = round2_secret_package.as_ref().unwrap();
