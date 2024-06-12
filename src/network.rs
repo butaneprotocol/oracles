@@ -1,5 +1,4 @@
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
 use tokio::{sync::mpsc, task::JoinSet};
 use tracing::{info, warn, Instrument};
 
@@ -22,12 +21,26 @@ type MpscPair<T> = (
     mpsc::Receiver<OutgoingMessage<T>>,
 );
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub enum Message {
-    Keygen(KeygenMessage),
-    Raft(RaftMessage),
-    Signer(SignerMessage),
+// We have a submodule named "core", which breaks the minicbor macros.
+// Declare this in a nested context so our "core" isn't visible
+mod derive_workaround {
+    use minicbor::{Decode, Encode};
+
+    use crate::{
+        dkg::KeygenMessage, raft::RaftMessage, signature_aggregator::signer::SignerMessage,
+    };
+
+    #[derive(Decode, Encode, Clone, Debug)]
+    pub enum Message {
+        #[n(0)]
+        Keygen(#[n(0)] KeygenMessage),
+        #[n(1)]
+        Raft(#[n(0)] RaftMessage),
+        #[n(2)]
+        Signer(#[n(0)] SignerMessage),
+    }
 }
+pub use derive_workaround::Message;
 
 pub struct Network {
     pub id: NodeId,

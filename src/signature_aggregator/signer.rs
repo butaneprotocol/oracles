@@ -11,13 +11,14 @@ use frost_ed25519::{
     round2::{self, SignatureShare},
     Identifier, SigningPackage,
 };
+use minicbor::{Decode, Encode};
 use rand::thread_rng;
-use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc::Sender, watch::Receiver};
 use tracing::{info, instrument, warn};
 use uuid::Uuid;
 
 use crate::{
+    cbor::{CborIdentifier, CborSignatureShare, CborSigningCommitments, CborSigningPackage},
     network::{NetworkSender, NodeId},
     price_feed::{
         deserialize, serialize, IntervalBound, IntervalBoundType, PriceFeed, PriceFeedEntry,
@@ -26,9 +27,11 @@ use crate::{
     raft::RaftLeader,
 };
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Decode, Encode, Clone, Debug)]
 pub struct SignerMessage {
+    #[n(0)]
     pub round: String,
+    #[n(1)]
     pub data: SignerMessageData,
 }
 impl Display for SignerMessage {
@@ -40,12 +43,16 @@ impl Display for SignerMessage {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Decode, Encode, Clone, Debug)]
 pub enum SignerMessageData {
+    #[n(0)]
     RequestCommitment,
-    Commit(Commitment),
-    RequestSignature(Vec<SigningPackage>),
-    Sign(Signature),
+    #[n(1)]
+    Commit(#[n(0)] Commitment),
+    #[n(2)]
+    RequestSignature(#[n(0)] SignatureRequest),
+    #[n(3)]
+    Sign(#[n(0)] Signature),
 }
 impl Display for SignerMessageData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -58,16 +65,26 @@ impl Display for SignerMessageData {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Decode, Encode, Clone, Debug)]
 pub struct Commitment {
-    pub identifier: Identifier,
-    pub commitments: Vec<SigningCommitments>,
+    #[n(0)]
+    pub identifier: CborIdentifier,
+    #[n(1)]
+    pub commitments: Vec<CborSigningCommitments>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Decode, Encode, Clone, Debug)]
+pub struct SignatureRequest {
+    #[n(0)]
+    packages: Vec<CborSigningPackage>,
+}
+
+#[derive(Decode, Encode, Clone, Debug)]
 pub struct Signature {
-    pub identifier: Identifier,
-    pub signatures: Vec<SignatureShare>,
+    #[n(0)]
+    pub identifier: CborIdentifier,
+    #[n(1)]
+    pub signatures: Vec<CborSignatureShare>,
 }
 
 #[derive(Clone)]
@@ -112,7 +129,8 @@ impl Display for LeaderState {
             Self::CollectingCommitments {
                 round, commitments, ..
             } => {
-                let committed: Vec<_> = commitments.iter().map(|c| c.identifier).collect();
+                let committed: Vec<Identifier> =
+                    commitments.iter().map(|c| c.identifier.into()).collect();
                 f.write_fmt(format_args!(
                     "{{role=Leader,state=CollectingCommitments,round={},committed={:?}}}",
                     round, committed
@@ -229,8 +247,8 @@ impl Signer {
                 SignerMessageData::Commit(commitment) => {
                     self.process_commitment(round, from, commitment).await?;
                 }
-                SignerMessageData::RequestSignature(packages) => {
-                    self.send_signature(round, packages).await?;
+                SignerMessageData::RequestSignature(request) => {
+                    self.send_signature(round, request).await?;
                 }
                 SignerMessageData::Sign(signature) => {
                     self.process_signature(round, signature).await?;
@@ -342,7 +360,8 @@ impl Signer {
                 recipients.push(from.clone());
             }
             for (idx, c) in commitment.commitments.iter().enumerate() {
-                commitment_maps[idx].insert(commitment.identifier, *c);
+                let comm: SigningCommitments = (*c).into();
+                commitment_maps[idx].insert(commitment.identifier.into(), comm);
             }
         }
 
@@ -354,13 +373,17 @@ impl Signer {
             .zip(messages)
             .map(|(c, m)| SigningPackage::new(c, &m))
             .collect();
+        let wire_packages: Vec<CborSigningPackage> =
+            packages.iter().map(|p| p.clone().into()).collect();
         for recipient in recipients {
             self.message_sink
                 .send(
                     recipient.clone(),
                     SignerMessage {
                         round: round.clone(),
-                        data: SignerMessageData::RequestSignature(packages.clone()),
+                        data: SignerMessageData::RequestSignature(SignatureRequest {
+                            packages: wire_packages.clone(),
+                        }),
                     },
                 )
                 .await;
@@ -380,7 +403,9 @@ impl Signer {
         Ok(())
     }
 
-    async fn send_signature(&mut self, round: String, packages: Vec<SigningPackage>) -> Result<()> {
+    async fn send_signature(&mut self, round: String, request: SignatureRequest) -> Result<()> {
+        let packages: Vec<SigningPackage> =
+            request.packages.into_iter().map(|i| i.into()).collect();
         let SignerState::Follower(
             leader_id,
             FollowerState::Committed {
@@ -465,7 +490,8 @@ impl Signer {
         let mut signature_maps = vec![BTreeMap::new(); price_data.len()];
         for signature in signatures {
             for (index, s) in signature.signatures.iter().enumerate() {
-                signature_maps[index].insert(signature.identifier, *s);
+                let sig: SignatureShare = (*s).into();
+                signature_maps[index].insert(signature.identifier.into(), sig);
             }
         }
 
@@ -504,10 +530,10 @@ impl Signer {
         for _ in 0..commitment_count {
             let (nonce, commitment) = round1::commit(self.key.signing_share(), &mut thread_rng());
             nonces.push(nonce);
-            commitments.push(commitment);
+            commitments.push(commitment.into());
         }
         let commitment = Commitment {
-            identifier: *self.key.identifier(),
+            identifier: (*self.key.identifier()).into(),
             commitments,
         };
         (nonces, commitment)
@@ -517,10 +543,10 @@ impl Signer {
         let mut signatures = vec![];
         for (package, nonce) in packages.iter().zip(nonces) {
             let signature = round2::sign(package, nonce, &self.key)?;
-            signatures.push(signature);
+            signatures.push(signature.into());
         }
         Ok(Signature {
-            identifier: *self.key.identifier(),
+            identifier: (*self.key.identifier()).into(),
             signatures,
         })
     }

@@ -1,19 +1,35 @@
 use std::{collections::HashSet, ops::Sub};
 
+use minicbor::{Decode, Encode};
 use rand::Rng;
-use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 use tracing::{info, trace, warn};
 
 use crate::network::{IncomingMessage, Network, NetworkChannel, NodeId};
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub enum RaftMessage {
+    #[n(0)]
     Connect,
+    #[n(1)]
     Disconnect,
-    RequestVote { term: usize },
-    RequestVoteResponse { term: usize, vote: bool },
-    Heartbeat { term: usize },
+    #[n(2)]
+    RequestVote {
+        #[n(0)]
+        term: usize,
+    },
+    #[n(3)]
+    RequestVoteResponse {
+        #[n(0)]
+        term: usize,
+        #[n(1)]
+        vote: bool,
+    },
+    #[n(4)]
+    Heartbeat {
+        #[n(0)]
+        term: usize,
+    },
 }
 
 #[derive(Eq, PartialEq, Clone)]
