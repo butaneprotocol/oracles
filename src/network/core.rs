@@ -257,14 +257,14 @@ impl Core {
                         continue;
                     };
                     if let Err(e) = sender.send(message).await {
-                        warn!("Could not send message to node {}: {:?}", id, e);
+                        warn!("Could not send message to node {}: {}", id, e);
                     }
                 }
                 None => {
                     // Broadcasting to all nodes
                     for (id, sender) in outgoing_message_txs.iter() {
                         if let Err(e) = sender.send(message.clone()).await {
-                            warn!("Could not send message to node {}: {:?}", id, e);
+                            warn!("Could not send message to node {}: {}", id, e);
                         }
                     }
                 }
@@ -314,14 +314,14 @@ impl Core {
             Ok((peer, secret)) => (peer, secret),
             Err(error) => {
                 warn!(them, "{:#}", error);
-                try_send_disconnect(&mut sink, format!("{:#}", error)).await;
+                try_send_disconnect(&them, &mut sink, format!("{:#}", error)).await;
                 return;
             }
         };
 
         let Some(outgoing_message_rx_mutex) = rxs.get(&peer.id) else {
             error!(them, "Missing outgoing message receiver");
-            try_send_disconnect(&mut sink, "Missing outgoing message receiver".into()).await;
+            try_send_disconnect(&them, &mut sink, "Missing outgoing message receiver".into()).await;
             return;
         };
         let mut outgoing_message_rx = match outgoing_message_rx_mutex.try_lock() {
@@ -331,7 +331,7 @@ impl Core {
                     them,
                     "Cannot establish a new incoming connection, we already have one"
                 );
-                try_send_disconnect(&mut sink, "You are already connected".into()).await;
+                try_send_disconnect(&them, &mut sink, "You are already connected".into()).await;
                 return;
             }
         };
@@ -449,7 +449,7 @@ impl Core {
                 Ok(secret) => secret,
                 Err(error) => {
                     warn!(them, "{:#}", error);
-                    try_send_disconnect(&mut sink, format!("{:#}", error)).await;
+                    try_send_disconnect(&them, &mut sink, format!("{:#}", error)).await;
                     continue;
                 }
             };
@@ -584,14 +584,14 @@ impl Core {
                         };
                         let message = ApplicationMessage::encrypt(message, &send_chacha);
                         if let Err(e) = sink.write(Message::Application(message)).await {
-                            break format!("Failed to send message: {:?}", e);
+                            break format!("Failed to send message: {}", e);
                         }
                     }
                 }
             };
             warn!(them, "Ending sender task: {}", disconnect_reason);
             send_disconnect_tx.send_replace(disconnect_reason.clone());
-            try_send_disconnect(&mut sink, disconnect_reason).await;
+            try_send_disconnect(&them, &mut sink, disconnect_reason).await;
         }
         .in_current_span();
 
@@ -610,7 +610,7 @@ impl Core {
                                 Err(e) => break format!("Failed to decrypt incoming message: {:#}", e)
                             };
                             if let Err(e) = incoming_message_tx.send((peer.id.clone(), message)).await {
-                                break format!("Failed to process incoming message: {:?}", e);
+                                break format!("Failed to process incoming message: {}", e);
                             }
                         },
                         Ok(Some(Message::Disconnect(reason))) => {
@@ -618,14 +618,14 @@ impl Core {
                             return;
                         }
                         Ok(Some(other)) => {
-                            break format!("Unexpected message received: {:?}", other);
+                            break format!("Expected Application message, got: {:?}", other);
                         }
                         Ok(None) => {
-                            trace!(them, "Empty message received");
+                            trace!(them, "Expected Application message, got empty message");
                             continue;
                         }
                         Err(e) => {
-                            break format!("Error reading from stream: {:?}", e);
+                            break format!("Error reading from stream: {}", e);
                         }
                     }
                 }
@@ -651,15 +651,15 @@ impl Core {
     }
 }
 
-async fn try_send_disconnect(sink: &mut EncodeSink, reason: String) {
+async fn try_send_disconnect(them: &str, sink: &mut EncodeSink, reason: String) {
     match timeout(
         Duration::from_secs(3),
         sink.write(Message::Disconnect(reason)),
     )
     .await
     {
-        Err(timeout) => warn!("could not send disconnect message: {}", timeout),
-        Ok(Err(send)) => warn!("could not send disconnect message: {}", send),
+        Err(timeout) => warn!(them, "could not send disconnect message: {}", timeout),
+        Ok(Err(send)) => warn!(them, "could not send disconnect message: {}", send),
         Ok(Ok(_)) => {}
     }
 }
