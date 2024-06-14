@@ -26,7 +26,7 @@ use tokio::{
     select,
     sync::{mpsc, watch, Mutex},
     task::JoinSet,
-    time::timeout,
+    time::{sleep, timeout},
 };
 use tokio_util::compat::{Compat, TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use tracing::{error, info, trace, warn, Instrument};
@@ -423,6 +423,7 @@ impl Core {
         mut outgoing_message_rx: mpsc::Receiver<AppMessage>,
     ) {
         let them = peer.label.clone();
+        let mut sleep_seconds = 1;
         loop {
             let stream = match self
                 .open_connection(&peer)
@@ -432,6 +433,10 @@ impl Core {
                 Ok(stream) => stream,
                 Err(error) => {
                     warn!(them, "{:#}", error);
+                    sleep(Duration::from_secs(sleep_seconds)).await;
+                    if sleep_seconds < 8 {
+                        sleep_seconds *= 2;
+                    }
                     continue;
                 }
             };
@@ -450,9 +455,15 @@ impl Core {
                 Err(error) => {
                     warn!(them, "{:#}", error);
                     try_send_disconnect(&them, &mut sink, format!("{:#}", error)).await;
+                    sleep(Duration::from_secs(sleep_seconds)).await;
+                    if sleep_seconds < 8 {
+                        sleep_seconds *= 2;
+                    }
                     continue;
                 }
             };
+
+            sleep_seconds = 1;
 
             self.handle_peer_connection(&peer, secret, sink, stream, &mut outgoing_message_rx)
                 .await;
