@@ -1,7 +1,11 @@
-use std::{collections::HashMap, env, fs, sync::Arc, time::Duration};
+use std::{
+    collections::{BTreeMap, HashMap},
+    fs,
+    sync::Arc,
+    time::Duration,
+};
 
 use anyhow::{anyhow, Context, Result};
-use async_compat::{Compat, CompatExt};
 use chacha20poly1305::{aead::Aead, AeadCore, Key, KeyInit, XChaCha20Poly1305};
 use dashmap::DashMap;
 use ed25519::{
@@ -14,25 +18,26 @@ use minicbor::{bytes::ByteVec, Decode, Decoder, Encode, Encoder};
 use minicbor_io::{AsyncReader, AsyncWriter};
 use rand::thread_rng;
 use tokio::{
-    io::Interest,
+    join,
     net::{
         tcp::{OwnedReadHalf, OwnedWriteHalf},
         TcpListener, TcpStream,
     },
     select,
-    sync::{mpsc, oneshot, Mutex},
+    sync::{mpsc, watch, Mutex},
     task::JoinSet,
-    time::sleep,
+    time::{sleep, timeout},
 };
-use tracing::{info, trace, warn, Instrument};
-use x25519_dalek as ecdh;
+use tokio_util::compat::{Compat, TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
+use tracing::{error, info, trace, warn, Instrument};
+use x25519_dalek::{self as ecdh, SharedSecret};
 
 type Nonce = chacha20poly1305::aead::generic_array::GenericArray<u8, chacha20poly1305::consts::U24>;
 
 use crate::{
     cbor::{CborEcdhPublicKey, CborSignature, CborVerifyingKey},
     config::{OracleConfig, PeerConfig},
-    keys::get_keys_directory,
+    keys,
     raft::RaftMessage,
 };
 
@@ -60,8 +65,14 @@ struct OpenConnectionMessage {
 
 #[derive(Decode, Encode, Clone, Debug)]
 struct ConfirmConnectionMessage {
-    /// The ecdh_public_key we sent, signed with the other node's private key
+    /// The app version of the other node
     #[n(0)]
+    version: String,
+    /// An ephemeral public key, used for ECDH
+    #[n(1)]
+    ecdh_public_key: CborEcdhPublicKey,
+    /// The ecdh_public_key we sent, signed with the other node's private key
+    #[n(2)]
     signature: CborSignature,
 }
 
@@ -123,15 +134,6 @@ struct Peer {
     address: String,
 }
 
-struct IncomingConnection {
-    ecdh_public_key: ecdh::PublicKey,
-    stream: DecodeStream,
-}
-struct OutgoingConnection {
-    ecdh_secret: ecdh::EphemeralSecret,
-    sink: EncodeSink,
-}
-
 type OutgoingMessageReceiver = mpsc::Receiver<(Option<NodeId>, AppMessage)>;
 type IncomingMessageSender = mpsc::Sender<(NodeId, AppMessage)>;
 
@@ -140,7 +142,7 @@ pub struct Core {
     pub id: NodeId,
     private_key: Arc<PrivateKey>,
     port: u16,
-    peers: Arc<Vec<Peer>>,
+    peers: Arc<BTreeMap<NodeId, Peer>>,
     outgoing_rx: Arc<Mutex<OutgoingMessageReceiver>>,
     incoming_tx: Arc<IncomingMessageSender>,
 }
@@ -157,8 +159,15 @@ impl Core {
 
         let peers = {
             let peers: Result<Vec<Peer>> = config.peers.iter().map(parse_peer).collect();
-            Arc::new(peers?.into_iter().filter(|p| p.id != id).collect())
+            Arc::new(
+                peers?
+                    .into_iter()
+                    .filter(|p| p.id != id)
+                    .map(|p| (p.id.clone(), p))
+                    .collect(),
+            )
         };
+
         Ok(Self {
             id,
             private_key,
@@ -176,37 +185,50 @@ impl Core {
     pub async fn handle_network(self) -> Result<()> {
         let mut set = JoinSet::new();
 
-        let incoming_connection_txs = DashMap::new();
         let mut outgoing_message_txs = HashMap::new();
 
-        // Spawn one task per peer that's responsible for all comms with that peer
-        for peer in self.peers.iter() {
+        let (outgoing_peers, incoming_peers): (Vec<_>, Vec<_>) = self
+            .peers
+            .iter()
+            .map(|(_, peer)| peer)
+            .partition(|p| self.should_initiate_connection_to(&p.id));
+
+        // For each peer that we should connect to, spawn a task to connect to them
+        for peer in outgoing_peers {
             let core = self.clone();
             let peer = peer.clone();
 
-            // Each peer gets a receiver that tells it when a new incoming connection from that peer is open.
-            // Hold onto the senders here
-            let (incoming_connection_tx, incoming_connection_rx) = mpsc::channel(10);
-            incoming_connection_txs.insert(peer.id.clone(), incoming_connection_tx);
+            trace!("This node will initiate connections to {}", peer.label);
 
-            // Each peer also gets a receiver that tells it when the app wants to send a message.
+            // Each peer gets a receiver that tells it when the app wants to send a message.
             // Hold onto the senders here
             let (outgoing_message_tx, outgoing_message_rx) = mpsc::channel(10);
             outgoing_message_txs.insert(peer.id.clone(), outgoing_message_tx);
 
             set.spawn(
                 async move {
-                    core.handle_peer(peer, incoming_connection_rx, outgoing_message_rx)
+                    core.handle_outgoing_connection(peer, outgoing_message_rx)
                         .await
                 }
                 .in_current_span(),
             );
         }
 
+        let outgoing_message_rxs = DashMap::new();
+        for peer in incoming_peers {
+            trace!("This node will expect connections from {}", peer.label);
+
+            // Each peer gets a receiver that tells it when the app wants to send a message.
+            // Build a map of these receivers for incoming connections.
+            let (outgoing_message_tx, outgoing_message_rx) = mpsc::channel(10);
+            outgoing_message_txs.insert(peer.id.clone(), outgoing_message_tx);
+            outgoing_message_rxs.insert(peer.id.clone(), Mutex::new(outgoing_message_rx));
+        }
+
         // One task listens for new connections and sends them to the appropriate peer task
         let core = self.clone();
         set.spawn(
-            async move { core.accept_connections(incoming_connection_txs).await }.in_current_span(),
+            async move { core.accept_connections(outgoing_message_rxs).await }.in_current_span(),
         );
 
         // One task polls for outgoing messages, and tells the appropriate peer task to send them
@@ -218,7 +240,7 @@ impl Core {
         );
 
         while let Some(x) = set.join_next().await {
-            x?
+            x?;
         }
 
         Ok(())
@@ -235,14 +257,14 @@ impl Core {
                         continue;
                     };
                     if let Err(e) = sender.send(message).await {
-                        warn!("Could not send message to node {}: {:?}", id, e);
+                        warn!("Could not send message to node {}: {}", id, e);
                     }
                 }
                 None => {
                     // Broadcasting to all nodes
                     for (id, sender) in outgoing_message_txs.iter() {
                         if let Err(e) = sender.send(message.clone()).await {
-                            warn!("Could not send message to node {}: {:?}", id, e);
+                            warn!("Could not send message to node {}: {}", id, e);
                         }
                     }
                 }
@@ -252,20 +274,19 @@ impl Core {
 
     async fn accept_connections(
         self,
-        incoming_connection_txs: DashMap<NodeId, mpsc::Sender<IncomingConnection>>,
+        outgoing_message_rxs: DashMap<NodeId, Mutex<mpsc::Receiver<AppMessage>>>,
     ) {
         let addr = format!("0.0.0.0:{}", self.port);
-        let incoming_connection_txs = Arc::new(incoming_connection_txs);
+        let outgoing_message_rxs = Arc::new(outgoing_message_rxs);
         info!("Listening on: {}", addr);
 
         let listener = TcpListener::bind(addr).await.unwrap();
         while let Ok((stream, _)) = listener.accept().await {
             let core = self.clone();
-            let txs = incoming_connection_txs.clone();
-            // Each incoming connection spawns its own thread to handling incoming messages
+            let rxs = outgoing_message_rxs.clone();
             tokio::spawn(
                 async move {
-                    core.handle_incoming_connection(stream, txs).await;
+                    core.handle_incoming_connection(stream, rxs).await;
                 }
                 .in_current_span(),
             );
@@ -275,55 +296,81 @@ impl Core {
     async fn handle_incoming_connection(
         self,
         stream: TcpStream,
-        txs: Arc<DashMap<NodeId, mpsc::Sender<IncomingConnection>>>,
+        rxs: Arc<DashMap<NodeId, Mutex<mpsc::Receiver<AppMessage>>>>,
     ) {
         trace!("Incoming connection from: {}", stream.peer_addr().unwrap());
 
+        let mut them = format!("<unknown> ({})", stream.peer_addr().unwrap());
+
         let (read, write) = stream.into_split();
         let mut stream: DecodeStream = DecodeStream::new(read.compat());
-        let mut sink: EncodeSink = EncodeSink::new(write.compat());
+        let mut sink: EncodeSink = EncodeSink::new(write.compat_write());
 
-        let message = match stream.read().await {
-            Ok(Some(Message::OpenConnection(message))) => message,
-            Ok(Some(Message::Disconnect(reason))) => {
-                warn!(
-                    "Other party disconnected immediately on connection: {}",
-                    reason
-                );
-                return;
-            }
-            Ok(Some(other)) => {
-                warn!("Expected Hello, got {:?}", other);
-                return;
-            }
-            Ok(None) => {
-                warn!("Expected Hello, got empty message");
-                return;
-            }
-            Err(e) => {
-                warn!("Error waiting for handshake: {:?}", e);
+        let (peer, secret) = match self
+            .handshake_incoming(&mut them, &mut stream, &mut sink)
+            .await
+            .context("error establishing shared secret")
+        {
+            Ok((peer, secret)) => (peer, secret),
+            Err(error) => {
+                warn!(them, "{:#}", error);
+                try_send_disconnect(&them, &mut sink, format!("{:#}", error)).await;
                 return;
             }
         };
 
+        let Some(outgoing_message_rx_mutex) = rxs.get(&peer.id) else {
+            error!(them, "Missing outgoing message receiver");
+            try_send_disconnect(&them, &mut sink, "Missing outgoing message receiver".into()).await;
+            return;
+        };
+        let mut outgoing_message_rx = match outgoing_message_rx_mutex.try_lock() {
+            Ok(lock) => lock,
+            Err(_) => {
+                warn!(
+                    them,
+                    "Cannot establish a new incoming connection, we already have one"
+                );
+                try_send_disconnect(&them, &mut sink, "You are already connected".into()).await;
+                return;
+            }
+        };
+
+        self.handle_peer_connection(&peer, secret, sink, stream, &mut outgoing_message_rx)
+            .await;
+    }
+
+    async fn handshake_incoming(
+        &self,
+        them: &mut String,
+        stream: &mut DecodeStream,
+        sink: &mut EncodeSink,
+    ) -> Result<(Peer, SharedSecret)> {
+        let message = match stream.read().await.context("error waiting for handshake")? {
+            Some(Message::OpenConnection(message)) => message,
+            Some(Message::Disconnect(reason)) => {
+                return Err(anyhow!("other party disconnected immediately: {}", reason));
+            }
+            Some(other) => {
+                return Err(anyhow!("expected OpenConnection, got {:?}", other));
+            }
+            None => {
+                return Err(anyhow!("expected OpenConnection, got empty message"));
+            }
+        };
+        trace!(them, "OpenConnection message received");
+
         // Grab the ecdh nonce they sent us
-        let ecdh_public_key: ecdh::PublicKey = message.ecdh_public_key.into();
+        let other_ecdh_public_key: ecdh::PublicKey = message.ecdh_public_key.into();
 
         // Figure out who they are based on the public key they sent us
         let id_public_key = message.id_public_key.into();
         let peer_id = compute_node_id(&id_public_key);
-        let Some(peer) = self.peers.iter().find(|p| p.id == peer_id) else {
-            warn!("Unrecognized peer {}", peer_id);
-            let _ = sink
-                .write(Message::Disconnect(format!(
-                    "Unrecognized peer {}",
-                    peer_id
-                )))
-                .await;
-            return;
+        let Some(peer) = self.peers.get(&peer_id) else {
+            return Err(anyhow!("Unrecognized peer {}", peer_id));
         };
 
-        let them = peer.label.clone();
+        them.clone_from(&peer.label);
         if message.version != ORACLE_VERSION {
             warn!(
                 them,
@@ -334,106 +381,96 @@ impl Core {
 
         // Confirm that they are who they say they are; they should have signed the ecdh nonce with their private key
         let signature: Signature = message.signature.into();
-        if let Err(e) = id_public_key.verify(ecdh_public_key.as_bytes(), &signature) {
-            warn!(them, "Signature does not match public key: {}", e);
-            let _ = sink
-                .write(Message::Disconnect(format!(
-                    "Signature does not match public key: {}",
-                    e
-                )))
-                .await;
-            return;
+        id_public_key
+            .verify(other_ecdh_public_key.as_bytes(), &signature)
+            .context("signature does not match public key")?;
+
+        // Confirm that we expect this node to reach out to us, instead of vice versa
+        if !self.should_receive_connection_from(&peer_id) {
+            return Err(anyhow!(
+                "did not expect peer to initiate connection with us"
+            ));
         }
 
-        // Notify whoever's listening that we have a new connection
-        // (We look up the "incoming connection" sender, so if we don't recognize them we fail here)
-        let Some(connection_tx) = txs.get(&peer_id) else {
-            warn!(them, "Other node not recognized");
-            let _ = sink
-                .write(Message::Disconnect("Other node not recognized".into()))
-                .await;
-            return;
+        // Generate our own ECDH secret
+        let ecdh_secret = {
+            let rng = thread_rng();
+            ecdh::EphemeralSecret::random_from_rng(rng)
         };
-        if let Err(e) = connection_tx
-            .send(IncomingConnection {
-                ecdh_public_key,
-                stream,
-            })
-            .await
-        {
-            warn!(them, "Could not send incoming connection: {:?}", e);
-            return;
-        }
 
-        // And finally, acknowledge them (and prove who we are) by signing their nonce
+        // Respond to the other client's open request with our own
+        let ecdh_public_key = ecdh::PublicKey::from(&ecdh_secret);
         let signature = self.private_key.sign(ecdh_public_key.as_bytes());
-        match sink
-            .write(Message::ConfirmConnection(ConfirmConnectionMessage {
-                signature: signature.into(),
-            }))
+
+        let message = ConfirmConnectionMessage {
+            version: ORACLE_VERSION.to_string(),
+            ecdh_public_key: ecdh_public_key.into(),
+            signature: signature.into(),
+        };
+        sink.write(Message::ConfirmConnection(message))
             .await
-        {
-            Ok(_) => {
-                trace!(them, "Outgoing Hello sent");
-            }
-            Err(e) => {
-                warn!(them, "Failed to send hello: {:?}", e);
-            }
-        }
+            .context("error sending ConfirmConnection message")?;
+        trace!(them, "ConfirmConnection message sent");
+
+        let peer = peer.clone();
+        let secret = ecdh_secret.diffie_hellman(&other_ecdh_public_key);
+        Ok((peer, secret))
     }
 
-    async fn handle_peer(
+    async fn handle_outgoing_connection(
         self,
         peer: Peer,
-        mut incoming_connection_rx: mpsc::Receiver<IncomingConnection>,
-        outgoing_message_rx: mpsc::Receiver<AppMessage>,
+        mut outgoing_message_rx: mpsc::Receiver<AppMessage>,
     ) {
         let them = peer.label.clone();
-        let outgoing_message_rx = Mutex::new(outgoing_message_rx);
-        let mut sleep_secs = 1u64;
+        let mut sleep_seconds = 1;
         loop {
-            // Every time the outgoing or incoming connections are closed, we need to reconnect to both.
-            // Because we store both connections in local variables inside this loop,
-            // they disconnect at the end of every iteration and reconnect at the start.
-            let outgoing_connection = match self.connect_to_peer(&peer).await {
-                Ok(conn) => conn,
-                Err(e) => {
-                    warn!(them, "error connecting: {:#}", e);
-                    sleep(Duration::from_secs(sleep_secs)).await;
-                    sleep_secs = if sleep_secs >= 8 { 8 } else { sleep_secs * 2 };
-                    continue;
-                }
-            };
-            sleep_secs = 1u64;
-            let incoming_connection = select! {
-                incoming = incoming_connection_rx.recv() => {
-                    let Some(conn) = incoming else {
-                        // if this receiver is closed, the system must be shutting down
-                        return;
-                    };
-                    conn
-                }
-                _ = wait_for_disconnect(&outgoing_connection.sink) => {
-                    // While waiting for an incoming connection, the outgoing one disconnected.
-                    // Restart the loop to try connecting again.
+            let stream = match self
+                .open_connection(&peer)
+                .await
+                .context("error opening connection")
+            {
+                Ok(stream) => stream,
+                Err(error) => {
+                    warn!(them, "{:#}", error);
+                    sleep(Duration::from_secs(sleep_seconds)).await;
+                    if sleep_seconds < 8 {
+                        sleep_seconds *= 2;
+                    }
                     continue;
                 }
             };
 
-            // Ok! We finally have incoming and outgoing connections set up.
-            // Now we can actually handle messages from across the way
-            let mut outgoing_message_rx = outgoing_message_rx.lock().await;
-            self.handle_peer_connections(
-                &peer,
-                incoming_connection,
-                outgoing_connection,
-                &mut outgoing_message_rx,
-            )
-            .await;
+            let (read, write) = stream.into_split();
+
+            let mut stream = DecodeStream::new(read.compat());
+            let mut sink = EncodeSink::new(write.compat_write());
+
+            let secret = match self
+                .handshake_outgoing(&peer, &mut stream, &mut sink)
+                .await
+                .context("error establishing shared secret")
+            {
+                Ok(secret) => secret,
+                Err(error) => {
+                    warn!(them, "{:#}", error);
+                    try_send_disconnect(&them, &mut sink, format!("{:#}", error)).await;
+                    sleep(Duration::from_secs(sleep_seconds)).await;
+                    if sleep_seconds < 8 {
+                        sleep_seconds *= 2;
+                    }
+                    continue;
+                }
+            };
+
+            sleep_seconds = 1;
+
+            self.handle_peer_connection(&peer, secret, sink, stream, &mut outgoing_message_rx)
+                .await;
         }
     }
 
-    async fn connect_to_peer(&self, peer: &Peer) -> Result<OutgoingConnection> {
+    async fn open_connection(&self, peer: &Peer) -> Result<TcpStream> {
         let them = peer.label.clone();
         trace!(them, "Attempting to connect to {}", peer.id);
         let stream = TcpStream::connect(&peer.address)
@@ -442,18 +479,23 @@ impl Core {
 
         trace!(
             them,
-            "Outgoing connection to: {}",
+            "Opening connection to: {}",
             stream.peer_addr().unwrap()
         );
         stream
             .set_nodelay(true)
             .context("error setting TCP_NODELAY")?;
         trace!(them, "Set TCP_NODELAY");
+        Ok(stream)
+    }
 
-        let (read, write) = stream.into_split();
-
-        let mut stream = DecodeStream::new(read.compat());
-        let mut sink = EncodeSink::new(write.compat());
+    async fn handshake_outgoing(
+        &self,
+        peer: &Peer,
+        stream: &mut DecodeStream,
+        sink: &mut EncodeSink,
+    ) -> Result<SharedSecret> {
+        let them = peer.label.clone();
 
         // Generate our secret for ECDH
         let ecdh_secret = {
@@ -475,144 +517,161 @@ impl Core {
         sink.write(Message::OpenConnection(Box::new(message)))
             .await
             .context("error sending open message")?;
-        trace!(them, "Outgoing Open request sent");
+        trace!(them, "OpenConnection message sent");
 
         // Wait for the other side to respond
-        let message = match stream.read().await {
-            Ok(Some(Message::ConfirmConnection(message))) => message,
-            Ok(Some(Message::Disconnect(reason))) => {
-                return Err(anyhow!("other side disconnected: {}", reason))
+        let message = match stream
+            .read()
+            .await
+            .context("error waiting for handshake response")?
+        {
+            Some(Message::ConfirmConnection(message)) => message,
+            Some(Message::Disconnect(reason)) => {
+                return Err(anyhow!("Other side disconnected: {}", reason))
             }
-            Ok(Some(other)) => {
-                return Err(anyhow!("expected ConfirmConnection, got {:?}", other));
+            Some(other) => {
+                return Err(anyhow!("Expected ConfirmConnection, got {:?}", other));
             }
-            Ok(None) => {
-                return Err(anyhow!("outgoing connection returned empty message"));
-            }
-            Err(e) => {
-                return Err(anyhow!(
-                    "error waiting for response from outgoing connection: {:?}",
-                    e
-                ));
+            None => {
+                return Err(anyhow!("Expected ConfirmConnection, got empty message"));
             }
         };
-        trace!(them, "Outgoing open response received");
-
-        // They've signed our nonce, let's confirm they did it right
-        let signature = message.signature.into();
-        let verification_result = peer
-            .public_key
-            .verify(ecdh_public_key.as_bytes(), &signature)
-            .context("signature does not match public key");
-        if verification_result.is_err() {
-            sink.write(Message::Disconnect(
-                "signature does not match public key".into(),
-            ))
-            .await
-            .context("error sending disconnect message")?;
-            verification_result?;
+        trace!(them, "ConfirmConnection message received");
+        if message.version != ORACLE_VERSION {
+            warn!(
+                them,
+                other_version = message.version,
+                "Other node is running a different oracle version"
+            )
         }
 
-        // and we're all set!
-        Ok(OutgoingConnection { ecdh_secret, sink })
+        // They've sent us a signed nonce, let's confirm they are who they say they are
+        let other_ecdh_key: ecdh::PublicKey = message.ecdh_public_key.into();
+        let signature = message.signature.into();
+
+        peer.public_key
+            .verify(other_ecdh_key.as_bytes(), &signature)
+            .context("signature does not match public key")?;
+
+        // And now the handshake is done and we have our secret
+        let secret = ecdh_secret.diffie_hellman(&other_ecdh_key);
+        Ok(secret)
     }
 
-    async fn handle_peer_connections(
+    async fn handle_peer_connection(
         &self,
         peer: &Peer,
-        incoming_connection: IncomingConnection,
-        outgoing_connection: OutgoingConnection,
+        secret: SharedSecret,
+        mut sink: EncodeSink,
+        mut stream: DecodeStream,
         outgoing_message_rx: &mut mpsc::Receiver<AppMessage>,
     ) {
         let them = peer.label.clone();
         info!(them, "Connected to {}", peer.id);
+
         // try to tell Raft that we are definitely connected
         let _ = self
             .incoming_tx
             .try_send((peer.id.clone(), AppMessage::Raft(RaftMessage::Connect)));
 
-        let shared_secret = outgoing_connection
-            .ecdh_secret
-            .diffie_hellman(&incoming_connection.ecdh_public_key);
-        let chacha_key = Key::from(shared_secret.to_bytes());
+        let (disconnect_tx, mut disconnect_rx) = watch::channel(String::new());
+        let disconnect_tx = Arc::new(disconnect_tx);
+
+        let chacha_key = Key::from(secret.to_bytes());
         let chacha = XChaCha20Poly1305::new(&chacha_key);
 
-        let mut sink = outgoing_connection.sink;
         let send_chacha = chacha.clone();
-        let (last_message_tx, last_message_rx) = oneshot::channel();
+        let send_disconnect_tx = disconnect_tx.clone();
+        let mut send_disconnect_rx = disconnect_rx.clone();
         let send_task = async move {
-            while let Some(message) = outgoing_message_rx.recv().await {
-                let message = ApplicationMessage::encrypt(message, &send_chacha);
-                if let Err(e) = sink.write(Message::Application(message)).await {
-                    warn!(them, "Failed to send message: {:?}", e);
-                    break;
+            let disconnect_reason = loop {
+                select! {
+                    _ = send_disconnect_rx.changed() => {
+                        break send_disconnect_rx.borrow().clone();
+                    }
+                    message = outgoing_message_rx.recv() => {
+                        let Some(message) = message else {
+                            break "Connection was closed".into();
+                        };
+                        let message = ApplicationMessage::encrypt(message, &send_chacha);
+                        if let Err(e) = sink.write(Message::Application(message)).await {
+                            break format!("Failed to send message: {}", e);
+                        }
+                    }
                 }
-            }
-            if let Ok(dc_reason) = last_message_rx.await {
-                let _ = sink.write(Message::Disconnect(dc_reason)).await;
-            }
-        };
+            };
+            warn!(them, "Ending sender task: {}", disconnect_reason);
+            send_disconnect_tx.send_replace(disconnect_reason.clone());
+            try_send_disconnect(&them, &mut sink, disconnect_reason).await;
+        }
+        .in_current_span();
 
-        let mut stream = incoming_connection.stream;
         let incoming_message_tx = self.incoming_tx.clone();
         let them = peer.label.clone();
         let recv_task = async move {
-            loop {
-                match stream.read().await {
-                    Ok(Some(Message::Application(message))) => {
-                        let message = match message.decrypt(&chacha) {
-                            Ok(message) => message,
-                            Err(e) => {
-                                return format!("Failed to decrypt incoming message: {:#}", e);
+            let disconnect_reason = loop {
+                select! {
+                    _ = disconnect_rx.changed() => {
+                        break disconnect_rx.borrow().clone();
+                    }
+                    incoming = stream.read() => match incoming {
+                        Ok(Some(Message::Application(message))) => {
+                            let message = match message.decrypt(&chacha) {
+                                Ok(message) => message,
+                                Err(e) => break format!("Failed to decrypt incoming message: {:#}", e)
+                            };
+                            if let Err(e) = incoming_message_tx.send((peer.id.clone(), message)).await {
+                                break format!("Failed to process incoming message: {}", e);
                             }
-                        };
-                        if let Err(e) = incoming_message_tx.send((peer.id.clone(), message)).await {
-                            return format!("Failed to send message: {:?}", e);
+                        },
+                        Ok(Some(Message::Disconnect(reason))) => {
+                            warn!(them, "Peer has disconnected from us: {}", reason);
+                            return;
+                        }
+                        Ok(Some(other)) => {
+                            break format!("Expected Application message, got: {:?}", other);
+                        }
+                        Ok(None) => {
+                            trace!(them, "Expected Application message, got empty message");
+                            continue;
+                        }
+                        Err(e) => {
+                            break format!("Error reading from stream: {}", e);
                         }
                     }
-                    // If someone tries to Hello us again, break it off
-                    Ok(Some(other)) => {
-                        return format!("Unexpected message: {:?}", other);
-                    }
-                    Ok(None) => {
-                        // someone sent an empty message
-                        continue;
-                    }
-                    // Either someone is sending messages we can't parse, or the connection is broken
-                    Err(e) => {
-                        return format!("error reading from stream: {:?}", e);
-                    }
                 }
-            }
+            };
+            warn!(them, "Ending receiver task: {}", disconnect_reason);
+            disconnect_tx.send_replace(disconnect_reason);
         };
 
-        // Run until either the sender or receiver task stops running, then return so we can reconnect
-        select! {
-            _ = send_task => {},
-            dc_reason = recv_task => {
-                warn!(them, "we disconnected: {}", dc_reason);
-                let _ = last_message_tx.send(dc_reason);
-            },
-        };
+        join!(send_task, recv_task);
 
         // try to warn raft that we aren't connected anymore
         let _ = self
             .incoming_tx
             .try_send((peer.id.clone(), AppMessage::Raft(RaftMessage::Disconnect)));
     }
+
+    fn should_initiate_connection_to(&self, peer_id: &NodeId) -> bool {
+        &self.id < peer_id
+    }
+
+    fn should_receive_connection_from(&self, peer_id: &NodeId) -> bool {
+        &self.id > peer_id
+    }
 }
 
-async fn wait_for_disconnect(sink: &EncodeSink) {
-    let transport = sink.writer().get_ref();
-    loop {
-        sleep(Duration::from_millis(500)).await;
-        let Ok(ready) = transport.ready(Interest::WRITABLE).await else {
-            // if we get an error checking the stream's state, just assume it's closed
-            return;
-        };
-        if ready.is_write_closed() || ready.is_error() {
-            return;
-        }
+async fn try_send_disconnect(them: &str, sink: &mut EncodeSink, reason: String) {
+    match timeout(
+        Duration::from_secs(3),
+        sink.write(Message::Disconnect(reason)),
+    )
+    .await
+    {
+        Err(timeout) => warn!(them, "could not send disconnect message: {}", timeout),
+        Ok(Err(send)) => warn!(them, "could not send disconnect message: {}", send),
+        Ok(Ok(_)) => {}
     }
 }
 
@@ -632,7 +691,7 @@ fn parse_peer(config: &PeerConfig) -> Result<Peer> {
 }
 
 fn read_private_key() -> Result<PrivateKey> {
-    let key_path = get_keys_directory()?.join("private.pem");
+    let key_path = keys::get_keys_directory()?.join("private.pem");
     let key_pem_file = fs::read_to_string(&key_path).context(format!(
         "Could not load private key from {}",
         key_path.display()

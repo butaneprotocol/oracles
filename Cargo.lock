@@ -258,19 +258,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "async-compat"
-version = "0.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7bab94bde396a3f7b4962e396fdad640e241ed797d4d8d77fc8c237d14c58fc0"
-dependencies = [
- "futures-core",
- "futures-io",
- "once_cell",
- "pin-project-lite 0.2.13",
- "tokio",
-]
-
-[[package]]
 name = "async-dup"
 version = "1.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2403,7 +2390,6 @@ version = "0.5.0"
 dependencies = [
  "almost-raft",
  "anyhow",
- "async-compat",
  "async-trait",
  "bech32 0.11.0",
  "chacha20poly1305",

@@ -13,7 +13,6 @@ publish = false
 [dependencies]
 almost-raft = "0.3.0"
 anyhow = "1.0.80"
-async-compat = "0.2"
 async-trait = "0.1.77"
 bech32 = "0.11"
 chacha20poly1305 = "0.10"
