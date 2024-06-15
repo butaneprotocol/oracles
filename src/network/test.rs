@@ -40,24 +40,29 @@ impl<T: Clone> TestNetwork<T> {
         (node_id, channel)
     }
 
+    pub fn reconnect(&mut self, node_id: &NodeId) -> NetworkChannel<T> {
+        let (outgoing_tx, outgoing_rx) = mpsc::channel(10);
+        self.outgoing.insert(node_id.clone(), outgoing_rx);
+        let sender = NetworkSender::new(outgoing_tx);
+
+        let (incoming_tx, incoming_rx) = mpsc::channel(10);
+        self.incoming.insert(node_id.clone(), incoming_tx);
+        let receiver = NetworkReceiver::new(incoming_rx);
+
+        NetworkChannel::new(sender, receiver)
+    }
+
+    pub async fn next_message_from(&mut self, from: &NodeId) -> Option<OutgoingMessage<T>> {
+        let receiver = self.outgoing.get_mut(from).unwrap();
+        let message = receiver.recv().await?;
+        self.send(from, &message).await;
+        Some(message)
+    }
+
     pub async fn drain_one(&mut self, from: &NodeId) -> Vec<OutgoingMessage<T>> {
         let mut sent = vec![];
-        let receiver = self.outgoing.get_mut(from).unwrap();
-        while let Ok(message) = receiver.try_recv() {
-            let recipients = self
-                .incoming
-                .iter()
-                .filter(|(id, _)| {
-                    from != *id && (message.to.is_none() || message.to.as_ref().unwrap() == *id)
-                })
-                .map(|(_, s)| s);
-            for recipient in recipients {
-                let message = IncomingMessage {
-                    from: from.clone(),
-                    data: message.data.clone(),
-                };
-                recipient.send(message).await.unwrap();
-            }
+        while let Ok(message) = self.outgoing.get_mut(from).unwrap().try_recv() {
+            self.send(from, &message).await;
             sent.push(message);
         }
         sent
@@ -77,6 +82,23 @@ impl<T: Clone> TestNetwork<T> {
             if !something_sent_this_round {
                 return something_sent;
             }
+        }
+    }
+
+    async fn send(&mut self, from: &NodeId, message: &OutgoingMessage<T>) {
+        let recipients = self
+            .incoming
+            .iter()
+            .filter(|(id, _)| {
+                from != *id && (message.to.is_none() || message.to.as_ref().unwrap() == *id)
+            })
+            .map(|(_, s)| s);
+        for recipient in recipients {
+            let message = IncomingMessage {
+                from: from.clone(),
+                data: message.data.clone(),
+            };
+            recipient.send(message).await.unwrap();
         }
     }
 }

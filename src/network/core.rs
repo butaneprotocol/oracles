@@ -249,25 +249,27 @@ impl Core {
     async fn send_messages(self, outgoing_message_txs: HashMap<NodeId, mpsc::Sender<AppMessage>>) {
         let mut outgoing_rx = self.outgoing_rx.lock_owned().await;
         while let Some((to, message)) = outgoing_rx.recv().await {
-            match to {
+            let recipients = match &to {
                 Some(id) => {
                     // Sending to one node
-                    let Some(sender) = outgoing_message_txs.get(&id) else {
+                    let Some(sender) = outgoing_message_txs.get(id) else {
                         warn!("Tried sending message to unrecognized node {}", id);
                         continue;
                     };
-                    if let Err(e) = sender.send(message).await {
-                        warn!("Could not send message to node {}: {}", id, e);
-                    }
+                    vec![(id, sender)]
                 }
                 None => {
                     // Broadcasting to all nodes
-                    for (id, sender) in outgoing_message_txs.iter() {
-                        if let Err(e) = sender.send(message.clone()).await {
-                            warn!("Could not send message to node {}: {}", id, e);
-                        }
-                    }
+                    outgoing_message_txs.iter().collect()
                 }
+            };
+            for (id, sender) in recipients {
+                match sender.try_send(message.clone()) {
+                    Ok(()) => {}
+                    Err(err) => {
+                        warn!("Could not send message to {}: {}", id, err)
+                    }
+                };
             }
         }
     }
@@ -298,7 +300,10 @@ impl Core {
         stream: TcpStream,
         rxs: Arc<DashMap<NodeId, Mutex<mpsc::Receiver<AppMessage>>>>,
     ) {
-        trace!("Incoming connection from: {}", stream.peer_addr().unwrap());
+        trace!(
+            "Incoming connection from {}, waiting for OpenConnection message",
+            stream.peer_addr().unwrap()
+        );
 
         let mut them = format!("<unknown> ({})", stream.peer_addr().unwrap());
 
@@ -517,7 +522,10 @@ impl Core {
         sink.write(Message::OpenConnection(Box::new(message)))
             .await
             .context("error sending open message")?;
-        trace!(them, "OpenConnection message sent");
+        trace!(
+            them,
+            "OpenConnection message sent, waiting for ConfirmConnection response"
+        );
 
         // Wait for the other side to respond
         let message = match stream
