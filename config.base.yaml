@@ -148,9 +148,12 @@ sundaeswap:
     - token: BTN
       unit: ADA
       asset_id: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b.000de1408e76c60dd3cbccdf8af264e560686078f05345d96d90c4af19c6c4f6
+    - token: ENCS
+      unit: ADA
+      asset_id: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b.000de1403d59c9a766909da1c3cda90e73a9582025b17d7eb0be44cbd8b2dadd
     - token: iUSD
       unit: ADA
-      asset_id: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b.000de1401c34bd8d8fd17ee5594374277d40a0a1d082da41c97607a6ec13fb65
+      asset_id: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b.000de140c7ef237f227542a0c8930d37911491c56a341fdef8437e0f21d024f8
     - token: SNEK
       unit: ADA
       asset_id: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b.000de140cacb7fd5f5b84bf876d40dc60d4991c72112d78d76132b1fb769e6ad
