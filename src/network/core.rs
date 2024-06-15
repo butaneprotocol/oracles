@@ -300,7 +300,10 @@ impl Core {
         stream: TcpStream,
         rxs: Arc<DashMap<NodeId, Mutex<mpsc::Receiver<AppMessage>>>>,
     ) {
-        trace!("Incoming connection from: {}", stream.peer_addr().unwrap());
+        trace!(
+            "Incoming connection from {}, waiting for OpenConnection message",
+            stream.peer_addr().unwrap()
+        );
 
         let mut them = format!("<unknown> ({})", stream.peer_addr().unwrap());
 
@@ -519,7 +522,10 @@ impl Core {
         sink.write(Message::OpenConnection(Box::new(message)))
             .await
             .context("error sending open message")?;
-        trace!(them, "OpenConnection message sent");
+        trace!(
+            them,
+            "OpenConnection message sent, waiting for ConfirmConnection response"
+        );
 
         // Wait for the other side to respond
         let message = match stream

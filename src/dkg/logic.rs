@@ -219,7 +219,7 @@ pub async fn run(
                     if round1_packages.len() == peers_count {
                         // We have packages from every peer, and now we can start (or re-start) round 2
                         session_id = compute_session_id(&round1_hashes);
-                        info!(session_id, "Round 1 complete! Beginning round 2");
+                        info!(session_id, "Round 1 complete! Beginning round 2, waiting for all peers to send round 2 packages");
 
                         round2_packages.clear();
 
@@ -267,7 +267,7 @@ pub async fn run(
                         let round2_secret_package = round2_secret_package.as_ref().unwrap();
                         let (key_package, public_key_package) =
                             part3(round2_secret_package, &round1_packages, &round2_packages)?;
-                        info!(session_id, "Key generation complete!");
+                        info!(session_id, "Key generation complete! Waiting for all peers to confirm they have generated keys as well");
 
                         generated_keys.replace(GeneratedKeys(key_package, public_key_package));
                         done_sets
