@@ -85,6 +85,12 @@ impl CoinbaseSource {
             return Err(anyhow!("Unexpected response from coinbase: {:?}", response));
         };
         let mut value = Decimal::from_str(&price)?;
+        if value.is_zero() {
+            return Err(anyhow!(
+                "Coinbase reported value of {} as zero, ignoring",
+                product_id
+            ));
+        }
         let (token, unit) = match product_id.as_str() {
             "ADA-USD" => ("ADA", "USD"),
             "BTC-USD" => ("BTCb", "USD"),

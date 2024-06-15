@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use futures::{future::BoxFuture, FutureExt};
 use reqwest::Client;
 use serde::Deserialize;
@@ -82,6 +82,13 @@ impl MaestroSource {
         let messages: [MaestroOHLCMessage; 1] = serde_json::from_str(&contents)?;
         let res = (messages[0].coin_a_open + messages[0].coin_a_close) / 2.;
         let volume = messages[0].coin_a_volume;
+
+        if res == 0.0 {
+            return Err(anyhow!(
+                "Maestro reported value of {} as zero, ignoring",
+                token
+            ));
+        }
 
         sink.send(PriceInfo {
             token: token.to_string(),

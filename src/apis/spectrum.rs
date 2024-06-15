@@ -75,6 +75,18 @@ impl SpectrumSource {
                         Some(token) => matc.value.assets[token],
                         None => matc.value.coins,
                     };
+                    if unit_value == 0 {
+                        return Err(anyhow!(
+                            "Spectrum reported value of {} as zero, ignoring",
+                            pool.pool.token
+                        ));
+                    }
+                    if token_value == 0 {
+                        return Err(anyhow!(
+                            "Spectrum reported value of {} as infinite, ignoring",
+                            pool.pool.token
+                        ));
+                    }
                     let value = Decimal::new(unit_value as i64, pool.unit_digits)
                         / Decimal::new(token_value as i64, pool.token_digits);
                     let tvl = Decimal::new(token_value as i64 * 2, 0);

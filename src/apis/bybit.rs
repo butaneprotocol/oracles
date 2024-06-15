@@ -10,7 +10,7 @@ use tokio::{
     time::{sleep, Duration},
 };
 use tokio_tungstenite::{connect_async, tungstenite::Message};
-use tracing::Instrument;
+use tracing::{warn, Instrument};
 
 use crate::config::OracleConfig;
 
@@ -125,12 +125,19 @@ impl ByBitSource {
                         let Some(value) = data
                             .mark_price
                             .and_then(|x| Decimal::from_str(&x).ok())
-                            .map(|p| {
-                                // We track inverse solana prices
-                                if info.token == "SOLp" {
-                                    Decimal::ONE / p
+                            .and_then(|p| {
+                                if p.is_zero() {
+                                    // If a price is reported as zero, assume it's a bug
+                                    warn!(
+                                        "ByBit reported value of {} as zero, ignoring",
+                                        data.symbol
+                                    );
+                                    None
+                                } else if info.token == "SOLp" {
+                                    // We track inverse solana prices
+                                    Some(Decimal::ONE / p)
                                 } else {
-                                    p
+                                    Some(p)
                                 }
                             })
                             .or(info.last_value)

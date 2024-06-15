@@ -87,6 +87,10 @@ fn process_binance_message(contents: String, sink: &PriceSink) -> Result<()> {
         None => return Err(anyhow!("Malformed stream {}", message.stream)),
     };
     let mut value = Decimal::from_str(&message.data.price)?;
+    if value.is_zero() {
+        warn!("Binance reported value of {} as zero, ignoring", currency);
+        return Ok(());
+    }
     let token = match currency {
         "btc" => "BTCb",
         "ada" => "ADA",

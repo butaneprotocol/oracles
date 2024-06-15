@@ -120,6 +120,18 @@ impl SundaeSwapSource {
 
             let token_value = i64::from_str(&quantity_b.quantity)?;
             let unit_value = i64::from_str(&quantity_a.quantity)?;
+            if unit_value == 0 {
+                return Err(anyhow!(
+                    "SundaeSwap reported value of {} as zero, ignoring",
+                    token
+                ));
+            }
+            if token_value == 0 {
+                return Err(anyhow!(
+                    "SundaeSwap reported value of {} as infinite, ignoring",
+                    token
+                ));
+            }
 
             let value = Decimal::new(unit_value, pool.asset_a.decimals)
                 / Decimal::new(token_value, pool.asset_b.decimals);

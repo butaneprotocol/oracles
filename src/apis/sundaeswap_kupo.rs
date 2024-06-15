@@ -90,6 +90,18 @@ impl SundaeSwapKupoSource {
                         Some(token) => matc.value.assets[token],
                         None => matc.value.coins - tx_fee,
                     };
+                    if unit_value == 0 {
+                        return Err(anyhow!(
+                            "SundaeSwap reported value of {} as zero, ignoring",
+                            pool.pool.token
+                        ));
+                    }
+                    if token_value == 0 {
+                        return Err(anyhow!(
+                            "SundaeSwap reported value of {} as infinite, ignoring",
+                            pool.pool.token
+                        ));
+                    }
 
                     let value = Decimal::new(unit_value as i64, pool.unit_digits)
                         / Decimal::new(token_value as i64, pool.token_digits);
