@@ -11,6 +11,7 @@ use frost_ed25519::{
     round2::{self, SignatureShare},
     Identifier, SigningPackage,
 };
+use futures::future::join_all;
 use minicbor::{Decode, Encode};
 use rand::thread_rng;
 use tokio::sync::{mpsc::Sender, watch::Receiver};
@@ -375,19 +376,16 @@ impl Signer {
             .collect();
         let wire_packages: Vec<CborSigningPackage> =
             packages.iter().map(|p| p.clone().into()).collect();
-        for recipient in recipients {
-            self.message_sink
-                .send(
-                    recipient.clone(),
-                    SignerMessage {
-                        round: round.clone(),
-                        data: SignerMessageData::RequestSignature(SignatureRequest {
-                            packages: wire_packages.clone(),
-                        }),
-                    },
-                )
-                .await;
-        }
+        let send_to_recipient_tasks = recipients.into_iter().map(|recipient| {
+            let message = SignerMessage {
+                round: round.clone(),
+                data: SignerMessageData::RequestSignature(SignatureRequest {
+                    packages: wire_packages.clone(),
+                }),
+            };
+            self.message_sink.send(recipient, message)
+        });
+        join_all(send_to_recipient_tasks).await;
 
         // And be sure to sign the message ourself
         let nonces = my_nonces.clone();

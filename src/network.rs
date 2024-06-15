@@ -8,6 +8,7 @@ use crate::raft::RaftMessage;
 use crate::signature_aggregator::signer::SignerMessage;
 pub use channel::{NetworkChannel, NetworkReceiver, NetworkSender};
 use core::Core;
+use std::any::type_name;
 pub use test::TestNetwork;
 pub use types::{IncomingMessage, NodeId, OutgoingMessage};
 
@@ -103,13 +104,13 @@ impl Network {
                 while let Some((from, data)) = receiver.recv().await {
                     match data {
                         Message::Keygen(data) => {
-                            receive_message(from, data, &keygen_sender).await;
+                            receive_message(from, data, &keygen_sender);
                         }
                         Message::Raft(data) => {
-                            receive_message(from, data, &raft_sender).await;
+                            receive_message(from, data, &raft_sender);
                         }
                         Message::Signer(data) => {
-                            receive_message(from, data, &signer_sender).await;
+                            receive_message(from, data, &signer_sender);
                         }
                     }
                 }
@@ -167,15 +168,19 @@ where
     }
 }
 
-async fn receive_message<T>(
-    from: NodeId,
-    data: T,
-    sender: &Option<mpsc::Sender<IncomingMessage<T>>>,
-) {
-    let message = IncomingMessage { from, data };
+fn receive_message<T>(from: NodeId, data: T, sender: &Option<mpsc::Sender<IncomingMessage<T>>>) {
+    let message = IncomingMessage {
+        from: from.clone(),
+        data,
+    };
     if let Some(sender) = sender {
-        if let Err(error) = sender.send(message).await {
-            warn!("error receiving message from {:?}: {}", error.0.from, error);
+        if let Err(error) = sender.try_send(message) {
+            warn!(
+                "error processing {} message from {}: {}",
+                type_name::<T>(),
+                from,
+                error
+            )
         }
     }
 }

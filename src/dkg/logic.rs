@@ -17,6 +17,7 @@ use frost_ed25519::{
     },
     Identifier,
 };
+use futures::future::join_all;
 use minicbor::{Decode, Encode};
 use pallas_crypto::hash::Hasher;
 use rand::thread_rng;
@@ -119,14 +120,16 @@ pub async fn run(
             loop {
                 // clone this so we aren't holding a lock for too long
                 let round2_packages = outgoing_round2_packages_rx.borrow().clone();
-                for (identifier, package) in round2_packages {
+                let session_id = part2_session_id.read().await.clone();
+                let tasks = round2_packages.into_iter().map(|(identifier, package)| {
                     let to: NodeId = identifiers.get(&identifier).unwrap().clone();
                     let message = Part2Message {
-                        session_id: part2_session_id.read().await.clone(),
+                        session_id: session_id.clone(),
                         package: Box::new(package.into()),
                     };
-                    part2_sender.send(to, KeygenMessage::Part2(message)).await;
-                }
+                    part2_sender.send(to, KeygenMessage::Part2(message))
+                });
+                join_all(tasks).await;
                 sleep(Duration::from_secs(1)).await;
             }
         }
