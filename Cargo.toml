@@ -58,7 +58,7 @@ lto = "thin"
 # Config for 'cargo dist'
 [workspace.metadata.dist]
 # The preferred cargo-dist version to use in CI (Cargo.toml SemVer syntax)
-cargo-dist-version = "0.14.1"
+cargo-dist-version = "0.16.0"
 # CI backends to support
 ci = "github"
 # The installers to generate for each app
@@ -66,12 +66,7 @@ installers = ["shell", "powershell", "homebrew"]
 # A GitHub repo to push Homebrew formulas to
 tap = "butaneprotocol/homebrew-tap"
 # Target platforms to build apps for (Rust target-triple syntax)
-targets = [
-  "aarch64-apple-darwin",
-  "x86_64-apple-darwin",
-  "x86_64-unknown-linux-gnu",
-  "x86_64-pc-windows-msvc",
-]
+targets = ["aarch64-apple-darwin", "aarch64-unknown-linux-gnu", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]
 # Publish jobs to run in CI
 publish-jobs = ["homebrew"]
 # Publish jobs to run in CI
