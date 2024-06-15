@@ -1,4 +1,6 @@
 mod logic;
+#[cfg(test)]
+mod tests;
 
 use logic::GeneratedKeys;
 pub use logic::KeygenMessage;

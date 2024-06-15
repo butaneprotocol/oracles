@@ -4,7 +4,10 @@ use std::{
     time::Duration,
 };
 
-use crate::network::{NetworkChannel, NodeId};
+use crate::{
+    cbor::{CborDkgRound1Package, CborDkgRound2Package},
+    network::{NetworkChannel, NodeId},
+};
 use anyhow::{anyhow, Result};
 use dashmap::DashMap;
 use frost_ed25519::{
@@ -21,26 +24,26 @@ use tokio::{
     sync::{watch, RwLock},
     time::sleep,
 };
-use tracing::{info, trace, Instrument};
+use tracing::{debug, info, trace, Instrument};
 
 #[derive(Decode, Encode, Clone, Debug)]
 pub struct Part1Message {
     #[n(0)]
-    package: Vec<u8>,
+    pub package: Box<CborDkgRound1Package>,
 }
 
 #[derive(Decode, Encode, Clone, Debug)]
 pub struct Part2Message {
     #[n(0)]
-    session_id: String,
+    pub session_id: String,
     #[n(1)]
-    package: Vec<u8>,
+    pub package: Box<CborDkgRound2Package>,
 }
 
 #[derive(Decode, Encode, Clone, Debug)]
 pub struct DoneMessage {
     #[n(0)]
-    session_id: String,
+    pub session_id: String,
 }
 
 #[derive(Decode, Encode, Clone, Debug)]
@@ -95,10 +98,9 @@ pub async fn run(
     let part1_broadcast_handle = tokio::spawn(
         async move {
             loop {
-                let package = round1_package
-                    .serialize()
-                    .expect("error serializing round 1 package");
-                let message = Part1Message { package };
+                let message = Part1Message {
+                    package: Box::new(round1_package.clone().into()),
+                };
                 part1_sender.broadcast(KeygenMessage::Part1(message)).await;
                 sleep(Duration::from_secs(1)).await;
             }
@@ -121,9 +123,7 @@ pub async fn run(
                     let to: NodeId = identifiers.get(&identifier).unwrap().clone();
                     let message = Part2Message {
                         session_id: part2_session_id.read().await.clone(),
-                        package: package
-                            .serialize()
-                            .expect("error serializing round 2 package"),
+                        package: Box::new(package.into()),
                     };
                     part2_sender.send(to, KeygenMessage::Part2(message)).await;
                 }
@@ -152,12 +152,12 @@ pub async fn run(
 
         match message.data {
             KeygenMessage::Part1(Part1Message { package }) => {
-                let package =
-                    round1::Package::deserialize(&package).expect("error deserializing package");
+                let package: round1::Package = (*package).into();
                 if round1_packages.get(&from_id) == Some(&package) {
                     // We've seen this one
                     continue;
                 }
+                debug!(%from, "Received new round 1 package");
 
                 round1_hashes.insert(
                     from_id,
@@ -195,12 +195,12 @@ pub async fn run(
                     continue;
                 }
 
-                let package =
-                    round2::Package::deserialize(&package).expect("error deserializing package");
+                let package: round2::Package = (*package).into();
                 if round2_packages.get(&from_id) == Some(&package) {
                     // We've seen this one
                     continue;
                 }
+                debug!(%from, session_id, "Received new round 2 package");
 
                 round2_packages.insert(from_id, package);
                 if round2_packages.len() == peers_count {
@@ -220,7 +220,7 @@ pub async fn run(
                 }
             }
             KeygenMessage::Done(DoneMessage { session_id }) => {
-                trace!(session_id, "received a Done message");
+                debug!(%from, session_id, "Received new done message");
                 done_sets.entry(session_id).or_default().insert(from);
             }
         }
