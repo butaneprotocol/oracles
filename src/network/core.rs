@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     fs,
     sync::Arc,
     time::Duration,
@@ -248,6 +248,7 @@ impl Core {
 
     async fn send_messages(self, outgoing_message_txs: HashMap<NodeId, mpsc::Sender<AppMessage>>) {
         let mut outgoing_rx = self.outgoing_rx.lock_owned().await;
+        let mut unhealthy_peers = HashSet::new();
         while let Some((to, message)) = outgoing_rx.recv().await {
             let recipients = match &to {
                 Some(id) => {
@@ -265,9 +266,13 @@ impl Core {
             };
             for (id, sender) in recipients {
                 match sender.try_send(message.clone()) {
-                    Ok(()) => {}
+                    Ok(()) => {
+                        unhealthy_peers.remove(id);
+                    }
                     Err(err) => {
-                        warn!("Could not send message to {}: {}", id, err)
+                        if unhealthy_peers.insert(id.clone()) {
+                            warn!("Could not send message to {}: {} (won't log this again until it recovers)", id, err)
+                        }
                     }
                 };
             }
