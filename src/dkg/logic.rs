@@ -75,7 +75,7 @@ impl BroadcastState {
         }
     }
 
-    fn broadcast_round_2(
+    async fn broadcast_round_2(
         &mut self,
         session_id: &str,
         round2_packages: BTreeMap<NodeId, round2::Package>,
@@ -83,11 +83,13 @@ impl BroadcastState {
         self.session_id = session_id.to_string();
         self.round2_packages = round2_packages;
         self.done = false;
+        self.send().await;
     }
 
-    fn broadcast_done(&mut self, session_id: &str) {
+    async fn broadcast_done(&mut self, session_id: &str) {
         assert!(self.session_id == session_id);
         self.done = true;
+        self.send().await;
     }
 
     async fn send(&self) {
@@ -239,6 +241,7 @@ pub async fn run(
                             .write()
                             .await
                             .broadcast_round_2(&session_id, round2_packages)
+                            .await;
                     }
                 }
                 KeygenMessage::Part2(Part2Message {
@@ -274,7 +277,7 @@ pub async fn run(
                             .entry(session_id.clone())
                             .or_default()
                             .insert(id.clone());
-                        broadcast_state.write().await.broadcast_done(&session_id);
+                        broadcast_state.write().await.broadcast_done(&session_id).await;
                     }
                 }
                 KeygenMessage::Done(DoneMessage { session_id }) => {
