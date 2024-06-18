@@ -277,7 +277,11 @@ pub async fn run(
                             .entry(session_id.clone())
                             .or_default()
                             .insert(id.clone());
-                        broadcast_state.write().await.broadcast_done(&session_id).await;
+                        broadcast_state
+                            .write()
+                            .await
+                            .broadcast_done(&session_id)
+                            .await;
                     }
                 }
                 KeygenMessage::Done(DoneMessage { session_id }) => {
