@@ -32,7 +32,7 @@ The oracle needs a FROST key pair in order to sign payloads. These keys are stor
 
 #### With DKG
 
-This oracle supports a "keygen mode". If every node is running in "keygen mode", they will collectively generate a new set up keys and store them to disk.
+This oracle supports a "keygen mode". If every node is running in "keygen mode", they will collectively generate a new set of keys and store them to disk.
 
 To initiate DKG, set `keygen.enabled` to `true` in your `config.yaml`. Make sure that every node agrees on the value of `keygen.min_signers`, or DKG will fail.
 

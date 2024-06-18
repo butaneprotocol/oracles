@@ -6,7 +6,7 @@ services:
       - ./config.yaml:/app/config.yaml
       - ./keys:/app/keys
     environment:
-      KEY_DIRECTORY: /app/keys
+      KEYS_DIRECTORY: /app/keys
     env_file:
       - path: .env
         required: false
