@@ -11,6 +11,9 @@ impl NodeId {
     pub fn as_bytes(&self) -> &[u8] {
         self.0.as_bytes()
     }
+    pub fn should_initiate_connection_to(&self, other: &NodeId) -> bool {
+        self < other
+    }
 }
 impl Display for NodeId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

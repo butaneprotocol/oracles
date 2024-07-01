@@ -1,6 +1,5 @@
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
-    fs,
     sync::Arc,
     time::Duration,
 };
@@ -8,12 +7,8 @@ use std::{
 use anyhow::{anyhow, Context, Result};
 use chacha20poly1305::{aead::Aead, AeadCore, Key, KeyInit, XChaCha20Poly1305};
 use dashmap::DashMap;
-use ed25519::{
-    pkcs8::{DecodePrivateKey, DecodePublicKey},
-    signature::Signer,
-    KeypairBytes, PublicKeyBytes, Signature,
-};
-use ed25519_dalek::{SigningKey as PrivateKey, Verifier, VerifyingKey as PublicKey};
+use ed25519::{signature::Signer, Signature};
+use ed25519_dalek::{SigningKey as PrivateKey, Verifier};
 use minicbor::{bytes::ByteVec, Decode, Decoder, Encode, Encoder};
 use minicbor_io::{AsyncReader, AsyncWriter};
 use rand::thread_rng;
@@ -36,12 +31,15 @@ type Nonce = chacha20poly1305::aead::generic_array::GenericArray<u8, chacha20pol
 
 use crate::{
     cbor::{CborEcdhPublicKey, CborSignature, CborVerifyingKey},
-    config::{OracleConfig, PeerConfig},
-    keys,
+    health::{HealthSink, HealthStatus, Origin},
+    network::config::compute_node_id,
     raft::RaftMessage,
 };
 
-use super::{Message as AppMessage, NodeId};
+use super::{
+    config::{NetworkConfig, Peer},
+    Message as AppMessage, NodeId,
+};
 type EncodeSink = AsyncWriter<Compat<OwnedWriteHalf>>;
 type DecodeStream = AsyncReader<Compat<OwnedReadHalf>>;
 
@@ -126,60 +124,42 @@ enum Message {
     Disconnect(#[n(0)] String),
 }
 
-#[derive(Clone)]
-struct Peer {
-    id: NodeId,
-    public_key: PublicKey,
-    label: String,
-    address: String,
-}
-
 type OutgoingMessageReceiver = mpsc::Receiver<(Option<NodeId>, AppMessage)>;
 type IncomingMessageSender = mpsc::Sender<(NodeId, AppMessage)>;
 
 #[derive(Clone)]
 pub struct Core {
-    pub id: NodeId,
+    id: NodeId,
     private_key: Arc<PrivateKey>,
     port: u16,
     peers: Arc<BTreeMap<NodeId, Peer>>,
+    health_sink: Arc<HealthSink>,
     outgoing_rx: Arc<Mutex<OutgoingMessageReceiver>>,
     incoming_tx: Arc<IncomingMessageSender>,
 }
 
 impl Core {
     pub fn new(
-        config: &OracleConfig,
+        config: &NetworkConfig,
+        health_sink: HealthSink,
         outgoing_rx: OutgoingMessageReceiver,
         incoming_tx: IncomingMessageSender,
-    ) -> Result<Self> {
-        let private_key = Arc::new(read_private_key()?);
-        let id = compute_node_id(&private_key.verifying_key());
-        info!("This node has ID {}", id);
+    ) -> Self {
+        let peers = config
+            .peers
+            .iter()
+            .map(|p| (p.id.clone(), p.clone()))
+            .collect();
 
-        let peers = {
-            let peers: Result<Vec<Peer>> = config.peers.iter().map(parse_peer).collect();
-            Arc::new(
-                peers?
-                    .into_iter()
-                    .filter(|p| p.id != id)
-                    .map(|p| (p.id.clone(), p))
-                    .collect(),
-            )
-        };
-
-        Ok(Self {
-            id,
-            private_key,
+        Self {
+            id: config.id.clone(),
+            private_key: Arc::new(config.private_key.clone()),
             port: config.port,
-            peers,
+            peers: Arc::new(peers),
+            health_sink: Arc::new(health_sink),
             outgoing_rx: Arc::new(Mutex::new(outgoing_rx)),
             incoming_tx: Arc::new(incoming_tx),
-        })
-    }
-
-    pub fn peers_count(&self) -> usize {
-        self.peers.len()
+        }
     }
 
     pub async fn handle_network(self) -> Result<()> {
@@ -191,7 +171,7 @@ impl Core {
             .peers
             .iter()
             .map(|(_, peer)| peer)
-            .partition(|p| self.should_initiate_connection_to(&p.id));
+            .partition(|p| self.id.should_initiate_connection_to(&p.id));
 
         // For each peer that we should connect to, spawn a task to connect to them
         for peer in outgoing_peers {
@@ -316,14 +296,18 @@ impl Core {
         let mut stream: DecodeStream = DecodeStream::new(read.compat());
         let mut sink: EncodeSink = EncodeSink::new(write.compat_write());
 
+        let mut peer_id = None;
         let (peer, secret) = match self
-            .handshake_incoming(&mut them, &mut stream, &mut sink)
+            .handshake_incoming(&mut them, &mut peer_id, &mut stream, &mut sink)
             .await
             .context("error establishing shared secret")
         {
             Ok((peer, secret)) => (peer, secret),
             Err(error) => {
                 warn!(them, "{:#}", error);
+                if let Some(peer_id) = peer_id {
+                    self.report_unhealthy_connection(&peer_id, &format!("{:#}", error));
+                }
                 try_send_disconnect(&them, &mut sink, format!("{:#}", error)).await;
                 return;
             }
@@ -331,6 +315,7 @@ impl Core {
 
         let Some(outgoing_message_rx_mutex) = rxs.get(&peer.id) else {
             error!(them, "Missing outgoing message receiver");
+            self.report_unhealthy_connection(&peer.id, "Missing outgoing message receiver");
             try_send_disconnect(&them, &mut sink, "Missing outgoing message receiver".into()).await;
             return;
         };
@@ -342,6 +327,7 @@ impl Core {
                     "Cannot establish a new incoming connection, we already have one"
                 );
                 try_send_disconnect(&them, &mut sink, "You are already connected".into()).await;
+                // do not report the connection as unhealthy, because we already have a healthy connection
                 return;
             }
         };
@@ -353,6 +339,7 @@ impl Core {
     async fn handshake_incoming(
         &self,
         them: &mut String,
+        their_id: &mut Option<NodeId>,
         stream: &mut DecodeStream,
         sink: &mut EncodeSink,
     ) -> Result<(Peer, SharedSecret)> {
@@ -380,6 +367,7 @@ impl Core {
             return Err(anyhow!("Unrecognized peer {}", peer_id));
         };
 
+        their_id.replace(peer_id.clone());
         them.clone_from(&peer.label);
         if message.version != ORACLE_VERSION {
             warn!(
@@ -396,7 +384,7 @@ impl Core {
             .context("signature does not match public key")?;
 
         // Confirm that we expect this node to reach out to us, instead of vice versa
-        if !self.should_receive_connection_from(&peer_id) {
+        if !&peer_id.should_initiate_connection_to(&self.id) {
             return Err(anyhow!(
                 "did not expect peer to initiate connection with us"
             ));
@@ -443,6 +431,7 @@ impl Core {
                 Ok(stream) => stream,
                 Err(error) => {
                     warn!(them, "{:#}", error);
+                    self.report_unhealthy_connection(&peer.id, &format!("{:#}", error));
                     sleep(Duration::from_secs(sleep_seconds)).await;
                     if sleep_seconds < 8 {
                         sleep_seconds *= 2;
@@ -464,6 +453,7 @@ impl Core {
                 Ok(secret) => secret,
                 Err(error) => {
                     warn!(them, "{:#}", error);
+                    self.report_unhealthy_connection(&peer.id, &format!("{:#}", error));
                     try_send_disconnect(&them, &mut sink, format!("{:#}", error)).await;
                     sleep(Duration::from_secs(sleep_seconds)).await;
                     if sleep_seconds < 8 {
@@ -581,13 +571,14 @@ impl Core {
     ) {
         let them = peer.label.clone();
         info!(them, "Connected to {}", peer.id);
+        self.report_healthy_connection(&peer.id);
 
         // try to tell Raft that we are definitely connected
         let _ = self
             .incoming_tx
             .try_send((peer.id.clone(), AppMessage::Raft(RaftMessage::Connect)));
 
-        let (disconnect_tx, mut disconnect_rx) = watch::channel(String::new());
+        let (disconnect_tx, disconnect_rx) = watch::channel(String::new());
         let disconnect_tx = Arc::new(disconnect_tx);
 
         let chacha_key = Key::from(secret.to_bytes());
@@ -620,12 +611,13 @@ impl Core {
         .in_current_span();
 
         let incoming_message_tx = self.incoming_tx.clone();
+        let mut recv_disconnect_rx = disconnect_rx.clone();
         let them = peer.label.clone();
         let recv_task = async move {
             let disconnect_reason = loop {
                 select! {
-                    _ = disconnect_rx.changed() => {
-                        break disconnect_rx.borrow().clone();
+                    _ = recv_disconnect_rx.changed() => {
+                        break recv_disconnect_rx.borrow().clone();
                     }
                     incoming = stream.read() => match incoming {
                         Ok(Some(Message::Application(message))) => {
@@ -660,18 +652,24 @@ impl Core {
 
         join!(send_task, recv_task);
 
+        self.report_unhealthy_connection(&peer.id, &disconnect_rx.borrow());
+
         // try to warn raft that we aren't connected anymore
         let _ = self
             .incoming_tx
             .try_send((peer.id.clone(), AppMessage::Raft(RaftMessage::Disconnect)));
     }
 
-    fn should_initiate_connection_to(&self, peer_id: &NodeId) -> bool {
-        &self.id < peer_id
+    fn report_healthy_connection(&self, peer: &NodeId) {
+        let origin = Origin::Peer(peer.clone());
+        let status = HealthStatus::Healthy;
+        self.health_sink.update(origin, status);
     }
 
-    fn should_receive_connection_from(&self, peer_id: &NodeId) -> bool {
-        &self.id > peer_id
+    fn report_unhealthy_connection(&self, peer: &NodeId, reason: &str) {
+        let origin = Origin::Peer(peer.clone());
+        let status = HealthStatus::Unhealthy(reason.to_string());
+        self.health_sink.update(origin, status);
     }
 }
 
@@ -686,34 +684,4 @@ async fn try_send_disconnect(them: &str, sink: &mut EncodeSink, reason: String) 
         Ok(Err(send)) => warn!(them, "could not send disconnect message: {}", send),
         Ok(Ok(_)) => {}
     }
-}
-
-fn parse_peer(config: &PeerConfig) -> Result<Peer> {
-    let public_key = {
-        let key_bytes = PublicKeyBytes::from_public_key_pem(&config.public_key)?;
-        PublicKey::from_bytes(&key_bytes.0)?
-    };
-    let id = compute_node_id(&public_key);
-    let label = config.label.as_ref().unwrap_or(&config.address).clone();
-    Ok(Peer {
-        id,
-        public_key,
-        label,
-        address: config.address.clone(),
-    })
-}
-
-fn read_private_key() -> Result<PrivateKey> {
-    let key_path = keys::get_keys_directory()?.join("private.pem");
-    let key_pem_file = fs::read_to_string(&key_path).context(format!(
-        "Could not load private key from {}",
-        key_path.display()
-    ))?;
-    let decoded = KeypairBytes::from_pkcs8_pem(&key_pem_file)?;
-    let private_key = PrivateKey::from_bytes(&decoded.secret_key);
-    Ok(private_key)
-}
-
-fn compute_node_id(public_key: &PublicKey) -> NodeId {
-    NodeId::new(hex::encode(public_key.as_bytes()))
 }
