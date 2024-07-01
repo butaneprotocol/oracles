@@ -157,6 +157,7 @@ sundaeswap:
     - token: SNEK
       unit: ADA
       asset_id: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b.000de140cacb7fd5f5b84bf876d40dc60d4991c72112d78d76132b1fb769e6ad
+  retries: 3
 minswap:
   kupo_address: http://kupo:1442
   credential: e1317b152faac13426e6a83e06ff88a4d62cce3c1634ab0a5ec13309/*
@@ -185,6 +186,7 @@ minswap:
     - token: SNEK
       unit: ADA
       asset_id: 0be55d262b29f564998ff81efe21bdc0022621c12f15af08d0f2ddb1.63f2cbfa5bf8b68828839a2575c8c70f14a32f50ebbfa7c654043269793be896
+  retries: 3
 spectrum:
   kupo_address: http://kupo:1442
   credential: 6b9c456aa650cb808a9ab54326e039d5235ed69f069c9664a8fe5b69/*
@@ -207,3 +209,4 @@ spectrum:
     - token: SNEK
       unit: ADA
       asset_id: f8fd67ee46f66da669f68dc941090eb753687636b47fc6fd7f5e6254.534e454b5f4144415f4e4654
+  retries: 3

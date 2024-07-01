@@ -37,7 +37,9 @@ impl Source for MinswapSource {
 impl MinswapSource {
     pub fn new(config: &OracleConfig) -> Result<Self> {
         let minswap_config = &config.minswap;
-        let client = kupon::Builder::with_endpoint(&minswap_config.kupo_address).build()?;
+        let client = kupon::Builder::with_endpoint(&minswap_config.kupo_address)
+            .with_retries(minswap_config.retries)
+            .build()?;
         Ok(Self {
             client: Arc::new(client),
             credential: minswap_config.credential.clone(),

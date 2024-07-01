@@ -37,7 +37,9 @@ impl Source for SpectrumSource {
 impl SpectrumSource {
     pub fn new(config: &OracleConfig) -> Result<Self> {
         let spectrum_config = &config.spectrum;
-        let client = kupon::Builder::with_endpoint(&spectrum_config.kupo_address).build()?;
+        let client = kupon::Builder::with_endpoint(&spectrum_config.kupo_address)
+            .with_retries(spectrum_config.retries)
+            .build()?;
         Ok(Self {
             client: Arc::new(client),
             credential: spectrum_config.credential.clone(),

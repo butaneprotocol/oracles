@@ -43,7 +43,9 @@ impl Source for SundaeSwapKupoSource {
 impl SundaeSwapKupoSource {
     pub fn new(config: &OracleConfig) -> Result<Self> {
         let sundae_config = &config.sundaeswap;
-        let client = kupon::Builder::with_endpoint(&sundae_config.kupo_address).build()?;
+        let client = kupon::Builder::with_endpoint(&sundae_config.kupo_address)
+            .with_retries(sundae_config.retries)
+            .build()?;
         Ok(Self {
             client: Arc::new(client),
             credential: sundae_config.credential.clone(),

@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use kupon::{Client, HealthStatus};
 use tokio::time::sleep;
-use tracing::{trace, warn};
+use tracing::{debug, warn};
 
 pub async fn wait_for_sync(client: &Client) {
     let mut last_status = None;
@@ -23,7 +23,7 @@ pub async fn wait_for_sync(client: &Client) {
                         status
                     );
                 } else {
-                    trace!("Kupo server is still {}.", status);
+                    debug!("Kupo server is still {}.", status);
                 }
                 sleep(Duration::from_secs(1)).await;
             }
@@ -31,7 +31,7 @@ pub async fn wait_for_sync(client: &Client) {
                 if status_changed {
                     warn!("Kupo server is disconnected from the underlying node. Please check that it is configured correctly. This source will be ignored until kupo is connected and fully synced.")
                 } else {
-                    trace!("Kupo server is still disconnected from the underlying node.");
+                    debug!("Kupo server is still disconnected from the underlying node.");
                 }
                 sleep(Duration::from_secs(5)).await;
             }
@@ -39,7 +39,7 @@ pub async fn wait_for_sync(client: &Client) {
                 if status_changed {
                     warn!("Kupo server is unreachable or otherwise unhealthy: {}. Please ensure the server is running and configured correctly. This source will be ignored until it is.", reason);
                 } else {
-                    trace!("Kupo server is still unhealthy: {}", reason);
+                    debug!("Kupo server is still unhealthy: {}", reason);
                 }
                 sleep(Duration::from_secs(10)).await;
             }
