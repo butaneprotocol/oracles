@@ -4,19 +4,20 @@ use anyhow::{anyhow, Result};
 use futures::{future::BoxFuture, FutureExt};
 use kupon::MatchOptions;
 use rust_decimal::Decimal;
-use tokio::{task::JoinSet, time::sleep};
+use tokio::time::sleep;
 use tracing::{warn, Instrument};
 
 use crate::config::{HydratedPool, OracleConfig};
 
 use super::{
-    kupo::wait_for_sync,
+    kupo::{wait_for_sync, MaxConcurrencyFutureSet},
     source::{PriceInfo, PriceSink, Source},
 };
 
 pub struct MinswapSource {
     client: Arc<kupon::Client>,
     credential: String,
+    max_concurrency: usize,
     pools: Vec<Arc<HydratedPool>>,
 }
 
@@ -43,6 +44,7 @@ impl MinswapSource {
         Ok(Self {
             client: Arc::new(client),
             credential: minswap_config.credential.clone(),
+            max_concurrency: minswap_config.max_concurrency,
             pools: config
                 .hydrate_pools(&minswap_config.pools)
                 .into_iter()
@@ -54,7 +56,7 @@ impl MinswapSource {
     async fn query_impl(&self, sink: &PriceSink) -> Result<()> {
         wait_for_sync(&self.client).await;
 
-        let mut set = JoinSet::new();
+        let mut set = MaxConcurrencyFutureSet::new(self.max_concurrency);
         for pool in &self.pools {
             let client = self.client.clone();
             let sink = sink.clone();
@@ -64,7 +66,7 @@ impl MinswapSource {
                 .asset_id(&pool.pool.asset_id)
                 .only_unspent();
 
-            set.spawn(
+            set.push(
                 async move {
                     let mut result = client.matches(&options).await?;
                     if result.is_empty() {
@@ -110,17 +112,13 @@ impl MinswapSource {
             );
         }
 
-        while let Some(res) = set.join_next().await {
+        while let Some(res) = set.next().await {
             match res {
                 Err(error) => {
-                    // the task was cancelled or panicked
-                    warn!("error running minswap query: {}", error);
-                }
-                Ok(Err(error)) => {
                     // the task ran, but returned an error
                     warn!("error querying minswap: {}", error);
                 }
-                Ok(Ok(())) => {
+                Ok(()) => {
                     // all is well
                 }
             }

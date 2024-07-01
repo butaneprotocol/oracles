@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use futures::{stream::FuturesUnordered, Future, StreamExt};
 use kupon::{Client, HealthStatus};
 use tokio::time::sleep;
 use tracing::{debug, warn};
@@ -44,5 +45,43 @@ pub async fn wait_for_sync(client: &Client) {
                 sleep(Duration::from_secs(10)).await;
             }
         }
+    }
+}
+
+/**
+ * Runs a set of futures, only allowing a certain number to execute at a time.
+ */
+pub struct MaxConcurrencyFutureSet<F: Future> {
+    running: FuturesUnordered<F>,
+    queued: Vec<F>,
+    concurrency: usize,
+}
+impl<F: Future> MaxConcurrencyFutureSet<F> {
+    pub fn new(concurrency: usize) -> Self {
+        assert!(concurrency > 0);
+        Self {
+            running: FuturesUnordered::new(),
+            queued: vec![],
+            concurrency,
+        }
+    }
+
+    pub fn push(&mut self, future: F) {
+        if self.running.len() < self.concurrency {
+            self.running.push(future);
+        } else {
+            self.queued.push(future);
+        }
+    }
+
+    pub async fn next(&mut self) -> Option<F::Output> {
+        let next = self.running.next().await;
+        if next.is_none() {
+            if let Some(another_task) = self.queued.pop() {
+                self.running.push(another_task);
+                return self.running.next().await;
+            }
+        }
+        next
     }
 }

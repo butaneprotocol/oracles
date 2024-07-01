@@ -6,7 +6,7 @@ use futures::{future::BoxFuture, FutureExt};
 use kupon::{AssetId, MatchOptions};
 use pallas_primitives::conway::{BigInt, PlutusData};
 use rust_decimal::Decimal;
-use tokio::{task::JoinSet, time::sleep};
+use tokio::time::sleep;
 use tracing::{warn, Instrument};
 
 use crate::{
@@ -15,7 +15,7 @@ use crate::{
 };
 
 use super::{
-    kupo::wait_for_sync,
+    kupo::{wait_for_sync, MaxConcurrencyFutureSet},
     source::{PriceSink, Source},
 };
 
@@ -23,6 +23,7 @@ use super::{
 pub struct SundaeSwapKupoSource {
     client: Arc<kupon::Client>,
     credential: String,
+    max_concurrency: usize,
     pools: DashMap<AssetId, HydratedPool>,
 }
 
@@ -49,6 +50,7 @@ impl SundaeSwapKupoSource {
         Ok(Self {
             client: Arc::new(client),
             credential: sundae_config.credential.clone(),
+            max_concurrency: sundae_config.max_concurrency,
             pools: config
                 .hydrate_pools(&sundae_config.pools)
                 .into_iter()
@@ -60,7 +62,7 @@ impl SundaeSwapKupoSource {
     async fn query_impl(&self, sink: &PriceSink) -> Result<()> {
         wait_for_sync(&self.client).await;
 
-        let mut set = JoinSet::new();
+        let mut set = MaxConcurrencyFutureSet::new(self.max_concurrency);
         for pool in &self.pools {
             let client = self.client.clone();
             let sink = sink.clone();
@@ -70,7 +72,7 @@ impl SundaeSwapKupoSource {
                 .asset_id(&pool.pool.asset_id)
                 .only_unspent();
 
-            set.spawn(
+            set.push(
                 async move {
                     let mut result = client.matches(&options).await?;
                     if result.is_empty() {
@@ -126,17 +128,13 @@ impl SundaeSwapKupoSource {
             );
         }
 
-        while let Some(res) = set.join_next().await {
+        while let Some(res) = set.next().await {
             match res {
                 Err(error) => {
-                    // the task was cancelled or panicked
-                    warn!("error running sundaeswap query: {}", error);
-                }
-                Ok(Err(error)) => {
                     // the task ran, but returned an error
                     warn!("error querying sundaeswap: {}", error);
                 }
-                Ok(Ok(())) => {
+                Ok(()) => {
                     // all is well
                 }
             }
