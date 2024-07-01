@@ -6,7 +6,7 @@ use oracles::{
     config::{load_config, LogConfig, OracleConfig},
     dkg,
     health::{HealthServer, HealthSink},
-    network::Network,
+    network::{Network, NetworkConfig},
     price_aggregator::PriceAggregator,
     publisher::Publisher,
     raft::{Raft, RaftLeader},
@@ -45,19 +45,19 @@ impl Node {
         let heartbeat = config.heartbeat();
         let timeout = config.timeout();
 
-        let (health_server, health_sink) = HealthServer::new();
+        let network_config = NetworkConfig::load(&config)?;
+        // quorum is set to a majority of expected nodes (which includes ourself!)
+        let quorum = ((network_config.peers.len() + 1) / 2) + 1;
+
+        let (leader_tx, leader_rx) = watch::channel(RaftLeader::Unknown);
+        let (health_server, health_sink) = HealthServer::new(&network_config, leader_rx.clone());
 
         // Construct a peer-to-peer network that can connect to peers, and dispatch messages to the correct state machine
-        let mut network = Network::new(&config)?;
-
-        // quorum is set to a majority of expected nodes (which includes ourself!)
-        let quorum = ((network.peers_count() + 1) / 2) + 1;
+        let mut network = Network::new(&network_config, health_sink.clone());
 
         let (pa_tx, pa_rx) = watch::channel(vec![]);
 
         let price_aggregator = PriceAggregator::new(pa_tx, config.clone())?;
-
-        let (leader_tx, leader_rx) = watch::channel(RaftLeader::Unknown);
 
         let (result_tx, result_rx) = mpsc::channel(10);
 

@@ -4,16 +4,20 @@ use anyhow::{anyhow, Result};
 use futures::{future::BoxFuture, FutureExt};
 use kupon::MatchOptions;
 use rust_decimal::Decimal;
-use tokio::{task::JoinSet, time::sleep};
+use tokio::time::sleep;
 use tracing::{warn, Instrument};
 
 use crate::config::{HydratedPool, OracleConfig};
 
-use super::source::{PriceInfo, PriceSink, Source};
+use super::{
+    kupo::{wait_for_sync, MaxConcurrencyFutureSet},
+    source::{PriceInfo, PriceSink, Source},
+};
 
 pub struct SpectrumSource {
     client: Arc<kupon::Client>,
     credential: String,
+    max_concurrency: usize,
     pools: Vec<Arc<HydratedPool>>,
 }
 
@@ -34,10 +38,13 @@ impl Source for SpectrumSource {
 impl SpectrumSource {
     pub fn new(config: &OracleConfig) -> Result<Self> {
         let spectrum_config = &config.spectrum;
-        let client = kupon::Builder::with_endpoint(&spectrum_config.kupo_address).build()?;
+        let client = kupon::Builder::with_endpoint(&spectrum_config.kupo_address)
+            .with_retries(spectrum_config.retries)
+            .build()?;
         Ok(Self {
             client: Arc::new(client),
             credential: spectrum_config.credential.clone(),
+            max_concurrency: spectrum_config.max_concurrency,
             pools: config
                 .hydrate_pools(&spectrum_config.pools)
                 .into_iter()
@@ -47,7 +54,9 @@ impl SpectrumSource {
     }
 
     async fn query_impl(&self, sink: &PriceSink) -> Result<()> {
-        let mut set = JoinSet::new();
+        wait_for_sync(&self.client).await;
+
+        let mut set = MaxConcurrencyFutureSet::new(self.max_concurrency);
         for pool in &self.pools {
             let client = self.client.clone();
             let sink = sink.clone();
@@ -57,7 +66,7 @@ impl SpectrumSource {
                 .asset_id(&pool.pool.asset_id)
                 .only_unspent();
 
-            set.spawn(
+            set.push(
                 async move {
                     let mut result = client.matches(&options).await?;
                     if result.is_empty() {
@@ -103,17 +112,13 @@ impl SpectrumSource {
             );
         }
 
-        while let Some(res) = set.join_next().await {
+        while let Some(res) = set.next().await {
             match res {
                 Err(error) => {
-                    // the task was cancelled or panicked
-                    warn!("error running spectrum query: {}", error);
-                }
-                Ok(Err(error)) => {
                     // the task ran, but returned an error
                     warn!("error querying spectrum: {}", error);
                 }
-                Ok(Ok(())) => {
+                Ok(()) => {
                     // all is well
                 }
             }

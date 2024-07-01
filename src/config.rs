@@ -128,6 +128,8 @@ pub struct SundaeSwapConfig {
     pub credential: String,
     pub policy_id: String,
     pub pools: Vec<Pool>,
+    pub max_concurrency: usize,
+    pub retries: usize,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -135,6 +137,8 @@ pub struct MinswapConfig {
     pub kupo_address: String,
     pub credential: String,
     pub pools: Vec<Pool>,
+    pub max_concurrency: usize,
+    pub retries: usize,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -142,6 +146,8 @@ pub struct SpectrumConfig {
     pub kupo_address: String,
     pub credential: String,
     pub pools: Vec<Pool>,
+    pub max_concurrency: usize,
+    pub retries: usize,
 }
 
 #[derive(Debug, Deserialize, Clone)]

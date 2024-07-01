@@ -2,17 +2,18 @@ use anyhow::Result;
 use tokio::{sync::mpsc, task::JoinSet};
 use tracing::{info, warn, Instrument};
 
-use crate::config::OracleConfig;
-use crate::dkg::KeygenMessage;
 use crate::raft::RaftMessage;
 use crate::signature_aggregator::signer::SignerMessage;
+use crate::{dkg::KeygenMessage, health::HealthSink};
 pub use channel::{NetworkChannel, NetworkReceiver, NetworkSender};
+pub use config::{NetworkConfig, Peer};
 use core::Core;
 use std::any::type_name;
 pub use test::TestNetwork;
 pub use types::{IncomingMessage, NodeId, OutgoingMessage};
 
 mod channel;
+mod config;
 mod core;
 mod test;
 mod types;
@@ -55,12 +56,12 @@ pub struct Network {
 }
 
 impl Network {
-    pub fn new(config: &OracleConfig) -> Result<Self> {
+    pub fn new(config: &NetworkConfig, health_sink: HealthSink) -> Self {
         let (outgoing_sender, outgoing_receiver) = mpsc::channel(10);
         let (incoming_sender, incoming_receiver) = mpsc::channel(10);
-        let core = Core::new(config, outgoing_receiver, incoming_sender)?;
-        let id = core.id.clone();
-        Ok(Self {
+        let core = Core::new(config, health_sink, outgoing_receiver, incoming_sender);
+        let id = config.id.clone();
+        Self {
             id,
             port: config.port,
             core,
@@ -69,11 +70,7 @@ impl Network {
             keygen: None,
             signer: None,
             raft: None,
-        })
-    }
-
-    pub fn peers_count(&self) -> usize {
-        self.core.peers_count()
+        }
     }
 
     pub fn keygen_channel(&mut self) -> NetworkChannel<KeygenMessage> {

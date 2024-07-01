@@ -3,12 +3,21 @@ use std::{collections::HashMap, sync::Arc};
 use dashmap::DashMap;
 use serde::Serialize;
 use tide::Response;
-use tokio::{sync::mpsc, task::JoinSet};
+use tokio::{
+    sync::{mpsc, watch},
+    task::JoinSet,
+};
 use tracing::{info, warn, Instrument};
+
+use crate::{
+    network::{NetworkConfig, NodeId, Peer},
+    raft::RaftLeader,
+};
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum Origin {
     Source(String),
+    Peer(NodeId),
 }
 
 pub struct HealthInfo {
@@ -22,13 +31,30 @@ pub enum HealthStatus {
 }
 
 type HealthSource = mpsc::UnboundedReceiver<HealthInfo>;
-type HealthMap = Arc<DashMap<Origin, HealthStatus>>;
+#[derive(Clone)]
+struct HealthState {
+    id: NodeId,
+    peers: Vec<Peer>,
+    leader_source: Arc<watch::Receiver<RaftLeader>>,
+    statuses: Arc<DashMap<Origin, HealthStatus>>,
+}
+impl HealthState {
+    fn peer(&self, id: &NodeId) -> &Peer {
+        self.peers.iter().find(|p| p.id == *id).unwrap()
+    }
+}
 
 #[derive(Clone)]
-pub struct HealthSink(mpsc::UnboundedSender<HealthInfo>);
+pub struct HealthSink(Option<mpsc::UnboundedSender<HealthInfo>>);
 impl HealthSink {
+    pub fn noop() -> Self {
+        Self(None)
+    }
     pub fn update(&self, origin: Origin, status: HealthStatus) {
-        let result = self.0.send(HealthInfo {
+        let Some(sink) = self.0.as_ref() else {
+            return;
+        };
+        let result = sink.send(HealthInfo {
             origin: origin.clone(),
             status,
         });
@@ -40,16 +66,33 @@ impl HealthSink {
 
 pub struct HealthServer {
     source: HealthSource,
-    statuses: HealthMap,
+    state: HealthState,
 }
 impl HealthServer {
-    pub fn new() -> (Self, HealthSink) {
+    pub fn new(
+        network_config: &NetworkConfig,
+        leader_source: watch::Receiver<RaftLeader>,
+    ) -> (Self, HealthSink) {
         let (sink, source) = mpsc::unbounded_channel();
-        let sink = HealthSink(sink);
+        let statuses = Arc::new(DashMap::new());
+        let mut peers = network_config.peers.clone();
+        peers.sort_by_cached_key(|p| p.label.clone());
+        for peer in &peers {
+            statuses.insert(
+                Origin::Peer(peer.id.clone()),
+                HealthStatus::Unhealthy("Not yet connected".into()),
+            );
+        }
+        let sink = HealthSink(Some(sink));
         (
             Self {
                 source,
-                statuses: Arc::new(DashMap::new()),
+                state: HealthState {
+                    id: network_config.id.clone(),
+                    leader_source: Arc::new(leader_source),
+                    peers,
+                    statuses,
+                },
             },
             sink,
         )
@@ -59,7 +102,7 @@ impl HealthServer {
         let mut set = JoinSet::new();
 
         let mut source = self.source;
-        let statuses = self.statuses.clone();
+        let statuses = self.state.statuses.clone();
         set.spawn(
             async move {
                 while let Some(info) = source.recv().await {
@@ -69,7 +112,7 @@ impl HealthServer {
             .in_current_span(),
         );
 
-        let mut app = tide::with_state(self.statuses);
+        let mut app = tide::with_state(self.state);
         app.at("/health").get(report_health);
         set.spawn(
             async move {
@@ -90,22 +133,78 @@ impl HealthServer {
 }
 
 #[derive(Serialize)]
+enum PeerConnectionStatus {
+    Connected,
+    WaitingForIncomingConnection,
+    TryingToConnect,
+}
+
+#[derive(Serialize)]
+struct PeerStatus {
+    pub name: String,
+    pub id: NodeId,
+    pub address: String,
+    pub connection: PeerConnectionStatus,
+}
+
+#[derive(Serialize)]
 struct ServerHealth {
+    pub id: NodeId,
     pub healthy: bool,
+    pub raft_leader: Option<String>,
+    pub peers: Vec<PeerStatus>,
     pub errors: HashMap<String, String>,
 }
 
-async fn report_health(req: tide::Request<HealthMap>) -> tide::Result {
+async fn report_health(req: tide::Request<HealthState>) -> tide::Result {
     let mut errors = HashMap::new();
-    for entry in req.state().iter() {
+    let state = req.state();
+    for entry in state.statuses.iter() {
         let (origin, status) = entry.pair();
         if let HealthStatus::Unhealthy(reason) = status {
-            errors.insert(format!("{:?}", origin), reason.clone());
+            let label = match origin {
+                Origin::Source(name) => name,
+                Origin::Peer(id) => &state.peer(id).label,
+            };
+            errors.insert(label.to_string(), reason.clone());
         }
     }
 
+    let peers: Vec<PeerStatus> = state
+        .peers
+        .iter()
+        .map(|p| {
+            let connected = state
+                .statuses
+                .get(&Origin::Peer(p.id.clone()))
+                .is_some_and(|s| matches!(s.value(), HealthStatus::Healthy));
+            let status = if connected {
+                PeerConnectionStatus::Connected
+            } else if state.id.should_initiate_connection_to(&p.id) {
+                PeerConnectionStatus::TryingToConnect
+            } else {
+                PeerConnectionStatus::WaitingForIncomingConnection
+            };
+            PeerStatus {
+                name: p.label.clone(),
+                id: p.id.clone(),
+                address: p.address.clone(),
+                connection: status,
+            }
+        })
+        .collect();
+
+    let raft_leader = match state.leader_source.borrow().clone() {
+        RaftLeader::Myself => Some("me".into()),
+        RaftLeader::Other(peer_id) => Some(state.peer(&peer_id).label.to_string()),
+        RaftLeader::Unknown => None,
+    };
+
     let health = ServerHealth {
+        id: state.id.clone(),
         healthy: errors.is_empty(),
+        raft_leader,
+        peers,
         errors,
     };
     let status = if health.healthy { 200 } else { 503 };

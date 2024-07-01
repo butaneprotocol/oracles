@@ -96,13 +96,13 @@ impl<C> Encode<C> for CborIdentifier {
         e: &mut Encoder<W>,
         ctx: &mut C,
     ) -> Result<(), encode::Error<W::Error>> {
-        let bytes: ByteArray<32> = self.0.serialize().into();
+        let bytes: ByteVec = self.0.serialize().into();
         bytes.encode(e, ctx)
     }
 }
 impl<'b, C> Decode<'b, C> for CborIdentifier {
     fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, decode::Error> {
-        let bytes: ByteArray<32> = d.decode_with(ctx)?;
+        let bytes: ByteVec = d.decode_with(ctx)?;
         let value = Identifier::deserialize(&bytes).map_err(decode::Error::custom)?;
         Ok(Self(value))
     }
@@ -138,14 +138,14 @@ impl<C> Encode<C> for CborSignatureShare {
         e: &mut Encoder<W>,
         ctx: &mut C,
     ) -> Result<(), encode::Error<W::Error>> {
-        let bytes: ByteArray<32> = self.0.serialize().into();
+        let bytes: ByteVec = self.0.serialize().into();
         bytes.encode(e, ctx)
     }
 }
 impl<'b, C> Decode<'b, C> for CborSignatureShare {
     fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, decode::Error> {
-        let bytes: ByteArray<32> = d.decode_with(ctx)?;
-        let value = SignatureShare::deserialize(*bytes).map_err(decode::Error::custom)?;
+        let bytes: ByteVec = d.decode_with(ctx)?;
+        let value = SignatureShare::deserialize(&bytes).map_err(decode::Error::custom)?;
         Ok(Self(value))
     }
 }

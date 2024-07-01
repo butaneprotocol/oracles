@@ -6,7 +6,7 @@ use futures::{future::BoxFuture, FutureExt};
 use kupon::{AssetId, MatchOptions};
 use pallas_primitives::conway::{BigInt, PlutusData};
 use rust_decimal::Decimal;
-use tokio::{task::JoinSet, time::sleep};
+use tokio::time::sleep;
 use tracing::{warn, Instrument};
 
 use crate::{
@@ -14,12 +14,16 @@ use crate::{
     config::{HydratedPool, OracleConfig},
 };
 
-use super::source::{PriceSink, Source};
+use super::{
+    kupo::{wait_for_sync, MaxConcurrencyFutureSet},
+    source::{PriceSink, Source},
+};
 
 #[derive(Clone)]
 pub struct SundaeSwapKupoSource {
     client: Arc<kupon::Client>,
     credential: String,
+    max_concurrency: usize,
     pools: DashMap<AssetId, HydratedPool>,
 }
 
@@ -40,10 +44,13 @@ impl Source for SundaeSwapKupoSource {
 impl SundaeSwapKupoSource {
     pub fn new(config: &OracleConfig) -> Result<Self> {
         let sundae_config = &config.sundaeswap;
-        let client = kupon::Builder::with_endpoint(&sundae_config.kupo_address).build()?;
+        let client = kupon::Builder::with_endpoint(&sundae_config.kupo_address)
+            .with_retries(sundae_config.retries)
+            .build()?;
         Ok(Self {
             client: Arc::new(client),
             credential: sundae_config.credential.clone(),
+            max_concurrency: sundae_config.max_concurrency,
             pools: config
                 .hydrate_pools(&sundae_config.pools)
                 .into_iter()
@@ -53,7 +60,9 @@ impl SundaeSwapKupoSource {
     }
 
     async fn query_impl(&self, sink: &PriceSink) -> Result<()> {
-        let mut set = JoinSet::new();
+        wait_for_sync(&self.client).await;
+
+        let mut set = MaxConcurrencyFutureSet::new(self.max_concurrency);
         for pool in &self.pools {
             let client = self.client.clone();
             let sink = sink.clone();
@@ -63,7 +72,7 @@ impl SundaeSwapKupoSource {
                 .asset_id(&pool.pool.asset_id)
                 .only_unspent();
 
-            set.spawn(
+            set.push(
                 async move {
                     let mut result = client.matches(&options).await?;
                     if result.is_empty() {
@@ -119,17 +128,13 @@ impl SundaeSwapKupoSource {
             );
         }
 
-        while let Some(res) = set.join_next().await {
+        while let Some(res) = set.next().await {
             match res {
                 Err(error) => {
-                    // the task was cancelled or panicked
-                    warn!("error running sundaeswap query: {}", error);
-                }
-                Ok(Err(error)) => {
                     // the task ran, but returned an error
                     warn!("error querying sundaeswap: {}", error);
                 }
-                Ok(Ok(())) => {
+                Ok(()) => {
                     // all is well
                 }
             }
