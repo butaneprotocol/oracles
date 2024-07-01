@@ -496,17 +496,17 @@ impl Signer {
         let mut signatures = vec![];
         for (package, sigs) in packages.iter().zip(signature_maps) {
             let signature = aggregate(package, &sigs, &self.public_key)?;
-            signatures.push(signature);
+            signatures.push(signature.serialize()?);
         }
 
         let payload = price_data
             .iter()
             .zip(signatures)
-            .map(|(price, sig)| SignedPriceFeedEntry {
+            .map(|(price, signature)| SignedPriceFeedEntry {
                 price: price.price,
                 data: SignedPriceFeed {
                     data: price.data.clone(),
-                    signature: sig.serialize().into(),
+                    signature,
                 },
             })
             .collect();

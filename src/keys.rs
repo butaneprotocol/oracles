@@ -52,7 +52,7 @@ pub fn write_frost_keys(
     public_key: PublicKeyPackage,
 ) -> Result<String> {
     let verifying_key = public_key.verifying_key();
-    let address = compute_address(&verifying_key.serialize())?;
+    let address = compute_address(&verifying_key.serialize()?)?;
     let frost_key_path = keys_dir.join(&address);
     fs::create_dir_all(&frost_key_path)?;
 

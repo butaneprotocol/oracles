@@ -22,7 +22,7 @@ config = "0.14"
 dashmap = "6"
 ed25519 = { version = "2.2", features = ["pkcs8", "pem"] }
 ed25519-dalek = { version = "2.1" }
-frost-ed25519 = { version = "1.0.0", features = ["serialization"] }
+frost-ed25519 = { version = "2.0.0-rc.0", features = ["serialization"] }
 futures = "0.3"
 hex = "0.4.3"
 kupon = { git = "https://github.com/SundaeSwap-finance/kupon", rev = "06dfda3" }
