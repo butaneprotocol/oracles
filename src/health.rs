@@ -3,10 +3,16 @@ use std::{collections::HashMap, sync::Arc};
 use dashmap::DashMap;
 use serde::Serialize;
 use tide::Response;
-use tokio::{sync::mpsc, task::JoinSet};
+use tokio::{
+    sync::{mpsc, watch},
+    task::JoinSet,
+};
 use tracing::{info, warn, Instrument};
 
-use crate::network::{NetworkConfig, NodeId, Peer};
+use crate::{
+    network::{NetworkConfig, NodeId, Peer},
+    raft::RaftLeader,
+};
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum Origin {
@@ -29,7 +35,13 @@ type HealthSource = mpsc::UnboundedReceiver<HealthInfo>;
 struct HealthState {
     id: NodeId,
     peers: Vec<Peer>,
+    leader_source: Arc<watch::Receiver<RaftLeader>>,
     statuses: Arc<DashMap<Origin, HealthStatus>>,
+}
+impl HealthState {
+    fn peer(&self, id: &NodeId) -> &Peer {
+        self.peers.iter().find(|p| p.id == *id).unwrap()
+    }
 }
 
 #[derive(Clone)]
@@ -57,7 +69,10 @@ pub struct HealthServer {
     state: HealthState,
 }
 impl HealthServer {
-    pub fn new(network_config: &NetworkConfig) -> (Self, HealthSink) {
+    pub fn new(
+        network_config: &NetworkConfig,
+        leader_source: watch::Receiver<RaftLeader>,
+    ) -> (Self, HealthSink) {
         let (sink, source) = mpsc::unbounded_channel();
         let statuses = Arc::new(DashMap::new());
         let mut peers = network_config.peers.clone();
@@ -74,6 +89,7 @@ impl HealthServer {
                 source,
                 state: HealthState {
                     id: network_config.id.clone(),
+                    leader_source: Arc::new(leader_source),
                     peers,
                     statuses,
                 },
@@ -135,6 +151,7 @@ struct PeerStatus {
 struct ServerHealth {
     pub id: NodeId,
     pub healthy: bool,
+    pub raft_leader: Option<String>,
     pub peers: Vec<PeerStatus>,
     pub errors: HashMap<String, String>,
 }
@@ -146,18 +163,14 @@ async fn report_health(req: tide::Request<HealthState>) -> tide::Result {
         let (origin, status) = entry.pair();
         if let HealthStatus::Unhealthy(reason) = status {
             let label = match origin {
-                Origin::Source(name) => name.to_string(),
-                Origin::Peer(id) => state
-                    .peers
-                    .iter()
-                    .find(|n| n.id == *id)
-                    .map_or_else(|| format!("{}", id), |p| p.label.clone()),
+                Origin::Source(name) => name,
+                Origin::Peer(id) => &state.peer(id).label,
             };
-            errors.insert(label, reason.clone());
+            errors.insert(label.to_string(), reason.clone());
         }
     }
 
-    let peers = state
+    let peers: Vec<PeerStatus> = state
         .peers
         .iter()
         .map(|p| {
@@ -181,9 +194,16 @@ async fn report_health(req: tide::Request<HealthState>) -> tide::Result {
         })
         .collect();
 
+    let raft_leader = match state.leader_source.borrow().clone() {
+        RaftLeader::Myself => Some("me".into()),
+        RaftLeader::Other(peer_id) => Some(state.peer(&peer_id).label.to_string()),
+        RaftLeader::Unknown => None,
+    };
+
     let health = ServerHealth {
         id: state.id.clone(),
         healthy: errors.is_empty(),
+        raft_leader,
         peers,
         errors,
     };

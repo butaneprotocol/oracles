@@ -49,7 +49,8 @@ impl Node {
         // quorum is set to a majority of expected nodes (which includes ourself!)
         let quorum = ((network_config.peers.len() + 1) / 2) + 1;
 
-        let (health_server, health_sink) = HealthServer::new(&network_config);
+        let (leader_tx, leader_rx) = watch::channel(RaftLeader::Unknown);
+        let (health_server, health_sink) = HealthServer::new(&network_config, leader_rx.clone());
 
         // Construct a peer-to-peer network that can connect to peers, and dispatch messages to the correct state machine
         let mut network = Network::new(&network_config, health_sink.clone());
@@ -57,8 +58,6 @@ impl Node {
         let (pa_tx, pa_rx) = watch::channel(vec![]);
 
         let price_aggregator = PriceAggregator::new(pa_tx, config.clone())?;
-
-        let (leader_tx, leader_rx) = watch::channel(RaftLeader::Unknown);
 
         let (result_tx, result_rx) = mpsc::channel(10);
 
