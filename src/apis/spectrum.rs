@@ -9,7 +9,10 @@ use tracing::{warn, Instrument};
 
 use crate::config::{HydratedPool, OracleConfig};
 
-use super::source::{PriceInfo, PriceSink, Source};
+use super::{
+    kupo::wait_for_sync,
+    source::{PriceInfo, PriceSink, Source},
+};
 
 pub struct SpectrumSource {
     client: Arc<kupon::Client>,
@@ -47,6 +50,8 @@ impl SpectrumSource {
     }
 
     async fn query_impl(&self, sink: &PriceSink) -> Result<()> {
+        wait_for_sync(&self.client).await;
+
         let mut set = JoinSet::new();
         for pool in &self.pools {
             let client = self.client.clone();

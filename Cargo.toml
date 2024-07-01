@@ -19,13 +19,13 @@ chacha20poly1305 = "0.10"
 cynic = "3.4"
 clap = { version = "4.5.1", features = ["derive"] }
 config = "0.14"
-dashmap = "5.5.3"
+dashmap = "6"
 ed25519 = { version = "2.2", features = ["pkcs8", "pem"] }
 ed25519-dalek = { version = "2.1" }
 frost-ed25519 = { version = "1.0.0", features = ["serialization"] }
 futures = "0.3"
 hex = "0.4.3"
-kupon = { git = "https://github.com/SundaeSwap-finance/kupon", rev = "890bed5" }
+kupon = { git = "https://github.com/SundaeSwap-finance/kupon", rev = "9d5eb1b" }
 minicbor = { version = "0.20", features = ["derive", "std"] }
 minicbor-io = { version = "0.15", features = ["async-io"] }
 num-bigint = "0.4"

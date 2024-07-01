@@ -14,7 +14,10 @@ use crate::{
     config::{HydratedPool, OracleConfig},
 };
 
-use super::source::{PriceSink, Source};
+use super::{
+    kupo::wait_for_sync,
+    source::{PriceSink, Source},
+};
 
 #[derive(Clone)]
 pub struct SundaeSwapKupoSource {
@@ -53,6 +56,8 @@ impl SundaeSwapKupoSource {
     }
 
     async fn query_impl(&self, sink: &PriceSink) -> Result<()> {
+        wait_for_sync(&self.client).await;
+
         let mut set = JoinSet::new();
         for pool in &self.pools {
             let client = self.client.clone();
