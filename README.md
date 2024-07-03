@@ -1,6 +1,56 @@
-# Oracles Offchain
+# Butane Oracle
+
+This repository holds the off-chain code that provides an oracle feed for the Butane protocol.
+
+## Introduction
+
+The Butane protocol allows users to lock up assets as collateral, and mint some amount of synthetic asset.  For example, locking up $100 worth of ADA, might let you mint $50 USDB. Since the on-chain code cannot interact with the outside world to know the price of ADA in USD is, it relies on a trusted "oracle feed" to tell it those prices.
+
+In order to be robust to outages, bugs, or malicious actors manipulating those prices, this oracle needs to employ a variety of techniques to keep the Butane protocol secure and highly solvent.
+
+## Architecture
+
+This section will explain, hopefully in relatively non-technical terms, how the oracle network operates, and what mechanisms it has in place for ensuring a reliable oracle feed for the purposes of preventing bad debt in the Butane protocol.
+
+It also describes the protocol as it exists today, with only light nods to the system that Butane intends to eventually build.
+
+The Butane oracle network consists of a set of operators. These operators have their own public/private keypair, known to the other nodes, that allow them to communicate in a secure and authenticated way.
+
+Additionally, these node operators have performed a multi-party computation to establish a shared [FROST](https://github.com/ZcashFoundation/frost) keypair. This key-pair is in the form of a public key, known to everyone, and a set of private key shares. Each node operator has one key share. More on what these are used for later.
+
+These operators establish connections directly to each other node. At any given moment, one of these nodes is acting as the "leader". If the leader goes offline, or is otherwise unreachable for too long, the rest of the nodes use a consensus protocol called [Raft](https://raft.github.io/) to decide on a new leader. This failover typically happens within a few hundred milliseconds.
+
+Meanwhile, each node is continually querying a number of different data sources, such as binance, coinbase, and on-chain DEX's for up to date pricing information. This includes pricing for the collateral that is accepted by the Butane protocol, the synthetic assets minted by the Butane protocol, and the underlying assets that the butane protocol tries to track. Thus, at any given moment, the node has its *own* view of these markets.
+
+Every 10 seconds, assuming the network is healthy, the leader will "propose" a value for each synthetic, listing out the collateral prices. Each node will compare that proposed value to their own. If it is within some tight threshold, they will agree to sign the payload, otherwise they will refuse.
+
+Using the FROST keys from above, if a certain threshold of the nodes agree to sign the payload, they can collaborate to produce a signature. This signature can be validated as if it were a signature corresponding to the FROST public key.
+
+These nodes will then serve this signed payload via an API; anyone wishing to interact with the Butane protocol can ask for the latest signed payload from any of the nodes. The butane smart contracts have the appropriate public key, and thus can check that the oracle feed came from the trusted node operators.
+
+Over time, the size of this set can be expanded and evolved, allowing for a more robust and decentralized oracle network.
+
+So, how does a node decide if it will sign the payload or not? There are a number of safety measures in place to ensure the Butane protocol does not take on bad debt:
+- The node confirms that its own pricing data is up to date by comparing multiple different sources of timing information
+- The node confirms that the messages from each other node are authenticated with the appropriate key pair
+- The node confirms that their own pricing data is high confidence from a minimum number of sources, using a "median discarding outliers"
+- The node adjusts the reported price differently depending on the change: drops in prices are seen by the oracle feed immediately, to liquidate quickly and guard against bad debt; while rises in prices are phased in over time, to ensure that short lived spikes don't get used to under-collateralize a synthetic.
+
+## Butane Deployment
+
+For the Butane mainnet deployment, currently we aggregate data from the following sources:
+- Binance
+- Bybit
+- Coinbase
+- Minswap
+- Spectrum
+- Sundae v3
+
+The oracle network is currently a set of 4 nodes, requiring agreement among 3 of them to produce a signature.
 
 ## Setup
+
+This section will explain how to set up and run an oracle node, for the node operators.
 
 ### Pick a key directory
 
