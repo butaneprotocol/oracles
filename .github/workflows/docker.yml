@@ -35,10 +35,28 @@ jobs:
         with:
           images: sundaeswap/butane-oracle
 
+      - name: Cargo Build Cache
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: cargo-build-cache
+          key: ${{ runner.os }}-cargo-build-cache
+
+      - name: inject cargo-build-cache into docker
+        uses: reproducible-containers/buildkit-cache-dance@5b6db76d1da5c8b307d5d2e0706d266521b710de # v3.1.2
+        with:
+          cache-map: |
+            {
+              "cargo-build-cache": "/usr/local/cargo/registry"
+            }
+          skip-extraction: ${{ steps.cache.outputs.cache-hit }}
+
       - name: Build and push Docker image
         id: push
         uses: docker/build-push-action@3b5e8027fcad23fda98b2e3ac259d8d67585f671
         with:
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           context: .
           file: ./Dockerfile
           push: true
