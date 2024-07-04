@@ -1,21 +1,25 @@
-FROM lukemathwalker/cargo-chef:latest-rust-alpine as chef
+FROM lukemathwalker/cargo-chef:latest-rust-alpine AS base
+RUN apk add musl-dev sccache
+ENV RUSTC_WRAPPER=sccache SCCACHE_DIR=/sccache
 WORKDIR /app
-RUN apk add musl-dev
 
-FROM chef AS planner
+FROM base AS planner
 COPY src /app/src
 COPY Cargo.toml Cargo.lock config.base.yaml /app/
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
-  cargo chef prepare --recipe-path recipe.json
+    --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
+    cargo chef prepare --recipe-path recipe.json
 
-FROM chef AS builder 
+FROM base AS builder 
 COPY --from=planner /app/recipe.json recipe.json
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
-  cargo chef cook --release --recipe-path recipe.json
+    --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
+    cargo chef cook --release --recipe-path recipe.json
 COPY src /app/src
 COPY Cargo.toml Cargo.lock config.base.yaml /app/
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
-  cargo build --release --bin oracles
+    --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
+    cargo build --release --bin oracles
 
 FROM alpine
 WORKDIR /app
