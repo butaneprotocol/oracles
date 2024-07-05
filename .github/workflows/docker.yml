@@ -41,7 +41,9 @@ jobs:
           path: |
             cargo-registry-cache
             sccache-cache
-          key: ${{ runner.os }}-cargo-cache
+          key: ${{ runner.os }}-cargo-cache-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-cache
 
       - name: inject cargo caches into docker
         uses: reproducible-containers/buildkit-cache-dance@5b6db76d1da5c8b307d5d2e0706d266521b710de # v3.1.2
