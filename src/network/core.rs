@@ -302,12 +302,12 @@ impl Core {
         let mut sink: EncodeSink = EncodeSink::new(write.compat_write());
 
         let mut peer_id = None;
-        let (peer, secret) = match self
+        let (peer, peer_version, secret) = match self
             .handshake_incoming(&mut them, &mut peer_id, &mut stream, &mut sink)
             .await
             .context("error establishing shared secret")
         {
-            Ok((peer, secret)) => (peer, secret),
+            Ok((peer, peer_version, secret)) => (peer, peer_version, secret),
             Err(error) => {
                 warn!(them, "{:#}", error);
                 if let Some(peer_id) = peer_id {
@@ -337,8 +337,15 @@ impl Core {
             }
         };
 
-        self.handle_peer_connection(&peer, secret, sink, stream, &mut outgoing_message_rx)
-            .await;
+        self.handle_peer_connection(
+            &peer,
+            peer_version,
+            secret,
+            sink,
+            stream,
+            &mut outgoing_message_rx,
+        )
+        .await;
     }
 
     async fn handshake_incoming(
@@ -347,7 +354,7 @@ impl Core {
         their_id: &mut Option<NodeId>,
         stream: &mut DecodeStream,
         sink: &mut EncodeSink,
-    ) -> Result<(Peer, SharedSecret)> {
+    ) -> Result<(Peer, String, SharedSecret)> {
         let message = match stream.read().await.context("error waiting for handshake")? {
             Some(Message::OpenConnection(message)) => message,
             Some(Message::Disconnect(reason)) => {
@@ -381,6 +388,7 @@ impl Core {
                 "Other node is running a different oracle version"
             )
         }
+        let peer_version = message.version;
 
         // Confirm that they are who they say they are; they should have signed the ecdh nonce with their private key
         let signature: Signature = message.signature.into();
@@ -417,7 +425,7 @@ impl Core {
 
         let peer = peer.clone();
         let secret = ecdh_secret.diffie_hellman(&other_ecdh_public_key);
-        Ok((peer, secret))
+        Ok((peer, peer_version, secret))
     }
 
     async fn handle_outgoing_connection(
@@ -450,12 +458,12 @@ impl Core {
             let mut stream = DecodeStream::new(read.compat());
             let mut sink = EncodeSink::new(write.compat_write());
 
-            let secret = match self
+            let (peer_version, secret) = match self
                 .handshake_outgoing(&peer, &mut stream, &mut sink)
                 .await
                 .context("error establishing shared secret")
             {
-                Ok(secret) => secret,
+                Ok((peer_version, secret)) => (peer_version, secret),
                 Err(error) => {
                     warn!(them, "{:#}", error);
                     self.report_unhealthy_connection(&peer.id, &format!("{:#}", error));
@@ -470,8 +478,15 @@ impl Core {
 
             sleep_seconds = 1;
 
-            self.handle_peer_connection(&peer, secret, sink, stream, &mut outgoing_message_rx)
-                .await;
+            self.handle_peer_connection(
+                &peer,
+                peer_version,
+                secret,
+                sink,
+                stream,
+                &mut outgoing_message_rx,
+            )
+            .await;
         }
     }
 
@@ -499,7 +514,7 @@ impl Core {
         peer: &Peer,
         stream: &mut DecodeStream,
         sink: &mut EncodeSink,
-    ) -> Result<SharedSecret> {
+    ) -> Result<(String, SharedSecret)> {
         let them = peer.label.clone();
 
         // Generate our secret for ECDH
@@ -562,13 +577,15 @@ impl Core {
             .context("signature does not match public key")?;
 
         // And now the handshake is done and we have our secret
+        let peer_version = message.version;
         let secret = ecdh_secret.diffie_hellman(&other_ecdh_key);
-        Ok(secret)
+        Ok((peer_version, secret))
     }
 
     async fn handle_peer_connection(
         &self,
         peer: &Peer,
+        peer_version: String,
         secret: SharedSecret,
         mut sink: EncodeSink,
         mut stream: DecodeStream,
@@ -632,7 +649,7 @@ impl Core {
         };
 
         // Another sends occasional pings to this peer, triggering a disconnect if it doesn't respond.
-        let ping_task = handle_ping(&peer.label, send_sink.clone(), pong_source);
+        let ping_task = handle_ping(&peer.label, &peer_version, send_sink.clone(), pong_source);
 
         // One more task receives all incoming messages and forwards them to other channels.
         let incoming_message_tx = self.incoming_tx.clone();
@@ -717,9 +734,17 @@ impl Core {
 const PING_TIMEOUT: Duration = Duration::from_millis(5000);
 async fn handle_ping(
     them: &str,
+    peer_version: &str,
     sink: mpsc::Sender<Message>,
     mut pong_source: mpsc::Receiver<String>,
 ) -> String {
+    // Don't try pinging someone on a version too old to support pings.
+    // TODO: remove this check after all test nodes are upgraded
+    if peer_version.starts_with("0.7.") {
+        loop {
+            sleep(PING_TIMEOUT).await;
+        }
+    }
     loop {
         let ping_id = Uuid::new_v4().to_string();
         if let Err(e) = sink
