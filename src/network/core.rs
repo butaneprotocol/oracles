@@ -593,7 +593,7 @@ impl Core {
     ) {
         let them = peer.label.clone();
         info!(them, "Connected to {}", peer.id);
-        self.report_healthy_connection(&peer.id);
+        self.report_healthy_connection(&peer.id, &peer_version);
 
         // try to tell Raft that we are definitely connected
         let _ = self
@@ -718,10 +718,11 @@ impl Core {
             .try_send((peer.id.clone(), AppMessage::Raft(RaftMessage::Disconnect)));
     }
 
-    fn report_healthy_connection(&self, peer: &NodeId) {
+    fn report_healthy_connection(&self, peer: &NodeId, version: &str) {
         let origin = Origin::Peer(peer.clone());
         let status = HealthStatus::Healthy;
         self.health_sink.update(origin, status);
+        self.health_sink.track_peer_version(peer, version);
     }
 
     fn report_unhealthy_connection(&self, peer: &NodeId, reason: &str) {
