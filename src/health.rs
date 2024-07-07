@@ -20,22 +20,29 @@ pub enum Origin {
     Peer(NodeId),
 }
 
-pub struct HealthInfo {
-    pub origin: Origin,
-    pub status: HealthStatus,
-}
-
 pub enum HealthStatus {
     Healthy,
     Unhealthy(String),
 }
 
-type HealthSource = mpsc::UnboundedReceiver<HealthInfo>;
+enum HealthMessage {
+    Status {
+        origin: Origin,
+        status: HealthStatus,
+    },
+    PeerVersion {
+        peer: NodeId,
+        version: String,
+    },
+}
+
+type HealthSource = mpsc::UnboundedReceiver<HealthMessage>;
 #[derive(Clone)]
 struct HealthState {
     id: NodeId,
     peers: Vec<Peer>,
     leader_source: Arc<watch::Receiver<RaftLeader>>,
+    peer_versions: Arc<DashMap<NodeId, String>>,
     statuses: Arc<DashMap<Origin, HealthStatus>>,
 }
 impl HealthState {
@@ -45,21 +52,35 @@ impl HealthState {
 }
 
 #[derive(Clone)]
-pub struct HealthSink(Option<mpsc::UnboundedSender<HealthInfo>>);
+pub struct HealthSink(Option<mpsc::UnboundedSender<HealthMessage>>);
 impl HealthSink {
     pub fn noop() -> Self {
         Self(None)
     }
     pub fn update(&self, origin: Origin, status: HealthStatus) {
+        let message = HealthMessage::Status {
+            origin: origin.clone(),
+            status,
+        };
+        self.try_send(
+            message,
+            &format!("Could not update health for {:?}", origin),
+        );
+    }
+    pub fn track_peer_version(&self, peer: &NodeId, version: &str) {
+        let message = HealthMessage::PeerVersion {
+            peer: peer.clone(),
+            version: version.to_string(),
+        };
+        self.try_send(message, &format!("Could not track version for {}", peer));
+    }
+    fn try_send(&self, message: HealthMessage, error_desc: &str) {
         let Some(sink) = self.0.as_ref() else {
             return;
         };
-        let result = sink.send(HealthInfo {
-            origin: origin.clone(),
-            status,
-        });
+        let result = sink.send(message);
         if let Err(err) = result {
-            warn!("Could not update health for {:?}: {}", origin, err);
+            warn!("{}: {}", error_desc, err);
         }
     }
 }
@@ -91,6 +112,7 @@ impl HealthServer {
                     id: network_config.id.clone(),
                     leader_source: Arc::new(leader_source),
                     peers,
+                    peer_versions: Arc::new(DashMap::new()),
                     statuses,
                 },
             },
@@ -102,11 +124,19 @@ impl HealthServer {
         let mut set = JoinSet::new();
 
         let mut source = self.source;
+        let peer_versions = self.state.peer_versions.clone();
         let statuses = self.state.statuses.clone();
         set.spawn(
             async move {
                 while let Some(info) = source.recv().await {
-                    statuses.insert(info.origin, info.status);
+                    match info {
+                        HealthMessage::Status { origin, status } => {
+                            statuses.insert(origin, status);
+                        }
+                        HealthMessage::PeerVersion { peer, version } => {
+                            peer_versions.insert(peer, version);
+                        }
+                    };
                 }
             }
             .in_current_span(),
@@ -144,6 +174,7 @@ struct PeerStatus {
     pub name: String,
     pub id: NodeId,
     pub address: String,
+    pub version: Option<String>,
     pub connection: PeerConnectionStatus,
 }
 
@@ -185,10 +216,12 @@ async fn report_health(req: tide::Request<HealthState>) -> tide::Result {
             } else {
                 PeerConnectionStatus::WaitingForIncomingConnection
             };
+            let version = state.peer_versions.get(&p.id).map(|v| v.clone());
             PeerStatus {
                 name: p.label.clone(),
                 id: p.id.clone(),
                 address: p.address.clone(),
+                version,
                 connection: status,
             }
         })

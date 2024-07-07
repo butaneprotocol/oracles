@@ -25,6 +25,7 @@ use tokio::{
 };
 use tokio_util::compat::{Compat, TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use tracing::{error, info, trace, warn, Instrument};
+use uuid::Uuid;
 use x25519_dalek::{self as ecdh, SharedSecret};
 
 type Nonce = chacha20poly1305::aead::generic_array::GenericArray<u8, chacha20poly1305::consts::U24>;
@@ -122,6 +123,10 @@ enum Message {
     Application(#[n(0)] ApplicationMessage),
     #[n(3)]
     Disconnect(#[n(0)] String),
+    #[n(4)]
+    Ping(#[n(0)] String),
+    #[n(5)]
+    Pong(#[n(0)] String),
 }
 
 type OutgoingMessageReceiver = mpsc::Receiver<(Option<NodeId>, AppMessage)>;
@@ -297,12 +302,12 @@ impl Core {
         let mut sink: EncodeSink = EncodeSink::new(write.compat_write());
 
         let mut peer_id = None;
-        let (peer, secret) = match self
+        let (peer, peer_version, secret) = match self
             .handshake_incoming(&mut them, &mut peer_id, &mut stream, &mut sink)
             .await
             .context("error establishing shared secret")
         {
-            Ok((peer, secret)) => (peer, secret),
+            Ok((peer, peer_version, secret)) => (peer, peer_version, secret),
             Err(error) => {
                 warn!(them, "{:#}", error);
                 if let Some(peer_id) = peer_id {
@@ -332,8 +337,15 @@ impl Core {
             }
         };
 
-        self.handle_peer_connection(&peer, secret, sink, stream, &mut outgoing_message_rx)
-            .await;
+        self.handle_peer_connection(
+            &peer,
+            peer_version,
+            secret,
+            sink,
+            stream,
+            &mut outgoing_message_rx,
+        )
+        .await;
     }
 
     async fn handshake_incoming(
@@ -342,7 +354,7 @@ impl Core {
         their_id: &mut Option<NodeId>,
         stream: &mut DecodeStream,
         sink: &mut EncodeSink,
-    ) -> Result<(Peer, SharedSecret)> {
+    ) -> Result<(Peer, String, SharedSecret)> {
         let message = match stream.read().await.context("error waiting for handshake")? {
             Some(Message::OpenConnection(message)) => message,
             Some(Message::Disconnect(reason)) => {
@@ -376,6 +388,7 @@ impl Core {
                 "Other node is running a different oracle version"
             )
         }
+        let peer_version = message.version;
 
         // Confirm that they are who they say they are; they should have signed the ecdh nonce with their private key
         let signature: Signature = message.signature.into();
@@ -412,7 +425,7 @@ impl Core {
 
         let peer = peer.clone();
         let secret = ecdh_secret.diffie_hellman(&other_ecdh_public_key);
-        Ok((peer, secret))
+        Ok((peer, peer_version, secret))
     }
 
     async fn handle_outgoing_connection(
@@ -445,12 +458,12 @@ impl Core {
             let mut stream = DecodeStream::new(read.compat());
             let mut sink = EncodeSink::new(write.compat_write());
 
-            let secret = match self
+            let (peer_version, secret) = match self
                 .handshake_outgoing(&peer, &mut stream, &mut sink)
                 .await
                 .context("error establishing shared secret")
             {
-                Ok(secret) => secret,
+                Ok((peer_version, secret)) => (peer_version, secret),
                 Err(error) => {
                     warn!(them, "{:#}", error);
                     self.report_unhealthy_connection(&peer.id, &format!("{:#}", error));
@@ -465,8 +478,15 @@ impl Core {
 
             sleep_seconds = 1;
 
-            self.handle_peer_connection(&peer, secret, sink, stream, &mut outgoing_message_rx)
-                .await;
+            self.handle_peer_connection(
+                &peer,
+                peer_version,
+                secret,
+                sink,
+                stream,
+                &mut outgoing_message_rx,
+            )
+            .await;
         }
     }
 
@@ -494,7 +514,7 @@ impl Core {
         peer: &Peer,
         stream: &mut DecodeStream,
         sink: &mut EncodeSink,
-    ) -> Result<SharedSecret> {
+    ) -> Result<(String, SharedSecret)> {
         let them = peer.label.clone();
 
         // Generate our secret for ECDH
@@ -557,13 +577,15 @@ impl Core {
             .context("signature does not match public key")?;
 
         // And now the handshake is done and we have our secret
+        let peer_version = message.version;
         let secret = ecdh_secret.diffie_hellman(&other_ecdh_key);
-        Ok(secret)
+        Ok((peer_version, secret))
     }
 
     async fn handle_peer_connection(
         &self,
         peer: &Peer,
+        peer_version: String,
         secret: SharedSecret,
         mut sink: EncodeSink,
         mut stream: DecodeStream,
@@ -571,7 +593,7 @@ impl Core {
     ) {
         let them = peer.label.clone();
         info!(them, "Connected to {}", peer.id);
-        self.report_healthy_connection(&peer.id);
+        self.report_healthy_connection(&peer.id, &peer_version);
 
         // try to tell Raft that we are definitely connected
         let _ = self
@@ -584,7 +606,11 @@ impl Core {
         let chacha_key = Key::from(secret.to_bytes());
         let chacha = XChaCha20Poly1305::new(&chacha_key);
 
-        let send_chacha = chacha.clone();
+        let (pong_sink, pong_source) = mpsc::channel(10);
+        let (send_sink, mut send_source) = mpsc::channel(10);
+
+        // One task owns the outgoing sink, and sends all messages to the peer.
+        // We manage that task specially; we want it to finish last so we can try to tell our peer why we disconnected.
         let send_disconnect_tx = disconnect_tx.clone();
         let mut send_disconnect_rx = disconnect_rx.clone();
         let send_task = async move {
@@ -593,14 +619,13 @@ impl Core {
                     _ = send_disconnect_rx.changed() => {
                         break send_disconnect_rx.borrow().clone();
                     }
-                    message = outgoing_message_rx.recv() => {
+                    message = send_source.recv() => {
                         let Some(message) = message else {
                             break "Connection was closed".into();
                         };
-                        let message = ApplicationMessage::encrypt(message, &send_chacha);
-                        if let Err(e) = sink.write(Message::Application(message)).await {
-                            break format!("Failed to send message: {}", e);
-                        }
+                        if let Err(e) = sink.write(message).await {
+                            break format!("Failed to send ping: {}", e);
+                        };
                     }
                 }
             };
@@ -610,47 +635,80 @@ impl Core {
         }
         .in_current_span();
 
+        // One task takes messages from the rest of the app and forwards them to the send task
+        let send_outgoing_sink = send_sink.clone();
+        let send_outgoing_chacha = chacha.clone();
+        let send_outgoing_task = async move {
+            while let Some(message) = outgoing_message_rx.recv().await {
+                let message = ApplicationMessage::encrypt(message, &send_outgoing_chacha);
+                if let Err(e) = send_outgoing_sink.send(Message::Application(message)).await {
+                    return format!("Failed to send message: {}", e);
+                }
+            }
+            "Connection was closed".into()
+        };
+
+        // Another sends occasional pings to this peer, triggering a disconnect if it doesn't respond.
+        let ping_task = handle_ping(&peer.label, &peer_version, send_sink.clone(), pong_source);
+
+        // One more task receives all incoming messages and forwards them to other channels.
         let incoming_message_tx = self.incoming_tx.clone();
-        let mut recv_disconnect_rx = disconnect_rx.clone();
         let them = peer.label.clone();
         let recv_task = async move {
-            let disconnect_reason = loop {
-                select! {
-                    _ = recv_disconnect_rx.changed() => {
-                        break recv_disconnect_rx.borrow().clone();
+            loop {
+                match stream.read().await {
+                    Ok(Some(Message::Application(message))) => {
+                        let message = match message.decrypt(&chacha) {
+                            Ok(message) => message,
+                            Err(e) => break format!("Failed to decrypt incoming message: {:#}", e),
+                        };
+                        if let Err(e) = incoming_message_tx.send((peer.id.clone(), message)).await {
+                            break format!("Failed to process incoming message: {}", e);
+                        }
                     }
-                    incoming = stream.read() => match incoming {
-                        Ok(Some(Message::Application(message))) => {
-                            let message = match message.decrypt(&chacha) {
-                                Ok(message) => message,
-                                Err(e) => break format!("Failed to decrypt incoming message: {:#}", e)
-                            };
-                            if let Err(e) = incoming_message_tx.send((peer.id.clone(), message)).await {
-                                break format!("Failed to process incoming message: {}", e);
-                            }
-                        },
-                        Ok(Some(Message::Disconnect(reason))) => {
-                            warn!(them, "Peer has disconnected from us: {}", reason);
-                            return;
+                    Ok(Some(Message::Ping(ping_id))) => {
+                        if let Err(e) = send_sink.send(Message::Pong(ping_id)).await {
+                            break format!("Failed to send pong: {}", e);
+                        };
+                    }
+                    Ok(Some(Message::Pong(ping_id))) => {
+                        if let Err(e) = pong_sink.send(ping_id).await {
+                            break format!("Failed to process pong: {}", e);
                         }
-                        Ok(Some(other)) => {
-                            break format!("Expected Application message, got: {:?}", other);
-                        }
-                        Ok(None) => {
-                            trace!(them, "Expected Application message, got empty message");
-                            continue;
-                        }
-                        Err(e) => {
-                            break format!("Error reading from stream: {}", e);
-                        }
+                    }
+                    Ok(Some(Message::Disconnect(reason))) => {
+                        break format!("Peer has disconnected from us: {}", reason);
+                    }
+                    Ok(Some(other)) => {
+                        break format!("Expected Application message, got: {:?}", other);
+                    }
+                    Ok(None) => {
+                        trace!(them, "Expected Application message, got empty message");
+                        continue;
+                    }
+                    Err(e) => {
+                        break format!("Error reading from stream: {}", e);
                     }
                 }
+            }
+        };
+
+        // Each of these tasks will return with a "reason" that it disconnected,
+        // and we want to send that reason to our peer (if possible).
+        let mut process_disconnect_rx = disconnect_rx.clone();
+        let them = peer.label.clone();
+        let process_task = async move {
+            let disconnect_reason = select! {
+                _ = process_disconnect_rx.changed() => process_disconnect_rx.borrow().clone(),
+                reason = send_outgoing_task => reason,
+                reason = ping_task => reason,
+                reason = recv_task => reason
             };
-            warn!(them, "Ending receiver task: {}", disconnect_reason);
+            warn!(them, disconnect_reason, "disconnecting from peer");
             disconnect_tx.send_replace(disconnect_reason);
         };
 
-        join!(send_task, recv_task);
+        join!(send_task, process_task);
 
         self.report_unhealthy_connection(&peer.id, &disconnect_rx.borrow());
 
@@ -660,10 +718,11 @@ impl Core {
             .try_send((peer.id.clone(), AppMessage::Raft(RaftMessage::Disconnect)));
     }
 
-    fn report_healthy_connection(&self, peer: &NodeId) {
+    fn report_healthy_connection(&self, peer: &NodeId, version: &str) {
         let origin = Origin::Peer(peer.clone());
         let status = HealthStatus::Healthy;
         self.health_sink.update(origin, status);
+        self.health_sink.track_peer_version(peer, version);
     }
 
     fn report_unhealthy_connection(&self, peer: &NodeId, reason: &str) {
@@ -673,7 +732,47 @@ impl Core {
     }
 }
 
-async fn try_send_disconnect(them: &str, sink: &mut EncodeSink, reason: String) {
+const PING_TIMEOUT: Duration = Duration::from_millis(5000);
+async fn handle_ping(
+    them: &str,
+    peer_version: &str,
+    sink: mpsc::Sender<Message>,
+    mut pong_source: mpsc::Receiver<String>,
+) -> String {
+    // Don't try pinging someone on a version too old to support pings.
+    // TODO: remove this check after all test nodes are upgraded
+    if peer_version.starts_with("0.7.") {
+        loop {
+            sleep(PING_TIMEOUT).await;
+        }
+    }
+    loop {
+        let ping_id = Uuid::new_v4().to_string();
+        if let Err(e) = sink
+            .send_timeout(Message::Ping(ping_id.clone()), PING_TIMEOUT)
+            .await
+        {
+            break format!("could not send ping: {}", e);
+        };
+        trace!(them, ping_id, "ping sent");
+
+        match timeout(PING_TIMEOUT, pong_source.recv()).await {
+            Err(timeout) => return format!("could not receive ping response: {}", timeout),
+            Ok(None) => return "could not receive ping response: stream was closed".into(),
+            Ok(Some(pong_id)) => {
+                if pong_id == ping_id {
+                    trace!(them, ping_id, "pong received");
+                } else {
+                    break format!("received mismatched pong: {} != {}", pong_id, ping_id);
+                }
+            }
+        }
+
+        sleep(PING_TIMEOUT).await;
+    }
+}
+
+pub(super) async fn try_send_disconnect(them: &str, sink: &mut EncodeSink, reason: String) {
     match timeout(
         Duration::from_secs(3),
         sink.write(Message::Disconnect(reason)),
