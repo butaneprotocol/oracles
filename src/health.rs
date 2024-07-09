@@ -1,9 +1,10 @@
 use std::{collections::HashMap, sync::Arc};
 
+use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::get, Json, Router};
 use dashmap::DashMap;
 use serde::Serialize;
-use tide::Response;
 use tokio::{
+    net::TcpListener,
     sync::{mpsc, watch},
     task::JoinSet,
 };
@@ -142,17 +143,22 @@ impl HealthServer {
             .in_current_span(),
         );
 
-        let mut app = tide::with_state(self.state);
-        app.at("/health").get(report_health);
-        set.spawn(
-            async move {
-                info!("Health server starting on port {}", port);
-                if let Err(error) = app.listen(("0.0.0.0", port)).await {
-                    warn!("Health server stopped: {}", error);
-                };
+        let app = Router::new()
+            .route("/health", get(report_health))
+            .with_state(self.state);
+        set.spawn(async move {
+            info!("Health server starting on port {}", port);
+            let listener = match TcpListener::bind(("0.0.0.0", port)).await {
+                Ok(l) => l,
+                Err(error) => {
+                    warn!("Could not start health server: {}", error);
+                    return;
+                }
+            };
+            if let Err(error) = axum::serve(listener, app).await {
+                warn!("Health server stopped: {}", error);
             }
-            .in_current_span(),
-        );
+        });
 
         while let Some(res) = set.join_next().await {
             if let Err(error) = res {
@@ -187,9 +193,8 @@ struct ServerHealth {
     pub errors: HashMap<String, String>,
 }
 
-async fn report_health(req: tide::Request<HealthState>) -> tide::Result {
+async fn report_health(State(state): State<HealthState>) -> impl IntoResponse {
     let mut errors = HashMap::new();
-    let state = req.state();
     for entry in state.statuses.iter() {
         let (origin, status) = entry.pair();
         if let HealthStatus::Unhealthy(reason) = status {
@@ -240,10 +245,10 @@ async fn report_health(req: tide::Request<HealthState>) -> tide::Result {
         peers,
         errors,
     };
-    let status = if health.healthy { 200 } else { 503 };
-    let response = Response::builder(status)
-        .content_type("application/json")
-        .body(serde_json::to_string_pretty(&health)?)
-        .build();
-    Ok(response)
+    let status = if health.healthy {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+    (status, Json(health))
 }
