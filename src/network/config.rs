@@ -34,8 +34,8 @@ impl NetworkConfig {
         Ok(Self {
             id,
             private_key,
-            port: if config.network_port == 0 {
-                config.port
+            port: if let Some(port) = config.port {
+                port
             } else {
                 config.network_port
             },

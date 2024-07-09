@@ -9,7 +9,7 @@ use serde::Deserialize;
 #[derive(Debug, Deserialize)]
 pub struct OracleConfig {
     /// Deprecated, switch to network_port
-    pub port: u16,
+    pub port: Option<u16>,
 
     pub network_port: u16,
     pub health_port: u16,
