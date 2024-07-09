@@ -7,6 +7,7 @@ use axum::{
     routing::get,
     Json, Router,
 };
+use serde_json::json;
 use tokio::{net::TcpListener, sync::watch, task::JoinSet};
 use tracing::{info, warn};
 
@@ -71,7 +72,9 @@ impl IntoResponse for Response {
     fn into_response(self) -> axum::response::Response {
         match self {
             Response::Ok(entry) => (StatusCode::OK, Json(entry)).into_response(),
-            Response::NotFound => (StatusCode::NOT_FOUND, "Not Found").into_response(),
+            Response::NotFound => {
+                (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response()
+            }
         }
     }
 }
