@@ -13,7 +13,7 @@ use oracles::{
     signature_aggregator::SignatureAggregator,
 };
 use tokio::{
-    sync::{mpsc, watch},
+    sync::watch,
     task::{JoinError, JoinSet},
     time::sleep,
 };
@@ -59,15 +59,13 @@ impl Node {
 
         let price_aggregator = PriceAggregator::new(pa_tx, config.clone())?;
 
-        let (result_tx, result_rx) = mpsc::channel(10);
-
-        let signature_aggregator = if config.consensus {
-            SignatureAggregator::consensus(&config, &mut network, pa_rx, leader_rx, result_tx)?
+        let (signature_aggregator, payload_source) = if config.consensus {
+            SignatureAggregator::consensus(&config, &mut network, pa_rx, leader_rx)?
         } else {
-            SignatureAggregator::single(pa_rx, leader_rx, result_tx)?
+            SignatureAggregator::single(pa_rx, leader_rx)?
         };
 
-        let publisher = Publisher::new(result_rx)?;
+        let publisher = Publisher::new(payload_source)?;
 
         let raft = Raft::new(quorum, heartbeat, timeout, &mut network, leader_tx);
 
@@ -83,7 +81,7 @@ impl Node {
         })
     }
 
-    pub async fn start(mut self) -> Result<(), JoinError> {
+    pub async fn start(self) -> Result<(), JoinError> {
         let mut set = JoinSet::new();
 
         // Start up the health server
