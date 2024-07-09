@@ -5,18 +5,18 @@ use reqwest::Client;
 use tokio::sync::watch;
 use tracing::{info, trace, warn};
 
-use crate::{network::NodeId, signature_aggregator::SerializablePayload};
+use crate::{network::NodeId, signature_aggregator::Payload};
 
 const URL: &str = "https://infra-integration.silver-train-1la.pages.dev/api/updatePrices";
 
 pub struct Publisher {
     id: NodeId,
-    source: watch::Receiver<SerializablePayload>,
+    source: watch::Receiver<Payload>,
     client: Client,
 }
 
 impl Publisher {
-    pub fn new(id: &NodeId, source: watch::Receiver<SerializablePayload>) -> Result<Self> {
+    pub fn new(id: &NodeId, source: watch::Receiver<Payload>) -> Result<Self> {
         Ok(Self {
             id: id.clone(),
             source,

@@ -14,7 +14,7 @@ use tracing::warn;
 
 use crate::{
     network::NodeId,
-    price_feed::{serialize, Payload, PayloadEntry, PriceFeedEntry, SignedPriceFeed},
+    price_feed::{serialize, PriceFeedEntry, SignedEntries, SignedEntry, SignedPriceFeed},
     raft::RaftLeader,
 };
 
@@ -24,7 +24,7 @@ pub struct SingleSignatureAggregator {
     key: SecretKey,
     price_source: watch::Receiver<Vec<PriceFeedEntry>>,
     leader_source: watch::Receiver<RaftLeader>,
-    payload_sink: mpsc::Sender<(NodeId, Payload)>,
+    payload_sink: mpsc::Sender<(NodeId, SignedEntries)>,
 }
 
 impl SingleSignatureAggregator {
@@ -32,7 +32,7 @@ impl SingleSignatureAggregator {
         id: &NodeId,
         price_source: watch::Receiver<Vec<PriceFeedEntry>>,
         leader_source: watch::Receiver<RaftLeader>,
-        payload_sink: mpsc::Sender<(NodeId, Payload)>,
+        payload_sink: mpsc::Sender<(NodeId, SignedEntries)>,
     ) -> Result<Self> {
         Ok(Self {
             id: id.clone(),
@@ -62,7 +62,7 @@ impl SingleSignatureAggregator {
                 .into_iter()
                 .map(|p| self.sign_price_feed(p))
                 .collect();
-            let payload = Payload {
+            let payload = SignedEntries {
                 timestamp: SystemTime::now(),
                 entries: payload_entries,
             };
@@ -73,10 +73,10 @@ impl SingleSignatureAggregator {
         }
     }
 
-    fn sign_price_feed(&self, data: PriceFeedEntry) -> PayloadEntry {
+    fn sign_price_feed(&self, data: PriceFeedEntry) -> SignedEntry {
         let price_feed_bytes = serialize(&data.data);
         let signature = self.key.sign(price_feed_bytes);
-        PayloadEntry {
+        SignedEntry {
             price: data.price.to_f64().expect("Could not convert decimal"),
             data: SignedPriceFeed {
                 data: data.data.clone(),

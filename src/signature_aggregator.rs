@@ -19,14 +19,14 @@ use tracing::Instrument;
 use crate::{
     config::OracleConfig,
     network::{Network, NodeId},
-    price_feed::{Payload, PriceFeedEntry},
+    price_feed::{PriceFeedEntry, SignedEntries},
     raft::RaftLeader,
 };
 
 pub struct SignatureAggregator {
     implementation: SignatureAggregatorImplementation,
-    payload_source: mpsc::Receiver<(NodeId, Payload)>,
-    serializable_payload_sink: watch::Sender<SerializablePayload>,
+    signed_entries_source: mpsc::Receiver<(NodeId, SignedEntries)>,
+    payload_sink: watch::Sender<Payload>,
 }
 enum SignatureAggregatorImplementation {
     Single(SingleSignatureAggregator),
@@ -38,24 +38,23 @@ impl SignatureAggregator {
         id: &NodeId,
         price_source: watch::Receiver<Vec<PriceFeedEntry>>,
         leader_source: watch::Receiver<RaftLeader>,
-    ) -> Result<(Self, watch::Receiver<SerializablePayload>)> {
-        let (payload_sink, payload_source) = mpsc::channel(10);
-        let (serializable_payload_sink, mut serializable_payload_source) =
-            watch::channel(SerializablePayload {
-                publisher: id.clone(),
-                timestamp: SystemTime::now(),
-                entries: vec![],
-            });
-        serializable_payload_source.mark_unchanged();
+    ) -> Result<(Self, watch::Receiver<Payload>)> {
+        let (signed_entries_sink, signed_entries_source) = mpsc::channel(10);
+        let (payload_sink, mut payload_source) = watch::channel(Payload {
+            publisher: id.clone(),
+            timestamp: SystemTime::now(),
+            entries: vec![],
+        });
+        payload_source.mark_unchanged();
 
         let aggregator =
-            SingleSignatureAggregator::new(id, price_source, leader_source, payload_sink)?;
+            SingleSignatureAggregator::new(id, price_source, leader_source, signed_entries_sink)?;
         let aggregator = SignatureAggregator {
             implementation: SignatureAggregatorImplementation::Single(aggregator),
-            payload_source,
-            serializable_payload_sink,
+            signed_entries_source,
+            payload_sink,
         };
-        Ok((aggregator, serializable_payload_source))
+        Ok((aggregator, payload_source))
     }
 
     pub fn consensus(
@@ -63,15 +62,14 @@ impl SignatureAggregator {
         network: &mut Network,
         price_source: watch::Receiver<Vec<PriceFeedEntry>>,
         leader_source: watch::Receiver<RaftLeader>,
-    ) -> Result<(Self, watch::Receiver<SerializablePayload>)> {
-        let (payload_sink, payload_source) = mpsc::channel(10);
-        let (serializable_payload_sink, mut serializable_payload_source) =
-            watch::channel(SerializablePayload {
-                publisher: network.id.clone(),
-                timestamp: SystemTime::now(),
-                entries: vec![],
-            });
-        serializable_payload_source.mark_unchanged();
+    ) -> Result<(Self, watch::Receiver<Payload>)> {
+        let (signed_entries_sink, signed_entries_source) = mpsc::channel(10);
+        let (payload_sink, mut payload_source) = watch::channel(Payload {
+            publisher: network.id.clone(),
+            timestamp: SystemTime::now(),
+            entries: vec![],
+        });
+        payload_source.mark_unchanged();
 
         let aggregator = ConsensusSignatureAggregator::new(
             config,
@@ -79,14 +77,14 @@ impl SignatureAggregator {
             network.signer_channel(),
             price_source,
             leader_source,
-            payload_sink,
+            signed_entries_sink,
         )?;
         let aggregator = SignatureAggregator {
             implementation: SignatureAggregatorImplementation::Consensus(aggregator),
-            payload_source,
-            serializable_payload_sink,
+            signed_entries_source,
+            payload_sink,
         };
-        Ok((aggregator, serializable_payload_source))
+        Ok((aggregator, payload_source))
     }
 
     pub async fn run(self) {
@@ -99,7 +97,7 @@ impl SignatureAggregator {
         }
         .in_current_span();
 
-        let mut payload_source = self.payload_source;
+        let mut payload_source = self.signed_entries_source;
         let publish_task = async move {
             while let Some((publisher, payload)) = payload_source.recv().await {
                 let entries = payload
@@ -112,19 +110,19 @@ impl SignatureAggregator {
                             encoder.encode(data).expect("encoding is infallible");
                             encoder.into_writer()
                         };
-                        SerializablePayloadEntry {
+                        PayloadEntry {
                             synthetic: entry.data.data.synthetic.clone(),
                             price: entry.price,
                             payload: hex::encode(payload),
                         }
                     })
                     .collect();
-                let payload = SerializablePayload {
+                let payload = Payload {
                     publisher,
                     timestamp: payload.timestamp,
                     entries,
                 };
-                self.serializable_payload_sink.send_replace(payload);
+                self.payload_sink.send_replace(payload);
             }
         }
         .in_current_span();
@@ -137,15 +135,15 @@ impl SignatureAggregator {
 }
 
 #[derive(Serialize)]
-pub struct SerializablePayloadEntry {
+pub struct PayloadEntry {
     pub synthetic: String,
     pub price: f64,
     pub payload: String,
 }
 
 #[derive(Serialize)]
-pub struct SerializablePayload {
+pub struct Payload {
     pub publisher: NodeId,
     pub timestamp: SystemTime,
-    pub entries: Vec<SerializablePayloadEntry>,
+    pub entries: Vec<PayloadEntry>,
 }

@@ -24,8 +24,8 @@ use crate::{
     cbor::{CborIdentifier, CborSignatureShare, CborSigningCommitments, CborSigningPackage},
     network::{NetworkSender, NodeId},
     price_feed::{
-        deserialize, serialize, IntervalBound, IntervalBoundType, Payload, PayloadEntry, PriceFeed,
-        PriceFeedEntry, SignedPriceFeed, Validity,
+        deserialize, serialize, IntervalBound, IntervalBoundType, PriceFeed, PriceFeedEntry,
+        SignedEntries, SignedEntry, SignedPriceFeed, Validity,
     },
     raft::RaftLeader,
 };
@@ -57,7 +57,7 @@ pub enum SignerMessageData {
     #[n(3)]
     Sign(#[n(0)] Signature),
     #[n(4)]
-    Publish(#[n(0)] Payload),
+    Publish(#[n(0)] SignedEntries),
 }
 impl Display for SignerMessageData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -195,7 +195,7 @@ pub struct Signer {
     public_key: PublicKeyPackage,
     price_source: watch::Receiver<Vec<PriceFeedEntry>>,
     message_sink: NetworkSender<SignerMessage>,
-    payload_sink: mpsc::Sender<(NodeId, Payload)>,
+    signed_entries_sink: mpsc::Sender<(NodeId, SignedEntries)>,
     state: SignerState,
 }
 
@@ -206,7 +206,7 @@ impl Signer {
         public_key: PublicKeyPackage,
         price_source: watch::Receiver<Vec<PriceFeedEntry>>,
         message_sink: NetworkSender<SignerMessage>,
-        payload_sink: mpsc::Sender<(NodeId, Payload)>,
+        signed_entries_sink: mpsc::Sender<(NodeId, SignedEntries)>,
     ) -> Self {
         Self {
             id,
@@ -214,7 +214,7 @@ impl Signer {
             public_key,
             price_source,
             message_sink,
-            payload_sink,
+            signed_entries_sink,
             state: SignerState::Unknown,
         }
     }
@@ -510,7 +510,7 @@ impl Signer {
         let payload_entries = price_data
             .iter()
             .zip(signatures)
-            .map(|(price, signature)| PayloadEntry {
+            .map(|(price, signature)| SignedEntry {
                 price: price.price.to_f64().expect("Could not convert decimal"),
                 data: SignedPriceFeed {
                     data: price.data.clone(),
@@ -519,12 +519,12 @@ impl Signer {
             })
             .collect();
 
-        let payload = Payload {
+        let payload = SignedEntries {
             timestamp: SystemTime::now(),
             entries: payload_entries,
         };
 
-        self.payload_sink
+        self.signed_entries_sink
             .send((self.id.clone(), payload.clone()))
             .await
             .context("Could not publish signed result")?;
@@ -543,8 +543,8 @@ impl Signer {
         Ok(())
     }
 
-    async fn publish(&mut self, publisher: NodeId, payload: Payload) -> Result<()> {
-        self.payload_sink
+    async fn publish(&mut self, publisher: NodeId, payload: SignedEntries) -> Result<()> {
+        self.signed_entries_sink
             .send((publisher, payload))
             .await
             .context("Could not publish signed result")?;
@@ -647,7 +647,7 @@ mod tests {
 
     use crate::{
         network::{NetworkReceiver, NodeId, TestNetwork},
-        price_feed::{IntervalBound, Payload, PriceFeed, PriceFeedEntry, Validity},
+        price_feed::{IntervalBound, PriceFeed, PriceFeedEntry, SignedEntries, Validity},
         raft::RaftLeader,
         signature_aggregator::signer::SignerMessage,
     };
@@ -679,7 +679,7 @@ mod tests {
     ) -> Result<(
         Vec<SignerOrchestrator>,
         TestNetwork<SignerMessage>,
-        mpsc::Receiver<(NodeId, Payload)>,
+        mpsc::Receiver<(NodeId, SignedEntries)>,
     )> {
         let rng = thread_rng();
         let (shares, public_key) =

@@ -23,15 +23,15 @@ pub fn deserialize<'a, T: Decode<'a, ()>>(bytes: &'a [u8]) -> Result<T, minicbor
 }
 
 #[derive(Decode, Encode, Clone, Debug)]
-pub struct Payload {
+pub struct SignedEntries {
     #[n(0)]
     pub timestamp: SystemTime,
     #[n(1)]
-    pub entries: Vec<PayloadEntry>,
+    pub entries: Vec<SignedEntry>,
 }
 
 #[derive(Decode, Encode, Clone, Debug)]
-pub struct PayloadEntry {
+pub struct SignedEntry {
     #[n(0)]
     pub price: f64,
     #[n(1)]
