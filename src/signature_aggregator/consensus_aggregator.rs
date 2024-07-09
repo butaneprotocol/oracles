@@ -4,10 +4,7 @@ use anyhow::{anyhow, Result};
 use frost_ed25519::keys::{KeyPackage, PublicKeyPackage};
 use tokio::{
     select,
-    sync::{
-        mpsc::{self, Sender},
-        watch::Receiver,
-    },
+    sync::{mpsc, watch},
     time::sleep,
 };
 use tracing::{warn, Instrument};
@@ -16,7 +13,7 @@ use crate::{
     config::OracleConfig,
     keys,
     network::{NetworkChannel, NetworkReceiver, NodeId},
-    price_feed::{PriceFeedEntry, SignedPriceFeedEntry},
+    price_feed::{Payload, PriceFeedEntry},
     raft::RaftLeader,
 };
 
@@ -24,7 +21,7 @@ use super::signer::{Signer, SignerEvent, SignerMessage};
 
 pub struct ConsensusSignatureAggregator {
     signer: Signer,
-    leader_source: Receiver<RaftLeader>,
+    leader_source: watch::Receiver<RaftLeader>,
     message_source: NetworkReceiver<SignerMessage>,
 }
 impl ConsensusSignatureAggregator {
@@ -32,9 +29,9 @@ impl ConsensusSignatureAggregator {
         config: &OracleConfig,
         id: NodeId,
         channel: NetworkChannel<SignerMessage>,
-        price_source: Receiver<Vec<PriceFeedEntry>>,
-        leader_source: Receiver<RaftLeader>,
-        signed_price_sink: Sender<Vec<SignedPriceFeedEntry>>,
+        price_source: watch::Receiver<Vec<PriceFeedEntry>>,
+        leader_source: watch::Receiver<RaftLeader>,
+        payload_sink: mpsc::Sender<(NodeId, Payload)>,
     ) -> Result<Self> {
         let (key, public_key) = Self::load_keys(config)?;
         let (outgoing_message_sink, message_source) = channel.split();
@@ -44,7 +41,7 @@ impl ConsensusSignatureAggregator {
             public_key,
             price_source,
             outgoing_message_sink,
-            signed_price_sink,
+            payload_sink,
         );
 
         Ok(Self {

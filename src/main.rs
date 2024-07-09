@@ -62,10 +62,10 @@ impl Node {
         let (signature_aggregator, payload_source) = if config.consensus {
             SignatureAggregator::consensus(&config, &mut network, pa_rx, leader_rx)?
         } else {
-            SignatureAggregator::single(pa_rx, leader_rx)?
+            SignatureAggregator::single(&network.id, pa_rx, leader_rx)?
         };
 
-        let publisher = Publisher::new(payload_source)?;
+        let publisher = Publisher::new(&network.id, payload_source)?;
 
         let raft = Raft::new(quorum, heartbeat, timeout, &mut network, leader_tx);
 

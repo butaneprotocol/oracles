@@ -2,7 +2,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use minicbor::{
     data::{Tag, Type},
-    decode, Decode, Decoder, Encoder,
+    decode,
+    encode::{self, Write},
+    Decode, Decoder, Encode, Encoder,
 };
 use num_bigint::BigUint;
 use pallas_primitives::conway::{BigInt, Constr, PlutusData};
@@ -20,19 +22,29 @@ pub fn deserialize<'a, T: Decode<'a, ()>>(bytes: &'a [u8]) -> Result<T, minicbor
     decoder.decode()
 }
 
+#[derive(Decode, Encode, Clone, Debug)]
+pub struct Payload {
+    #[n(0)]
+    pub timestamp: SystemTime,
+    #[n(1)]
+    pub entries: Vec<PayloadEntry>,
+}
+
+#[derive(Decode, Encode, Clone, Debug)]
+pub struct PayloadEntry {
+    #[n(0)]
+    pub price: f64,
+    #[n(1)]
+    pub data: SignedPriceFeed,
+}
+
 #[derive(Clone, Debug)]
 pub struct PriceFeedEntry {
     pub price: Decimal,
     pub data: PriceFeed,
 }
 
-#[derive(Debug)]
-pub struct SignedPriceFeedEntry {
-    pub price: Decimal,
-    pub data: SignedPriceFeed,
-}
-
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct SignedPriceFeed {
     pub data: PriceFeed,
     pub signature: Vec<u8>,
@@ -44,6 +56,28 @@ impl From<&SignedPriceFeed> for PlutusData {
             encoded_data,
             PlutusData::BoundedBytes(value.signature.clone().into()),
         ])
+    }
+}
+impl<C> Encode<C> for SignedPriceFeed {
+    fn encode<W: Write>(
+        &self,
+        e: &mut Encoder<W>,
+        ctx: &mut C,
+    ) -> Result<(), encode::Error<W::Error>> {
+        let plutus_data: PlutusData = self.into();
+        plutus_data.encode(e, ctx)
+    }
+}
+impl<'b, C> Decode<'b, C> for SignedPriceFeed {
+    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, decode::Error> {
+        decode_struct_begin(d)?;
+
+        let data = d.decode_with(ctx)?;
+        let signature = d.bytes()?.to_vec();
+
+        decode_struct_end(d)?;
+
+        Ok(SignedPriceFeed { data, signature })
     }
 }
 

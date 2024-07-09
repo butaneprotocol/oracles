@@ -1,37 +1,45 @@
-use std::{env, time::Duration};
+use std::{
+    env,
+    time::{Duration, SystemTime},
+};
 
 use anyhow::Result;
 use pallas_crypto::key::ed25519::SecretKey;
+use rust_decimal::prelude::ToPrimitive;
 use tokio::{
-    sync::{mpsc::Sender, watch::Receiver},
+    sync::{mpsc, watch},
     time::sleep,
 };
 use tracing::warn;
 
 use crate::{
-    price_feed::{serialize, PriceFeedEntry, SignedPriceFeed, SignedPriceFeedEntry},
+    network::NodeId,
+    price_feed::{serialize, Payload, PayloadEntry, PriceFeedEntry, SignedPriceFeed},
     raft::RaftLeader,
 };
 
 #[derive(Clone)]
 pub struct SingleSignatureAggregator {
+    id: NodeId,
     key: SecretKey,
-    price_source: Receiver<Vec<PriceFeedEntry>>,
-    leader_source: Receiver<RaftLeader>,
-    signed_price_sink: Sender<Vec<SignedPriceFeedEntry>>,
+    price_source: watch::Receiver<Vec<PriceFeedEntry>>,
+    leader_source: watch::Receiver<RaftLeader>,
+    payload_sink: mpsc::Sender<(NodeId, Payload)>,
 }
 
 impl SingleSignatureAggregator {
     pub fn new(
-        price_source: Receiver<Vec<PriceFeedEntry>>,
-        leader_source: Receiver<RaftLeader>,
-        signed_price_sink: Sender<Vec<SignedPriceFeedEntry>>,
+        id: &NodeId,
+        price_source: watch::Receiver<Vec<PriceFeedEntry>>,
+        leader_source: watch::Receiver<RaftLeader>,
+        payload_sink: mpsc::Sender<(NodeId, Payload)>,
     ) -> Result<Self> {
         Ok(Self {
+            id: id.clone(),
             key: decode_key()?,
             price_source,
             leader_source,
-            signed_price_sink,
+            payload_sink,
         })
     }
 
@@ -50,24 +58,28 @@ impl SingleSignatureAggregator {
                     .collect::<Vec<PriceFeedEntry>>()
             };
 
-            let signed_prices = prices
+            let payload_entries = prices
                 .into_iter()
                 .map(|p| self.sign_price_feed(p))
                 .collect();
+            let payload = Payload {
+                timestamp: SystemTime::now(),
+                entries: payload_entries,
+            };
 
-            if let Err(error) = self.signed_price_sink.send(signed_prices).await {
+            if let Err(error) = self.payload_sink.send((self.id.clone(), payload)).await {
                 warn!("Could not send signed prices: {}", error);
             }
         }
     }
 
-    fn sign_price_feed(&self, data: PriceFeedEntry) -> SignedPriceFeedEntry {
+    fn sign_price_feed(&self, data: PriceFeedEntry) -> PayloadEntry {
         let price_feed_bytes = serialize(&data.data);
         let signature = self.key.sign(price_feed_bytes);
-        SignedPriceFeedEntry {
-            price: data.price,
+        PayloadEntry {
+            price: data.price.to_f64().expect("Could not convert decimal"),
             data: SignedPriceFeed {
-                data: data.data,
+                data: data.data.clone(),
                 signature: signature.as_ref().to_vec(),
             },
         }

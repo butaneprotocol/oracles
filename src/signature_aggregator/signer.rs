@@ -1,6 +1,7 @@
 use std::{
     collections::BTreeMap,
     fmt::{self, Display},
+    time::SystemTime,
 };
 
 use anyhow::{anyhow, Context, Result};
@@ -14,7 +15,8 @@ use frost_ed25519::{
 use futures::future::join_all;
 use minicbor::{Decode, Encode};
 use rand::thread_rng;
-use tokio::sync::{mpsc::Sender, watch::Receiver};
+use rust_decimal::prelude::ToPrimitive;
+use tokio::sync::{mpsc, watch};
 use tracing::{info, instrument, warn};
 use uuid::Uuid;
 
@@ -22,8 +24,8 @@ use crate::{
     cbor::{CborIdentifier, CborSignatureShare, CborSigningCommitments, CborSigningPackage},
     network::{NetworkSender, NodeId},
     price_feed::{
-        deserialize, serialize, IntervalBound, IntervalBoundType, PriceFeed, PriceFeedEntry,
-        SignedPriceFeed, SignedPriceFeedEntry, Validity,
+        deserialize, serialize, IntervalBound, IntervalBoundType, Payload, PayloadEntry, PriceFeed,
+        PriceFeedEntry, SignedPriceFeed, Validity,
     },
     raft::RaftLeader,
 };
@@ -54,6 +56,8 @@ pub enum SignerMessageData {
     RequestSignature(#[n(0)] SignatureRequest),
     #[n(3)]
     Sign(#[n(0)] Signature),
+    #[n(4)]
+    Publish(#[n(0)] Payload),
 }
 impl Display for SignerMessageData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -62,6 +66,7 @@ impl Display for SignerMessageData {
             Self::Commit(_) => f.write_str("Commit"),
             Self::RequestSignature(_) => f.write_str("RequestSignature"),
             Self::Sign(_) => f.write_str("Sign"),
+            Self::Publish(_) => f.write_str("Publish"),
         }
     }
 }
@@ -188,9 +193,9 @@ pub struct Signer {
     id: NodeId,
     key: KeyPackage,
     public_key: PublicKeyPackage,
-    price_source: Receiver<Vec<PriceFeedEntry>>,
+    price_source: watch::Receiver<Vec<PriceFeedEntry>>,
     message_sink: NetworkSender<SignerMessage>,
-    signed_price_sink: Sender<Vec<SignedPriceFeedEntry>>,
+    payload_sink: mpsc::Sender<(NodeId, Payload)>,
     state: SignerState,
 }
 
@@ -199,9 +204,9 @@ impl Signer {
         id: NodeId,
         key: KeyPackage,
         public_key: PublicKeyPackage,
-        price_source: Receiver<Vec<PriceFeedEntry>>,
+        price_source: watch::Receiver<Vec<PriceFeedEntry>>,
         message_sink: NetworkSender<SignerMessage>,
-        signed_price_sink: Sender<Vec<SignedPriceFeedEntry>>,
+        payload_sink: mpsc::Sender<(NodeId, Payload)>,
     ) -> Self {
         Self {
             id,
@@ -209,7 +214,7 @@ impl Signer {
             public_key,
             price_source,
             message_sink,
-            signed_price_sink,
+            payload_sink,
             state: SignerState::Unknown,
         }
     }
@@ -253,6 +258,9 @@ impl Signer {
                 }
                 SignerMessageData::Sign(signature) => {
                     self.process_signature(round, signature).await?;
+                }
+                SignerMessageData::Publish(payload) => {
+                    self.publish(from, payload).await?;
                 }
             },
         }
@@ -499,11 +507,11 @@ impl Signer {
             signatures.push(signature.serialize()?);
         }
 
-        let payload = price_data
+        let payload_entries = price_data
             .iter()
             .zip(signatures)
-            .map(|(price, signature)| SignedPriceFeedEntry {
-                price: price.price,
+            .map(|(price, signature)| PayloadEntry {
+                price: price.price.to_f64().expect("Could not convert decimal"),
                 data: SignedPriceFeed {
                     data: price.data.clone(),
                     signature,
@@ -511,13 +519,35 @@ impl Signer {
             })
             .collect();
 
-        self.signed_price_sink
-            .send(payload)
+        let payload = Payload {
+            timestamp: SystemTime::now(),
+            entries: payload_entries,
+        };
+
+        self.payload_sink
+            .send((self.id.clone(), payload.clone()))
             .await
             .context("Could not publish signed result")?;
 
+        // Notify our peers that we've agreed to sign the payload
+        self.message_sink
+            .broadcast(SignerMessage {
+                round,
+                data: SignerMessageData::Publish(payload),
+            })
+            .await;
+
         // And now that we've signed something, wait for the next round
         self.state = SignerState::Leader(LeaderState::Ready);
+
+        Ok(())
+    }
+
+    async fn publish(&mut self, publisher: NodeId, payload: Payload) -> Result<()> {
+        self.payload_sink
+            .send((publisher, payload))
+            .await
+            .context("Could not publish signed result")?;
 
         Ok(())
     }
@@ -617,7 +647,7 @@ mod tests {
 
     use crate::{
         network::{NetworkReceiver, NodeId, TestNetwork},
-        price_feed::{IntervalBound, PriceFeed, PriceFeedEntry, SignedPriceFeedEntry, Validity},
+        price_feed::{IntervalBound, Payload, PriceFeed, PriceFeedEntry, Validity},
         raft::RaftLeader,
         signature_aggregator::signer::SignerMessage,
     };
@@ -649,7 +679,7 @@ mod tests {
     ) -> Result<(
         Vec<SignerOrchestrator>,
         TestNetwork<SignerMessage>,
-        mpsc::Receiver<Vec<SignedPriceFeedEntry>>,
+        mpsc::Receiver<(NodeId, Payload)>,
     )> {
         let rng = thread_rng();
         let (shares, public_key) =

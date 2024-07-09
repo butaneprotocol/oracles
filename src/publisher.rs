@@ -5,18 +5,20 @@ use reqwest::Client;
 use tokio::sync::watch;
 use tracing::{info, trace, warn};
 
-use crate::signature_aggregator::SignedPayload;
+use crate::{network::NodeId, signature_aggregator::SerializablePayload};
 
 const URL: &str = "https://infra-integration.silver-train-1la.pages.dev/api/updatePrices";
 
 pub struct Publisher {
-    source: watch::Receiver<SignedPayload>,
+    id: NodeId,
+    source: watch::Receiver<SerializablePayload>,
     client: Client,
 }
 
 impl Publisher {
-    pub fn new(source: watch::Receiver<SignedPayload>) -> Result<Self> {
+    pub fn new(id: &NodeId, source: watch::Receiver<SerializablePayload>) -> Result<Self> {
         Ok(Self {
+            id: id.clone(),
             source,
             client: Client::builder().build()?,
         })
@@ -28,8 +30,15 @@ impl Publisher {
         let mut source = self.source;
         let client = self.client;
         while source.changed().await.is_ok() {
-            let payload =
-                serde_json::to_string(&source.borrow_and_update().entries).expect("infallible");
+            let payload = {
+                let latest = source.borrow_and_update();
+                let payload = serde_json::to_string(&latest.entries).expect("infallible");
+                if latest.publisher != self.id {
+                    info!(%latest.publisher, payload, "someone else is publishing a payload");
+                    continue;
+                }
+                payload
+            };
             info!(payload, "publishing payload");
 
             if !DEBUG {
