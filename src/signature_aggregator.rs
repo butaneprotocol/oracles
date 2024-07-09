@@ -134,14 +134,14 @@ impl SignatureAggregator {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct PayloadEntry {
     pub synthetic: String,
     pub price: f64,
     pub payload: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct Payload {
     pub publisher: NodeId,
     pub timestamp: SystemTime,

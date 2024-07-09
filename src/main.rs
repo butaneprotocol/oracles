@@ -6,6 +6,7 @@ use oracles::{
     config::{load_config, LogConfig, OracleConfig},
     dkg,
     health::{HealthServer, HealthSink},
+    api::APIServer,
     network::{Network, NetworkConfig},
     price_aggregator::PriceAggregator,
     publisher::Publisher,
@@ -30,6 +31,7 @@ struct Args {
 }
 
 struct Node {
+    api_server: APIServer,
     health_server: HealthServer,
     health_sink: HealthSink,
     network: Network,
@@ -65,11 +67,14 @@ impl Node {
             SignatureAggregator::single(&network.id, pa_rx, leader_rx)?
         };
 
+        let api_server = APIServer::new(payload_source.clone());
+
         let publisher = Publisher::new(&network.id, payload_source)?;
 
         let raft = Raft::new(quorum, heartbeat, timeout, &mut network, leader_tx);
 
         Ok(Node {
+            api_server,
             health_server,
             health_sink,
             network,
@@ -89,6 +94,14 @@ impl Node {
         set.spawn(
             async move {
                 self.health_server.run(health_port).await;
+            }
+            .in_current_span(),
+        );
+
+        let api_port = self.config.api_port;
+        set.spawn(
+            async move {
+                self.api_server.run(api_port).await;
             }
             .in_current_span(),
         );

@@ -2,6 +2,7 @@ pub mod apis;
 pub mod cbor;
 pub mod config;
 pub mod dkg;
+pub mod api;
 pub mod health;
 pub mod keys;
 pub mod network;

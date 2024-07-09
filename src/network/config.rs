@@ -34,7 +34,7 @@ impl NetworkConfig {
         Ok(Self {
             id,
             private_key,
-            port: config.port,
+            port: if config.network_port == 0 { config.port } else { config.network_port },
             peers,
         })
     }
