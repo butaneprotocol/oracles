@@ -3,6 +3,7 @@ use std::{str::FromStr, sync::Arc, time::Duration};
 use anyhow::Result;
 use clap::Parser;
 use oracles::{
+    api::APIServer,
     config::{load_config, LogConfig, OracleConfig},
     dkg,
     health::{HealthServer, HealthSink},
@@ -13,7 +14,7 @@ use oracles::{
     signature_aggregator::SignatureAggregator,
 };
 use tokio::{
-    sync::{mpsc, watch},
+    sync::watch,
     task::{JoinError, JoinSet},
     time::sleep,
 };
@@ -30,6 +31,7 @@ struct Args {
 }
 
 struct Node {
+    api_server: APIServer,
     health_server: HealthServer,
     health_sink: HealthSink,
     network: Network,
@@ -59,19 +61,20 @@ impl Node {
 
         let price_aggregator = PriceAggregator::new(pa_tx, config.clone())?;
 
-        let (result_tx, result_rx) = mpsc::channel(10);
-
-        let signature_aggregator = if config.consensus {
-            SignatureAggregator::consensus(&config, &mut network, pa_rx, leader_rx, result_tx)?
+        let (signature_aggregator, payload_source) = if config.consensus {
+            SignatureAggregator::consensus(&config, &mut network, pa_rx, leader_rx)?
         } else {
-            SignatureAggregator::single(pa_rx, leader_rx, result_tx)?
+            SignatureAggregator::single(&network.id, pa_rx, leader_rx)?
         };
 
-        let publisher = Publisher::new(result_rx)?;
+        let api_server = APIServer::new(payload_source.clone());
+
+        let publisher = Publisher::new(&network.id, payload_source)?;
 
         let raft = Raft::new(quorum, heartbeat, timeout, &mut network, leader_tx);
 
         Ok(Node {
+            api_server,
             health_server,
             health_sink,
             network,
@@ -83,7 +86,7 @@ impl Node {
         })
     }
 
-    pub async fn start(mut self) -> Result<(), JoinError> {
+    pub async fn start(self) -> Result<(), JoinError> {
         let mut set = JoinSet::new();
 
         // Start up the health server
@@ -91,6 +94,14 @@ impl Node {
         set.spawn(
             async move {
                 self.health_server.run(health_port).await;
+            }
+            .in_current_span(),
+        );
+
+        let api_port = self.config.api_port;
+        set.spawn(
+            async move {
+                self.api_server.run(api_port).await;
             }
             .in_current_span(),
         );

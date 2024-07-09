@@ -1,3 +1,4 @@
+pub mod api;
 pub mod apis;
 pub mod cbor;
 pub mod config;

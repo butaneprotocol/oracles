@@ -8,8 +8,12 @@ use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 pub struct OracleConfig {
-    pub port: u16,
+    /// Deprecated, switch to network_port
+    pub port: Option<u16>,
+
+    pub network_port: u16,
     pub health_port: u16,
+    pub api_port: u16,
     pub consensus: bool,
     pub peers: Vec<PeerConfig>,
     pub heartbeat_ms: u64,
