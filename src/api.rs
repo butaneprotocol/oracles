@@ -1,11 +1,7 @@
 use std::sync::Arc;
 
 use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::get, Json, Router};
-use tokio::{
-    net::TcpListener,
-    sync::watch,
-    task::JoinSet,
-};
+use tokio::{net::TcpListener, sync::watch, task::JoinSet};
 use tracing::{info, warn};
 
 use crate::signature_aggregator::Payload;
@@ -19,13 +15,11 @@ pub struct APIServer {
     state: APIState,
 }
 impl APIServer {
-    pub fn new(
-        payload_source: watch::Receiver<Payload>,
-    ) -> Self {
+    pub fn new(payload_source: watch::Receiver<Payload>) -> Self {
         Self {
-            state: APIState{
+            state: APIState {
                 payload_source: Arc::new(payload_source),
-            }
+            },
         }
     }
 

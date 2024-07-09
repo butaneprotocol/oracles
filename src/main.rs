@@ -3,10 +3,10 @@ use std::{str::FromStr, sync::Arc, time::Duration};
 use anyhow::Result;
 use clap::Parser;
 use oracles::{
+    api::APIServer,
     config::{load_config, LogConfig, OracleConfig},
     dkg,
     health::{HealthServer, HealthSink},
-    api::APIServer,
     network::{Network, NetworkConfig},
     price_aggregator::PriceAggregator,
     publisher::Publisher,
