@@ -104,6 +104,7 @@ impl ConsensusSignatureAggregator {
         // Forward any events to the signer
         let handle_events_task = async move {
             while let Some(event) = event_source.recv().await {
+                warn!("Received event in CSA: {:#?}", event);
                 signer.process(event).await;
             }
         }

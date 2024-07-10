@@ -245,7 +245,6 @@ impl Core {
                     vec![(id, sender)]
                 }
                 None => {
-                    warn!("Broadcasting message to {} nodes", outgoing_message_txs.len());
                     // Broadcasting to all nodes
                     outgoing_message_txs.iter().collect()
                 }
@@ -663,6 +662,7 @@ impl Core {
                             Ok(message) => message,
                             Err(e) => break format!("Failed to decrypt incoming message: {:#}", e),
                         };
+                        warn!("Received message in Core from {}: {:#?}", them, message);
                         if let Err(e) = incoming_message_tx.send((peer.id.clone(), message)).await {
                             break format!("Failed to process incoming message: {}", e);
                         }

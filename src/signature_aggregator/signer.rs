@@ -93,7 +93,7 @@ pub struct Signature {
     pub signatures: Vec<CborSignatureShare>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum SignerEvent {
     RoundStarted,
     Message(NodeId, SignerMessage),
