@@ -205,7 +205,7 @@ impl Core {
 
             // Each peer gets a receiver that tells it when the app wants to send a message.
             // Build a map of these receivers for incoming connections.
-            let (outgoing_message_tx, outgoing_message_rx) = mpsc::channel(10);
+            let (outgoing_message_tx, outgoing_message_rx) = mpsc::channel(2000);
             outgoing_message_txs.insert(peer.id.clone(), outgoing_message_tx);
             outgoing_message_rxs.insert(peer.id.clone(), Mutex::new(outgoing_message_rx));
         }
@@ -593,12 +593,8 @@ impl Core {
     ) {
         let them = peer.label.clone();
         info!(them, "Connected to {}", peer.id);
+        self.report_connected(peer).await;
         self.report_healthy_connection(&peer.id, &peer_version);
-
-        // try to tell Raft that we are definitely connected
-        let _ = self
-            .incoming_tx
-            .try_send((peer.id.clone(), AppMessage::Raft(RaftMessage::Connect)));
 
         let (disconnect_tx, disconnect_rx) = watch::channel(String::new());
         let disconnect_tx = Arc::new(disconnect_tx);
@@ -711,11 +707,33 @@ impl Core {
         join!(send_task, process_task);
 
         self.report_unhealthy_connection(&peer.id, &disconnect_rx.borrow());
+        self.report_disconnected(peer).await;
+    }
 
-        // try to warn raft that we aren't connected anymore
-        let _ = self
+    async fn report_connected(&self, peer: &Peer) {
+        if let Err(e) = self
             .incoming_tx
-            .try_send((peer.id.clone(), AppMessage::Raft(RaftMessage::Disconnect)));
+            .send((peer.id.clone(), AppMessage::Raft(RaftMessage::Connect)))
+            .await
+        {
+            warn!(
+                them = peer.label,
+                "Could not notify raft that peer has connected: {}", e
+            );
+        }
+    }
+
+    async fn report_disconnected(&self, peer: &Peer) {
+        if let Err(e) = self
+            .incoming_tx
+            .send((peer.id.clone(), AppMessage::Raft(RaftMessage::Disconnect)))
+            .await
+        {
+            warn!(
+                them = peer.label,
+                "Could not notify raft that peer has disconnected: {}", e
+            );
+        }
     }
 
     fn report_healthy_connection(&self, peer: &NodeId, version: &str) {
