@@ -245,6 +245,7 @@ impl Core {
                     vec![(id, sender)]
                 }
                 None => {
+                    warn!("Broadcasting message to {} nodes", outgoing_message_txs.len());
                     // Broadcasting to all nodes
                     outgoing_message_txs.iter().collect()
                 }
