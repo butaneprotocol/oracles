@@ -130,10 +130,10 @@ impl Network {
 }
 
 fn create_channel<T>(holder: &mut Option<MpscPair<T>>) -> NetworkChannel<T> {
-    let (outgoing_tx, outgoing_rx) = mpsc::channel(10);
+    let (outgoing_tx, outgoing_rx) = mpsc::channel(2000);
     let sender = NetworkSender::new(outgoing_tx);
 
-    let (incoming_tx, incoming_rx) = mpsc::channel(10);
+    let (incoming_tx, incoming_rx) = mpsc::channel(2000);
     let receiver = NetworkReceiver::new(incoming_rx);
 
     holder.replace((incoming_tx, outgoing_rx));
