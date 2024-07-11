@@ -33,6 +33,8 @@ pub struct OracleConfig {
 pub struct LogConfig {
     pub json: bool,
     pub level: String,
+    pub otlp_endpoint: Option<String>,
+    pub uptrace_dsn: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -1,12 +1,13 @@
-use std::{str::FromStr, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use anyhow::Result;
 use clap::Parser;
 use oracles::{
     api::APIServer,
-    config::{load_config, LogConfig, OracleConfig},
+    config::{load_config, OracleConfig},
     dkg,
     health::{HealthServer, HealthSink},
+    instrumentation,
     network::{Network, NetworkConfig},
     price_aggregator::PriceAggregator,
     publisher::Publisher,
@@ -18,8 +19,7 @@ use tokio::{
     task::{JoinError, JoinSet},
     time::sleep,
 };
-use tracing::{info, info_span, Instrument, Level, Span};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, FmtSubscriber};
+use tracing::{info, trace_span, Instrument};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -190,30 +190,6 @@ where
     }
 }
 
-fn init_tracing(config: &LogConfig) -> Result<Span> {
-    let level = Level::from_str(&config.level)?;
-    let env_filter = EnvFilter::builder()
-        .with_default_directive(level.into())
-        .from_env_lossy();
-    if config.json {
-        FmtSubscriber::builder()
-            .json()
-            .with_max_level(level)
-            .finish()
-            .with(env_filter)
-            .init();
-    } else {
-        FmtSubscriber::builder()
-            .compact()
-            .with_max_level(level)
-            .finish()
-            .with(env_filter)
-            .init();
-    }
-    let span = info_span!("oracles", version = env!("CARGO_PKG_VERSION"));
-    Ok(span)
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
@@ -223,7 +199,15 @@ async fn main() -> Result<()> {
 
     let config = Arc::new(load_config(&args.config_file)?);
 
-    let span = init_tracing(&config.logs)?;
+    let dispatch = instrumentation::init_tracing(&config.logs)?;
+    tracing::dispatcher::set_global_default(dispatch.clone())?;
+    tracing::dispatcher::with_default(&dispatch, || {
+        let span = trace_span!("oracles", version = env!("CARGO_PKG_VERSION"));
+        span.in_scope(|| info!("Node starting..."));
+    });
+    let _guard = tracing::dispatcher::set_default(&dispatch);
+
+    let span = trace_span!("oracles", version = env!("CARGO_PKG_VERSION"));
     span.in_scope(|| info!("Node starting..."));
 
     if config.keygen.enabled {
