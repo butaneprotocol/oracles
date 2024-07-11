@@ -65,6 +65,7 @@ fn init_tracer(endpoint: &str, uptrace_dsn: Option<&String>) -> Result<Tracer> {
                 .tonic()
                 .with_endpoint(endpoint)
                 .with_timeout(Duration::from_secs(5))
+                .with_tls_config(Default::default())
                 .with_metadata(metadata),
         )
         .with_batch_config(
