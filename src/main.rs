@@ -8,7 +8,7 @@ use oracles::{
     dkg,
     health::{HealthServer, HealthSink},
     instrumentation,
-    network::{Network, NetworkConfig},
+    network::Network,
     price_aggregator::PriceAggregator,
     publisher::Publisher,
     raft::{Raft, RaftLeader},
@@ -19,7 +19,7 @@ use tokio::{
     task::{JoinError, JoinSet},
     time::sleep,
 };
-use tracing::{info, info_span, Instrument};
+use tracing::{info, info_span};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -44,18 +44,17 @@ struct Node {
 
 impl Node {
     pub fn new(config: Arc<OracleConfig>) -> Result<Self> {
-        let heartbeat = config.heartbeat();
-        let timeout = config.timeout();
+        let heartbeat = config.heartbeat.clone();
+        let timeout = config.timeout.clone();
 
-        let network_config = NetworkConfig::load(&config)?;
         // quorum is set to a majority of expected nodes (which includes ourself!)
-        let quorum = ((network_config.peers.len() + 1) / 2) + 1;
+        let quorum = ((config.network.peers.len() + 1) / 2) + 1;
 
         let (leader_tx, leader_rx) = watch::channel(RaftLeader::Unknown);
-        let (health_server, health_sink) = HealthServer::new(&network_config, leader_rx.clone());
+        let (health_server, health_sink) = HealthServer::new(&config.network, leader_rx.clone());
 
         // Construct a peer-to-peer network that can connect to peers, and dispatch messages to the correct state machine
-        let mut network = Network::new(&network_config, health_sink.clone());
+        let mut network = Network::new(&config.network, health_sink.clone());
 
         let (pa_tx, pa_rx) = watch::channel(vec![]);
 
@@ -91,59 +90,38 @@ impl Node {
 
         // Start up the health server
         let health_port = self.config.health_port;
-        set.spawn(
-            async move {
-                self.health_server.run(health_port).await;
-            }
-            .in_current_span(),
-        );
+        set.spawn(async move {
+            self.health_server.run(health_port).await;
+        });
 
         let api_port = self.config.api_port;
-        set.spawn(
-            async move {
-                self.api_server.run(api_port).await;
-            }
-            .in_current_span(),
-        );
+        set.spawn(async move {
+            self.api_server.run(api_port).await;
+        });
 
         // Spawn the abstract raft state machine, which internally uses network to maintain a Raft consensus
-        set.spawn(
-            async move {
-                self.raft.handle_messages().await;
-            }
-            .in_current_span(),
-        );
+        set.spawn(async move {
+            self.raft.handle_messages().await;
+        });
 
         // Then spawn the peer to peer network, which will maintain a connection to each peer, and dispatch messages to the correct state machine
-        set.spawn(
-            async move {
-                self.network.listen().await.unwrap();
-            }
-            .in_current_span(),
-        );
+        set.spawn(async move {
+            self.network.listen().await.unwrap();
+        });
 
         let health = self.health_sink;
-        set.spawn(
-            async move {
-                self.price_aggregator.run(&health).await;
-            }
-            .in_current_span(),
-        );
+        set.spawn(async move {
+            self.price_aggregator.run(&health).await;
+        });
 
         let signature_aggregator = self.signature_aggregator;
-        set.spawn(
-            async move {
-                signature_aggregator.run().await;
-            }
-            .in_current_span(),
-        );
+        set.spawn(async move {
+            signature_aggregator.run().await;
+        });
 
-        set.spawn(
-            async move {
-                self.publisher.run().await;
-            }
-            .in_current_span(),
-        );
+        set.spawn(async move {
+            self.publisher.run().await;
+        });
 
         // Then wait for all of them to complete (they won't)
         while let Some(res) = set.join_next().await {
@@ -171,13 +149,10 @@ where
         let mut set = JoinSet::new();
 
         let node = node_factory()?;
-        set.spawn(
-            async move {
-                // Runs forever
-                node.start().await.unwrap();
-            }
-            .in_current_span(),
-        );
+        set.spawn(async move {
+            // Runs forever
+            node.start().await.unwrap();
+        });
 
         set.spawn_blocking(|| {
             // runs until we get input
@@ -185,7 +160,7 @@ where
             std::io::stdin().read_line(&mut line).unwrap();
         });
 
-        set.join_next().in_current_span().await.unwrap()?;
+        set.join_next().await.unwrap()?;
         set.abort_all();
         info!("Node shutting down for {:?}", restart_after);
         sleep(restart_after).await;
@@ -201,13 +176,11 @@ async fn main() -> Result<()> {
 
     let config = Arc::new(load_config(&args.config_file)?);
 
-    let (_guard, span) = instrumentation::init_tracing(&config.logs)?;
-    span.in_scope(|| {
-        info_span!("init").in_scope(|| info!("Node starting..."));
-    });
+    let _guard = instrumentation::init_tracing(&config.logs)?;
+    info_span!("init").in_scope(|| info!(foo = "bar", "Node starting..."));
 
     if config.keygen.enabled {
-        dkg::run(&config).instrument(span).await?;
+        dkg::run(&config).await?;
         return Ok(());
     }
 
@@ -215,12 +188,10 @@ async fn main() -> Result<()> {
 
     // Start the node, which will spawn a bunch of threads and infinite loop
     if debug {
-        let restart_after = config.timeout() + Duration::from_secs(1);
-        run_debug(node_factory, restart_after)
-            .instrument(span)
-            .await?;
+        let restart_after = config.timeout + Duration::from_secs(1);
+        run_debug(node_factory, restart_after).await?;
     } else {
-        run(node_factory).instrument(span).await?;
+        run(node_factory).await?;
     }
     Ok(())
 }

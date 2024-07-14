@@ -8,10 +8,11 @@ use tokio::{
     sync::{mpsc, watch},
     task::JoinSet,
 };
-use tracing::{info, warn, Instrument};
+use tracing::{info, warn};
 
 use crate::{
-    network::{NetworkConfig, NodeId, Peer},
+    config::{NetworkConfig, Peer},
+    network::NodeId,
     raft::RaftLeader,
 };
 
@@ -127,21 +128,18 @@ impl HealthServer {
         let mut source = self.source;
         let peer_versions = self.state.peer_versions.clone();
         let statuses = self.state.statuses.clone();
-        set.spawn(
-            async move {
-                while let Some(info) = source.recv().await {
-                    match info {
-                        HealthMessage::Status { origin, status } => {
-                            statuses.insert(origin, status);
-                        }
-                        HealthMessage::PeerVersion { peer, version } => {
-                            peer_versions.insert(peer, version);
-                        }
-                    };
-                }
+        set.spawn(async move {
+            while let Some(info) = source.recv().await {
+                match info {
+                    HealthMessage::Status { origin, status } => {
+                        statuses.insert(origin, status);
+                    }
+                    HealthMessage::PeerVersion { peer, version } => {
+                        peer_versions.insert(peer, version);
+                    }
+                };
             }
-            .in_current_span(),
-        );
+        });
 
         let app = Router::new()
             .route("/health", get(report_health))

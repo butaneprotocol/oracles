@@ -1,20 +1,17 @@
-use std::{str::FromStr, time::Duration};
+use std::time::Duration;
 
 use anyhow::Result;
+use opentelemetry::KeyValue;
 use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_sdk::{
-    resource::{EnvResourceDetector, SdkProvidedResourceDetector, TelemetryResourceDetector},
-    trace::Tracer,
-    Resource,
-};
+use opentelemetry_sdk::{trace::Tracer, Resource};
 use tonic::metadata::MetadataMap;
-use tracing::{info_span, Dispatch, Level, Span, Subscriber};
+use tracing::{Dispatch, Level, Subscriber};
 use tracing_subscriber::{
-    fmt, layer::SubscriberExt, registry::LookupSpan, util::SubscriberInitExt, EnvFilter, Layer,
-    Registry,
+    filter::Targets, fmt, layer::SubscriberExt, registry::LookupSpan, util::SubscriberInitExt,
+    Layer, Registry,
 };
 
-use crate::config::LogConfig;
+use crate::{config::LogConfig, network::NodeId};
 
 pub struct TracingGuard;
 impl Drop for TracingGuard {
@@ -23,8 +20,8 @@ impl Drop for TracingGuard {
     }
 }
 
-pub fn init_tracing(config: &LogConfig) -> Result<(TracingGuard, Span)> {
-    let filter = get_env_filter(config)?;
+pub fn init_tracing(config: &LogConfig) -> Result<TracingGuard> {
+    let filter = get_filter(config);
     if config.json {
         let subscriber = Registry::default().with(fmt::layer().json().with_filter(filter));
         init_opentelemetry(config, subscriber)?;
@@ -33,10 +30,7 @@ pub fn init_tracing(config: &LogConfig) -> Result<(TracingGuard, Span)> {
         init_opentelemetry(config, subscriber)?;
     }
 
-    Ok((
-        TracingGuard,
-        info_span!("oracles", version = env!("CARGO_PKG_VERSION")),
-    ))
+    Ok(TracingGuard)
 }
 
 fn init_opentelemetry<S>(config: &LogConfig, subscriber: S) -> Result<()>
@@ -45,8 +39,13 @@ where
 {
     match config.otlp_endpoint.as_ref() {
         Some(endpoint) => {
-            let filter = get_env_filter(config)?;
-            let tracer = init_tracer(endpoint, config.uptrace_dsn.as_ref())?;
+            let filter = get_filter(config);
+            let tracer = init_tracer(
+                &config.id,
+                &config.label,
+                endpoint,
+                config.uptrace_dsn.as_ref(),
+            )?;
             let layer = tracing_opentelemetry::layer()
                 .with_tracer(tracer)
                 .with_filter(filter);
@@ -59,26 +58,28 @@ where
     Ok(())
 }
 
-fn get_env_filter(config: &LogConfig) -> Result<EnvFilter> {
-    let level = Level::from_str(&config.level)?;
-    Ok(EnvFilter::builder()
-        .with_default_directive(level.into())
-        .from_env_lossy())
+fn get_filter(config: &LogConfig) -> Targets {
+    Targets::new()
+        .with_default(Level::INFO)
+        .with_target("oracles", config.level)
 }
 
-fn init_tracer(endpoint: &str, uptrace_dsn: Option<&String>) -> Result<Tracer> {
+fn init_tracer(
+    id: &NodeId,
+    name: &str,
+    endpoint: &str,
+    uptrace_dsn: Option<&String>,
+) -> Result<Tracer> {
     opentelemetry::global::set_error_handler(|error| {
         tracing::error!("OpenTelemetry error occurred: {:#}", anyhow::anyhow!(error),);
     })?;
 
-    let resource = Resource::from_detectors(
-        Duration::from_secs(0),
-        vec![
-            Box::new(SdkProvidedResourceDetector),
-            Box::new(EnvResourceDetector::new()),
-            Box::new(TelemetryResourceDetector),
-        ],
-    );
+    let resource = Resource::default().merge(&Resource::new([
+        KeyValue::new("service.name", name.to_string()),
+        KeyValue::new("service.namespace", "oracles"),
+        KeyValue::new("service.instance.id", id.to_string()),
+        KeyValue::new("service.version", env!("CARGO_PKG_VERSION")),
+    ]));
 
     let mut metadata = MetadataMap::with_capacity(1);
     if let Some(dsn) = uptrace_dsn {
