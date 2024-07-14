@@ -19,7 +19,7 @@ use tokio::{
     task::{JoinError, JoinSet},
     time::sleep,
 };
-use tracing::{info, trace_span, Instrument};
+use tracing::{info, info_span, Instrument};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -159,7 +159,7 @@ where
     F: Fn() -> Result<Node>,
 {
     let node = node_factory()?;
-    node.start().in_current_span().await?;
+    node.start().await?;
     Ok(())
 }
 
@@ -171,10 +171,13 @@ where
         let mut set = JoinSet::new();
 
         let node = node_factory()?;
-        set.spawn(async move {
-            // Runs forever
-            node.start().in_current_span().await.unwrap();
-        });
+        set.spawn(
+            async move {
+                // Runs forever
+                node.start().await.unwrap();
+            }
+            .in_current_span(),
+        );
 
         set.spawn_blocking(|| {
             // runs until we get input
@@ -194,21 +197,14 @@ where
 async fn main() -> Result<()> {
     let args = Args::parse();
 
-    // Let us specify an ID on the command line, for easier debugging, otherwise generate a UUID
     let debug = args.debug;
 
     let config = Arc::new(load_config(&args.config_file)?);
 
-    let dispatch = instrumentation::init_tracing(&config.logs)?;
-    tracing::dispatcher::set_global_default(dispatch.clone())?;
-    tracing::dispatcher::with_default(&dispatch, || {
-        let span = trace_span!("oracles", version = env!("CARGO_PKG_VERSION"));
-        span.in_scope(|| info!("Node starting..."));
+    let (_guard, span) = instrumentation::init_tracing(&config.logs)?;
+    span.in_scope(|| {
+        info_span!("init").in_scope(|| info!("Node starting..."));
     });
-    let _guard = tracing::dispatcher::set_default(&dispatch);
-
-    let span = trace_span!("oracles", version = env!("CARGO_PKG_VERSION"));
-    span.in_scope(|| info!("Node starting..."));
 
     if config.keygen.enabled {
         dkg::run(&config).instrument(span).await?;
