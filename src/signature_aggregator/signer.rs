@@ -155,6 +155,15 @@ impl Display for LeaderState {
         }
     }
 }
+impl LeaderState {
+    fn round(&self) -> &str {
+        match self {
+            Self::Ready => "",
+            Self::CollectingCommitments { round, .. } => round,
+            Self::CollectingSignatures { round, .. } => round,
+        }
+    }
+}
 
 enum FollowerState {
     Ready,
@@ -174,6 +183,15 @@ impl Display for FollowerState {
         }
     }
 }
+impl FollowerState {
+    fn round(&self) -> &str {
+        match self {
+            Self::Ready => "",
+            Self::Committed { round, .. } => round,
+        }
+    }
+}
+
 enum SignerState {
     Leader(LeaderState),
     Follower(NodeId, FollowerState),
@@ -185,6 +203,15 @@ impl Display for SignerState {
             Self::Leader(state) => state.fmt(f),
             Self::Follower(_, state) => state.fmt(f),
             Self::Unknown => f.write_str("{role=Unknown}"),
+        }
+    }
+}
+impl SignerState {
+    pub fn round(&self) -> &str {
+        match self {
+            Self::Leader(state) => state.round(),
+            Self::Follower(_, state) => state.round(),
+            Self::Unknown => "",
         }
     }
 }
@@ -219,7 +246,7 @@ impl Signer {
         }
     }
 
-    #[instrument(skip_all, fields(state = %self.state))]
+    #[instrument(skip_all, fields(round = self.state.round(), state = %self.state))]
     pub async fn process(&mut self, event: SignerEvent) {
         info!("Processing event: {}", event);
         match self.do_process(event.clone()).await {

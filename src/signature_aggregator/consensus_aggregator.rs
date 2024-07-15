@@ -7,7 +7,7 @@ use tokio::{
     sync::{mpsc, watch},
     time::sleep,
 };
-use tracing::{warn, Instrument};
+use tracing::{info_span, warn};
 
 use crate::{
     config::OracleConfig,
@@ -63,42 +63,42 @@ impl ConsensusSignatureAggregator {
                 if !matches!(*leader.borrow(), RaftLeader::Myself) {
                     continue;
                 }
+                let span = info_span!("new_round");
                 if let Err(err) = sink.send(SignerEvent::RoundStarted).await {
-                    warn!("Failed to start new round: {}", err);
+                    span.in_scope(|| warn!("Failed to start new round: {}", err));
                     break;
                 }
             }
-        }
-        .in_current_span();
+        };
 
         // Any time the current leader changes, send the signer a "leader changed" event
         let mut leader = self.leader_source;
         let sink = event_sink.clone();
         let leader_changed_task = async move {
             while let Ok(()) = leader.changed().await {
+                let span = info_span!("new_round");
                 let new_leader = leader.borrow().clone();
                 if let Err(err) = sink.send(SignerEvent::LeaderChanged(new_leader)).await {
-                    warn!("Failed to update leader: {}", err);
+                    span.in_scope(|| warn!("Failed to update leader: {}", err));
                     break;
                 }
             }
-        }
-        .in_current_span();
+        };
 
         // Any time someone sends us a message, send the signer a "message" event
         let mut message_source = self.message_source;
         let message_received_task = async move {
             while let Some(incoming) = message_source.recv().await {
+                let span = info_span!("message_received");
                 if let Err(err) = event_sink
                     .send(SignerEvent::Message(incoming.from, incoming.data))
                     .await
                 {
-                    warn!("Failed to receive message: {}", err);
+                    span.in_scope(|| warn!("Failed to receive message: {}", err));
                     break;
                 }
             }
-        }
-        .in_current_span();
+        };
 
         let mut signer = self.signer;
         // Forward any events to the signer
@@ -106,8 +106,7 @@ impl ConsensusSignatureAggregator {
             while let Some(event) = event_source.recv().await {
                 signer.process(event).await;
             }
-        }
-        .in_current_span();
+        };
 
         select! {
             res = new_round_task => res,
