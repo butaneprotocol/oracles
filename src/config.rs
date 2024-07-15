@@ -300,7 +300,7 @@ pub fn load_config(config_files: &[String]) -> Result<OracleConfig> {
         .add_source(Environment::with_prefix("ORACLE_"))
         .build()?;
     let raw: RawOracleConfig = config.try_deserialize()?;
-    Ok(raw.try_into()?)
+    raw.try_into()
 }
 
 pub fn compute_node_id(public_key: &VerifyingKey) -> NodeId {

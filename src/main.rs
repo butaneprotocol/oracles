@@ -44,8 +44,8 @@ struct Node {
 
 impl Node {
     pub fn new(config: Arc<OracleConfig>) -> Result<Self> {
-        let heartbeat = config.heartbeat.clone();
-        let timeout = config.timeout.clone();
+        let heartbeat = config.heartbeat;
+        let timeout = config.timeout;
 
         // quorum is set to a majority of expected nodes (which includes ourself!)
         let quorum = ((config.network.peers.len() + 1) / 2) + 1;
