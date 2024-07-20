@@ -17,7 +17,7 @@ use minicbor::{Decode, Encode};
 use rand::thread_rng;
 use rust_decimal::prelude::ToPrimitive;
 use tokio::sync::{mpsc, watch};
-use tracing::{info, instrument, warn};
+use tracing::{info, info_span, instrument, warn, Instrument, Span};
 use uuid::Uuid;
 
 use crate::{
@@ -117,12 +117,14 @@ enum LeaderState {
     Ready,
     CollectingCommitments {
         round: String,
+        round_span: Span,
         price_data: Vec<PriceFeedEntry>,
         commitments: Vec<Commitment>,
         my_nonces: Vec<SigningNonces>,
     },
     CollectingSignatures {
         round: String,
+        round_span: Span,
         price_data: Vec<PriceFeedEntry>,
         signatures: Vec<Signature>,
         packages: Vec<SigningPackage>,
@@ -169,6 +171,7 @@ enum FollowerState {
     Ready,
     Committed {
         round: String,
+        round_span: Span,
         nonces: Vec<SigningNonces>,
     },
 }
@@ -296,13 +299,18 @@ impl Signer {
 
     async fn request_commitments(&mut self) -> Result<()> {
         let round = Uuid::new_v4().to_string();
-
         let price_data = self.price_source.borrow().clone();
-        info!(
+
+        let round_span = info_span!(
+            "signer_round",
+            role = "leader",
             round,
-            ?price_data,
-            "Beginning round of signature collection, requesting commitments"
+            price_data = format!("{:#?}", price_data)
         );
+        round_span.follows_from(Span::current());
+
+        round_span
+            .in_scope(|| info!("Beginning round of signature collection, requesting commitments"));
 
         // request other folks commit
         self.message_sink
@@ -316,6 +324,7 @@ impl Signer {
         let (my_nonces, commitment) = self.commit(price_data.len());
         self.state = SignerState::Leader(LeaderState::CollectingCommitments {
             round,
+            round_span,
             price_data,
             commitments: vec![commitment],
             my_nonces,
@@ -325,11 +334,20 @@ impl Signer {
     }
 
     async fn send_commitment(&mut self, round: String) -> Result<()> {
-        let SignerState::Follower(leader_id, _) = &self.state else {
+        let SignerState::Follower(leader_id, old_state) = &self.state else {
             // we're not a follower ATM
             return Ok(());
         };
         let leader_id = leader_id.clone();
+        let round_span = match old_state {
+            FollowerState::Committed {
+                round: curr_round,
+                round_span,
+                ..
+            } if curr_round == &round => round_span.clone(),
+            _ => info_span!("signer_round", role = "follower", round),
+        };
+        round_span.in_scope(|| info!("Sending commitment for this round"));
 
         // Send our commitment
         let commitment_count = self.price_source.borrow().len();
@@ -347,7 +365,11 @@ impl Signer {
         // And wait to be asked to sign
         self.state = SignerState::Follower(
             leader_id.clone(),
-            FollowerState::Committed { round, nonces },
+            FollowerState::Committed {
+                round,
+                round_span,
+                nonces,
+            },
         );
 
         Ok(())
@@ -361,6 +383,7 @@ impl Signer {
     ) -> Result<()> {
         let SignerState::Leader(LeaderState::CollectingCommitments {
             round: curr_round,
+            round_span,
             price_data,
             commitments,
             my_nonces,
@@ -373,6 +396,7 @@ impl Signer {
             // Commitment from a different round
             return Ok(());
         }
+        let round_span = round_span.clone();
 
         if commitments
             .iter()
@@ -401,6 +425,13 @@ impl Signer {
             }
         }
 
+        round_span.in_scope(|| {
+            info!(
+                ?recipients,
+                "Collected enough commitments, time to collect signatures"
+            )
+        });
+
         let price_data = price_data.clone();
         // Request signatures from all the committees
         let messages: Vec<Vec<u8>> = price_data.iter().map(|e| serialize(&e.data)).collect();
@@ -428,6 +459,7 @@ impl Signer {
 
         self.state = SignerState::Leader(LeaderState::CollectingSignatures {
             round,
+            round_span,
             price_data,
             signatures: vec![my_signature],
             packages,
@@ -440,10 +472,11 @@ impl Signer {
         let packages: Vec<SigningPackage> =
             request.packages.into_iter().map(|i| i.into()).collect();
         let SignerState::Follower(
-            leader_id,
+            _,
             FollowerState::Committed {
                 round: curr_round,
-                nonces,
+                round_span,
+                ..
             },
         ) = &self.state
         else {
@@ -454,7 +487,33 @@ impl Signer {
             // Signature requested from a different round
             return Ok(());
         };
+        let round_span = round_span.clone();
 
+        match self
+            .do_send_signature(round, &packages)
+            .instrument(round_span.clone())
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(error) => {
+                round_span.in_scope(|| warn!(?error));
+                Err(error)
+            }
+        }
+    }
+
+    // separated into its own method so that we can easily instrument the error
+    async fn do_send_signature(
+        &mut self,
+        round: String,
+        packages: &[SigningPackage],
+    ) -> Result<()> {
+        let SignerState::Follower(leader_id, FollowerState::Committed { nonces, .. }) = &self.state
+        else {
+            return Ok(());
+        };
+
+        // TODO: price_data should be fixed at commitment time
         let price_data = self.price_source.borrow().clone();
 
         // Make sure we are OK with signing this
@@ -472,7 +531,7 @@ impl Signer {
         }
 
         // Send our signature back to the leader
-        let signature = self.sign(&packages, nonces)?;
+        let signature = self.sign(packages, nonces)?;
         self.message_sink
             .send(
                 leader_id.clone(),
@@ -482,6 +541,7 @@ impl Signer {
                 },
             )
             .await;
+        info!("Sent signature for this round");
 
         // and vibe until we get back into the signature flow
         self.state = SignerState::Follower(leader_id.clone(), FollowerState::Ready);
@@ -492,6 +552,7 @@ impl Signer {
     async fn process_signature(&mut self, round: String, signature: Signature) -> Result<()> {
         let SignerState::Leader(LeaderState::CollectingSignatures {
             round: curr_round,
+            round_span,
             price_data,
             signatures,
             packages,
@@ -518,6 +579,9 @@ impl Signer {
             // still collecting
             return Ok(());
         }
+
+        round_span
+            .in_scope(|| info!("Collected all signatures, signing and completing this round"));
 
         // We've finally collected all the signatures we need! Now just aggregate them
         let mut signature_maps = vec![BTreeMap::new(); price_data.len()];
