@@ -119,7 +119,7 @@ enum LeaderState {
         round: String,
         round_span: Span,
         price_data: Vec<PriceFeedEntry>,
-        commitments: Vec<Commitment>,
+        commitments: Vec<(NodeId, Commitment)>,
         my_nonces: Vec<SigningNonces>,
     },
     CollectingSignatures {
@@ -137,8 +137,10 @@ impl Display for LeaderState {
             Self::CollectingCommitments {
                 round, commitments, ..
             } => {
-                let committed: Vec<Identifier> =
-                    commitments.iter().map(|c| c.identifier.into()).collect();
+                let committed: Vec<Identifier> = commitments
+                    .iter()
+                    .map(|(_, c)| c.identifier.into())
+                    .collect();
                 f.write_fmt(format_args!(
                     "{{role=Leader,state=CollectingCommitments,round={},committed={:?}}}",
                     round, committed
@@ -326,7 +328,7 @@ impl Signer {
             round,
             round_span,
             price_data,
-            commitments: vec![commitment],
+            commitments: vec![(self.id.clone(), commitment)],
             my_nonces,
         });
 
@@ -400,12 +402,12 @@ impl Signer {
 
         if commitments
             .iter()
-            .any(|c| c.identifier == commitment.identifier)
+            .any(|(_, c)| c.identifier == commitment.identifier)
         {
             // we saw this one
             return Ok(());
         }
-        commitments.push(commitment);
+        commitments.push((from, commitment));
 
         if commitments.len() < (*self.key.min_signers() as usize) {
             // still collecting
@@ -415,9 +417,9 @@ impl Signer {
         let mut commitment_maps = vec![BTreeMap::new(); price_data.len()];
         let mut recipients = vec![];
         // time to transition to signing
-        for commitment in commitments {
-            if from != self.id {
-                recipients.push(from.clone());
+        for (signer, commitment) in commitments {
+            if *signer != self.id {
+                recipients.push(signer.clone());
             }
             for (idx, c) in commitment.commitments.iter().enumerate() {
                 let comm: SigningCommitments = (*c).into();
@@ -734,7 +736,10 @@ mod tests {
     use num_bigint::BigUint;
     use rand::thread_rng;
     use rust_decimal::{prelude::FromPrimitive, Decimal};
-    use tokio::sync::{mpsc, watch};
+    use tokio::sync::{
+        mpsc::{self, error::TryRecvError},
+        watch,
+    };
 
     use crate::{
         network::{NetworkReceiver, NodeId, TestNetwork},
@@ -835,6 +840,17 @@ mod tests {
         }
     }
 
+    fn assert_round_complete(payload_source: &mut mpsc::Receiver<(NodeId, SignedEntries)>) {
+        assert!(payload_source.try_recv().is_ok());
+    }
+
+    fn assert_round_not_complete(payload_source: &mut mpsc::Receiver<(NodeId, SignedEntries)>) {
+        assert!(matches!(
+            payload_source.try_recv(),
+            Err(TryRecvError::Empty)
+        ));
+    }
+
     fn price_feed_entry(
         synthetic: &str,
         price: f64,
@@ -900,7 +916,24 @@ mod tests {
         signers[0].process_incoming_messages().await;
 
         // leader should have published results
-        assert!(payload_source.recv().await.is_some());
+        assert_round_complete(&mut payload_source);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn should_sign_payload_with_quorum_of_three() -> Result<()> {
+        let price_data = vec![
+            price_feed_entry("ADA", 3.50, &[3, 4], 1),
+            price_feed_entry("BTN", 1.21, &[5, 8], 1),
+        ];
+
+        let (mut signers, mut network, mut payload_source) =
+            construct_signers(3, vec![price_data; 4]).await?;
+        assign_roles(&mut signers).await;
+        run_round(&mut signers, &mut network).await;
+
+        assert_round_complete(&mut payload_source);
 
         Ok(())
     }
@@ -915,7 +948,7 @@ mod tests {
         assign_roles(&mut signers).await;
         run_round(&mut signers, &mut network).await;
 
-        assert!(payload_source.recv().await.is_some());
+        assert_round_complete(&mut payload_source);
 
         Ok(())
     }
@@ -930,7 +963,7 @@ mod tests {
         assign_roles(&mut signers).await;
         run_round(&mut signers, &mut network).await;
 
-        assert!(payload_source.try_recv().is_err());
+        assert_round_not_complete(&mut payload_source);
 
         Ok(())
     }
@@ -954,7 +987,7 @@ mod tests {
         assign_roles(&mut signers).await;
         run_round(&mut signers, &mut network).await;
 
-        assert!(payload_source.recv().await.is_some());
+        assert_round_complete(&mut payload_source);
 
         Ok(())
     }
@@ -978,7 +1011,7 @@ mod tests {
         assign_roles(&mut signers).await;
         run_round(&mut signers, &mut network).await;
 
-        assert!(payload_source.try_recv().is_err());
+        assert_round_not_complete(&mut payload_source);
 
         Ok(())
     }
