@@ -49,7 +49,7 @@ impl Display for SignerMessage {
 #[derive(Decode, Encode, Clone, Debug)]
 pub enum SignerMessageData {
     #[n(0)]
-    RequestCommitment,
+    RequestCommitment(#[n(0)] CommitmentRequest),
     #[n(1)]
     Commit(#[n(0)] Commitment),
     #[n(2)]
@@ -62,13 +62,19 @@ pub enum SignerMessageData {
 impl Display for SignerMessageData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::RequestCommitment => f.write_str("RequestCommitment"),
+            Self::RequestCommitment(_) => f.write_str("RequestCommitment"),
             Self::Commit(_) => f.write_str("Commit"),
             Self::RequestSignature(_) => f.write_str("RequestSignature"),
             Self::Sign(_) => f.write_str("Sign"),
             Self::Publish(_) => f.write_str("Publish"),
         }
     }
+}
+
+#[derive(Decode, Encode, Clone, Debug)]
+pub struct CommitmentRequest {
+    #[n(0)]
+    price_feed: Vec<PriceFeed>,
 }
 
 #[derive(Decode, Encode, Clone, Debug)]
@@ -174,6 +180,7 @@ enum FollowerState {
     Committed {
         round: String,
         round_span: Span,
+        price_data: Vec<PriceFeedEntry>,
         nonces: Vec<SigningNonces>,
     },
 }
@@ -279,8 +286,8 @@ impl Signer {
                 }
             }
             SignerEvent::Message(from, SignerMessage { round, data }) => match data {
-                SignerMessageData::RequestCommitment => {
-                    self.send_commitment(round).await?;
+                SignerMessageData::RequestCommitment(request) => {
+                    self.send_commitment(round, request).await?;
                 }
                 SignerMessageData::Commit(commitment) => {
                     self.process_commitment(round, from, commitment).await?;
@@ -314,11 +321,14 @@ impl Signer {
         round_span
             .in_scope(|| info!("Beginning round of signature collection, requesting commitments"));
 
+        let price_feed = price_data.iter().map(|entry| entry.data.clone()).collect();
+        let request = CommitmentRequest { price_feed };
+
         // request other folks commit
         self.message_sink
             .broadcast(SignerMessage {
                 round: round.clone(),
-                data: SignerMessageData::RequestCommitment,
+                data: SignerMessageData::RequestCommitment(request),
             })
             .await;
 
@@ -335,24 +345,42 @@ impl Signer {
         Ok(())
     }
 
-    async fn send_commitment(&mut self, round: String) -> Result<()> {
+    async fn send_commitment(&mut self, round: String, request: CommitmentRequest) -> Result<()> {
         let SignerState::Follower(leader_id, old_state) = &self.state else {
             // we're not a follower ATM
             return Ok(());
         };
         let leader_id = leader_id.clone();
-        let round_span = match old_state {
+        let (round_span, price_data) = match old_state {
             FollowerState::Committed {
                 round: curr_round,
                 round_span,
+                price_data,
                 ..
-            } if curr_round == &round => round_span.clone(),
-            _ => info_span!("signer_round", role = "follower", round),
+            } if curr_round == &round => (round_span.clone(), price_data.clone()),
+            _ => {
+                let price_data = self.price_source.borrow().clone();
+                let round_span = info_span!(
+                    "signer_round",
+                    role = "follower",
+                    round,
+                    price_data = format!("{:#?}", price_data)
+                );
+                round_span.follows_from(Span::current());
+                (round_span, price_data)
+            }
         };
-        round_span.in_scope(|| info!("Sending commitment for this round"));
+
+        let my_feed: Vec<PriceFeed> = price_data.iter().map(|entry| entry.data.clone()).collect();
+        if let Err(mismatch) = should_sign_all(&request.price_feed, &my_feed) {
+            round_span
+                .in_scope(|| warn!(error = mismatch, "Not sending commitment for this round"));
+            return Ok(());
+        }
 
         // Send our commitment
-        let commitment_count = self.price_source.borrow().len();
+        round_span.in_scope(|| info!("Sending commitment for this round"));
+        let commitment_count = price_data.len();
         let (nonces, commitment) = self.commit(commitment_count);
         self.message_sink
             .send(
@@ -370,6 +398,7 @@ impl Signer {
             FollowerState::Committed {
                 round,
                 round_span,
+                price_data,
                 nonces,
             },
         );
@@ -510,13 +539,15 @@ impl Signer {
         round: String,
         packages: &[SigningPackage],
     ) -> Result<()> {
-        let SignerState::Follower(leader_id, FollowerState::Committed { nonces, .. }) = &self.state
+        let SignerState::Follower(
+            leader_id,
+            FollowerState::Committed {
+                price_data, nonces, ..
+            },
+        ) = &self.state
         else {
             return Ok(());
         };
-
-        // TODO: price_data should be fixed at commitment time
-        let price_data = self.price_source.borrow().clone();
 
         // Make sure we are OK with signing this
         if packages.len() != price_data.len() {
@@ -524,12 +555,13 @@ impl Signer {
                 "Mismatched price feed count. Is this server misconfigured?"
             ));
         }
-        for (package, my_feed) in packages.iter().zip(price_data.iter()) {
-            let leader_feed =
-                deserialize(package.message()).context("could not decode price_feed")?;
-            if let Err(mismatch) = should_sign(&leader_feed, &my_feed.data) {
-                return Err(anyhow!("Not signing payload: {}", mismatch));
-            }
+        let leader_feed: Result<Vec<PriceFeed>> = packages
+            .iter()
+            .map(|p| deserialize(p.message()).context("could not decode price_feed"))
+            .collect();
+        let my_feed: Vec<PriceFeed> = price_data.iter().map(|entry| entry.data.clone()).collect();
+        if let Err(mismatch) = should_sign_all(&leader_feed?, &my_feed) {
+            return Err(anyhow!("Not signing payload: {}", mismatch));
         }
 
         // Send our signature back to the leader
@@ -671,6 +703,16 @@ impl Signer {
             signatures,
         })
     }
+}
+
+fn should_sign_all(leader_feed: &[PriceFeed], my_feed: &[PriceFeed]) -> Result<(), String> {
+    if leader_feed.len() != my_feed.len() {
+        return Err("Mismatched price feed count. Is this server misconfigured?".into());
+    }
+    for (leader, mine) in leader_feed.iter().zip(my_feed) {
+        should_sign(leader, mine)?;
+    }
+    Ok(())
 }
 
 fn should_sign(leader_feed: &PriceFeed, my_feed: &PriceFeed) -> Result<(), String> {

@@ -99,6 +99,17 @@ impl From<&PriceFeed> for PlutusData {
     }
 }
 
+impl<C> Encode<C> for PriceFeed {
+    fn encode<W: Write>(
+        &self,
+        e: &mut Encoder<W>,
+        ctx: &mut C,
+    ) -> Result<(), encode::Error<W::Error>> {
+        let plutus_data: PlutusData = self.into();
+        plutus_data.encode(e, ctx)
+    }
+}
+
 impl<'b, C> Decode<'b, C> for PriceFeed {
     fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, decode::Error> {
         decode_struct_begin(d)?;
