@@ -638,7 +638,7 @@ impl Core {
         };
 
         // Another sends occasional pings to this peer, triggering a disconnect if it doesn't respond.
-        let ping_task = handle_ping(&peer.label, &peer_version, send_sink.clone(), pong_source);
+        let ping_task = handle_ping(&peer.label, send_sink.clone(), pong_source);
 
         // One more task receives all incoming messages and forwards them to other channels.
         let incoming_message_tx = self.incoming_tx.clone();
@@ -747,17 +747,9 @@ impl Core {
 const PING_TIMEOUT: Duration = Duration::from_millis(5000);
 async fn handle_ping(
     them: &str,
-    peer_version: &str,
     sink: mpsc::Sender<Message>,
     mut pong_source: mpsc::Receiver<String>,
 ) -> String {
-    // Don't try pinging someone on a version too old to support pings.
-    // TODO: remove this check after all test nodes are upgraded
-    if peer_version.starts_with("0.7.") {
-        loop {
-            sleep(PING_TIMEOUT).await;
-        }
-    }
     loop {
         let ping_id = Uuid::new_v4().to_string();
         if let Err(e) = sink
