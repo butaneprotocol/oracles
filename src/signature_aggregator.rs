@@ -1,4 +1,5 @@
 pub mod consensus_aggregator;
+pub mod price_comparator;
 pub mod signer;
 pub mod single_aggregator;
 

@@ -24,10 +24,11 @@ use crate::{
     cbor::{CborIdentifier, CborSignatureShare, CborSigningCommitments, CborSigningPackage},
     network::{NetworkSender, NodeId},
     price_feed::{
-        deserialize, serialize, IntervalBound, IntervalBoundType, PriceFeed, PriceFeedEntry,
-        SignedEntries, SignedEntry, SignedPriceFeed, Validity,
+        deserialize, serialize, PriceFeed, PriceFeedEntry, SignedEntries, SignedEntry,
+        SignedPriceFeed,
     },
     raft::RaftLeader,
+    signature_aggregator::price_comparator::should_sign_all,
 };
 
 #[derive(Decode, Encode, Clone, Debug)]
@@ -649,10 +650,7 @@ impl Signer {
             entries: payload_entries,
         };
 
-        self.signed_entries_sink
-            .send((self.id.clone(), payload.clone()))
-            .await
-            .context("Could not publish signed result")?;
+        self.publish(self.id.clone(), payload.clone()).await?;
 
         // Notify our peers that we've agreed to sign the payload
         self.message_sink
@@ -705,72 +703,6 @@ impl Signer {
     }
 }
 
-fn should_sign_all(leader_feed: &[PriceFeed], my_feed: &[PriceFeed]) -> Result<(), String> {
-    if leader_feed.len() != my_feed.len() {
-        return Err("Mismatched price feed count. Is this server misconfigured?".into());
-    }
-    for (leader, mine) in leader_feed.iter().zip(my_feed) {
-        should_sign(leader, mine)?;
-    }
-    Ok(())
-}
-
-fn should_sign(leader_feed: &PriceFeed, my_feed: &PriceFeed) -> Result<(), String> {
-    if leader_feed.synthetic != my_feed.synthetic {
-        return Err(format!(
-            "mismatched synthetics: leader has {}, we have {}",
-            leader_feed.synthetic, my_feed.synthetic
-        ));
-    }
-    if !is_validity_close_enough(&leader_feed.validity, &my_feed.validity) {
-        return Err(format!(
-            "mismatched validity: leader has {:?}, we have {:?}",
-            leader_feed.validity, my_feed.validity
-        ));
-    }
-    if leader_feed.collateral_prices.len() != my_feed.collateral_prices.len() {
-        return Err(format!(
-            "wrong number of collateral prices: leader has {}, we have {}",
-            leader_feed.collateral_prices.len(),
-            my_feed.collateral_prices.len()
-        ));
-    }
-    // If one price is >1% less than the other, they're too distant to trust
-    for (leader_price, my_price) in leader_feed
-        .collateral_prices
-        .iter()
-        .zip(my_feed.collateral_prices.iter())
-    {
-        let leader_value = leader_price * &my_feed.denominator;
-        let my_value = my_price * &leader_feed.denominator;
-        let max_value = leader_value.clone().max(my_value.clone());
-        let min_value = leader_value.min(my_value);
-        let difference = &max_value - min_value;
-        if difference * 100u32 > max_value {
-            return Err(format!(
-                "collateral prices are too distant: leader has {}/{}, we have {}/{}",
-                leader_price, leader_feed.denominator, my_price, my_feed.denominator
-            ));
-        }
-    }
-    Ok(())
-}
-fn is_validity_close_enough(leader_validity: &Validity, my_validity: &Validity) -> bool {
-    are_bounds_close_enough(&leader_validity.lower_bound, &my_validity.lower_bound)
-        && are_bounds_close_enough(&leader_validity.upper_bound, &my_validity.upper_bound)
-}
-
-fn are_bounds_close_enough(leader_bound: &IntervalBound, my_bound: &IntervalBound) -> bool {
-    if let IntervalBoundType::Finite(leader_moment) = leader_bound.bound_type {
-        if let IntervalBoundType::Finite(my_moment) = my_bound.bound_type {
-            let difference = leader_moment.max(my_moment) - leader_moment.min(my_moment);
-            // allow up to 60 seconds difference between bounds
-            return difference < 1000 * 60;
-        }
-    }
-    leader_bound == my_bound
-}
-
 #[cfg(test)]
 mod tests {
     use anyhow::Result;
@@ -785,7 +717,7 @@ mod tests {
 
     use crate::{
         network::{NetworkReceiver, NodeId, TestNetwork},
-        price_feed::{IntervalBound, PriceFeed, PriceFeedEntry, SignedEntries, Validity},
+        price_feed::{PriceFeed, PriceFeedEntry, SignedEntries, Validity},
         raft::RaftLeader,
         signature_aggregator::signer::SignerMessage,
     };
@@ -1002,54 +934,6 @@ mod tests {
 
         let (mut signers, mut network, mut payload_source) =
             construct_signers(2, vec![leader_prices, follower_prices]).await?;
-        assign_roles(&mut signers).await;
-        run_round(&mut signers, &mut network).await;
-
-        assert_round_not_complete(&mut payload_source);
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn should_sign_close_enough_validity() -> Result<()> {
-        const TIMESTAMP: u64 = 1712723729359;
-        let mut leader_price = price_feed_entry("TOKEN", 3.50, &[1], 1);
-        leader_price.data.validity = Validity {
-            lower_bound: IntervalBound::unix_timestamp(TIMESTAMP, true),
-            upper_bound: IntervalBound::unix_timestamp(TIMESTAMP + 3000000, true),
-        };
-        let mut follower_price = price_feed_entry("TOKEN", 3.50, &[1], 1);
-        follower_price.data.validity = Validity {
-            lower_bound: IntervalBound::unix_timestamp(TIMESTAMP + 5000, true),
-            upper_bound: IntervalBound::unix_timestamp(TIMESTAMP + 3005000, true),
-        };
-
-        let (mut signers, mut network, mut payload_source) =
-            construct_signers(2, vec![vec![leader_price], vec![follower_price]]).await?;
-        assign_roles(&mut signers).await;
-        run_round(&mut signers, &mut network).await;
-
-        assert_round_complete(&mut payload_source);
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn should_not_sign_distant_validity() -> Result<()> {
-        const TIMESTAMP: u64 = 1712723729359;
-        let mut leader_price = price_feed_entry("TOKEN", 3.50, &[1], 1);
-        leader_price.data.validity = Validity {
-            lower_bound: IntervalBound::unix_timestamp(TIMESTAMP, true),
-            upper_bound: IntervalBound::unix_timestamp(TIMESTAMP + 3000000, true),
-        };
-        let mut follower_price = price_feed_entry("TOKEN", 3.50, &[1], 1);
-        follower_price.data.validity = Validity {
-            lower_bound: IntervalBound::unix_timestamp(TIMESTAMP + 5000000, true),
-            upper_bound: IntervalBound::unix_timestamp(TIMESTAMP + 8000000, true),
-        };
-
-        let (mut signers, mut network, mut payload_source) =
-            construct_signers(2, vec![vec![leader_price], vec![follower_price]]).await?;
         assign_roles(&mut signers).await;
         run_round(&mut signers, &mut network).await;
 
