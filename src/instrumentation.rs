@@ -2,8 +2,9 @@ use std::time::Duration;
 
 use anyhow::Result;
 use opentelemetry::{global, trace::TracerProvider, KeyValue};
-use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_otlp::{TonicExporterBuilder, WithExportConfig};
 use opentelemetry_sdk::{
+    metrics,
     trace::{self, Config},
     Resource,
 };
@@ -19,7 +20,7 @@ use crate::{config::LogConfig, network::NodeId};
 pub struct TracingGuard;
 impl Drop for TracingGuard {
     fn drop(&mut self) {
-        opentelemetry::global::shutdown_tracer_provider();
+        global::shutdown_tracer_provider();
     }
 }
 
@@ -42,18 +43,19 @@ where
 {
     match config.otlp_endpoint.as_ref() {
         Some(endpoint) => {
-            let filter = get_filter(config);
-            let provider = init_tracer_provider(
-                &config.id,
-                &config.label,
-                endpoint,
-                config.uptrace_dsn.as_ref(),
-            )?;
-            let tracer = provider.tracer("oracle");
-            let layer = tracing_opentelemetry::layer()
+            let uptrace_dsn = config.uptrace_dsn.as_ref();
+            let (tracer_provider, meter_provider) =
+                init_providers(&config.id, &config.label, endpoint, uptrace_dsn)?;
+
+            let tracer = tracer_provider.tracer("oracle");
+            let tracer_layer = tracing_opentelemetry::layer()
                 .with_tracer(tracer)
-                .with_filter(filter);
-            Dispatch::new(subscriber.with(layer)).init();
+                .with_filter(get_filter(config));
+
+            let metrics_layer = tracing_opentelemetry::MetricsLayer::new(meter_provider)
+                .with_filter(get_filter(config));
+
+            Dispatch::new(subscriber.with(tracer_layer).with(metrics_layer)).init();
         }
         None => {
             Dispatch::new(subscriber).init();
@@ -68,13 +70,13 @@ fn get_filter(config: &LogConfig) -> Targets {
         .with_target("oracles", config.level)
 }
 
-fn init_tracer_provider(
+fn init_providers(
     id: &NodeId,
     name: &str,
     endpoint: &str,
     uptrace_dsn: Option<&String>,
-) -> Result<trace::TracerProvider> {
-    opentelemetry::global::set_error_handler(|error| {
+) -> Result<(trace::TracerProvider, metrics::SdkMeterProvider)> {
+    global::set_error_handler(|error| {
         tracing::error!("OpenTelemetry error occurred: {:#}", anyhow::anyhow!(error),);
     })?;
 
@@ -85,21 +87,21 @@ fn init_tracer_provider(
         KeyValue::new("service.version", env!("CARGO_PKG_VERSION")),
     ]));
 
-    let mut metadata = MetadataMap::with_capacity(1);
-    if let Some(dsn) = uptrace_dsn {
-        metadata.insert("uptrace-dsn", dsn.parse()?);
-    }
+    let exporter_provider = ExporterProvider::new(endpoint, uptrace_dsn)?;
 
+    let tracer_provider = init_tracer_provider(resource.clone(), &exporter_provider)?;
+    let meter_provider = init_meter_provider(resource, &exporter_provider)?;
+
+    Ok((tracer_provider, meter_provider))
+}
+
+fn init_tracer_provider(
+    resource: Resource,
+    exporter_provider: &ExporterProvider,
+) -> Result<trace::TracerProvider> {
     let provider = opentelemetry_otlp::new_pipeline()
         .tracing()
-        .with_exporter(
-            opentelemetry_otlp::new_exporter()
-                .tonic()
-                .with_endpoint(endpoint)
-                .with_timeout(Duration::from_secs(5))
-                .with_tls_config(Default::default())
-                .with_metadata(metadata),
-        )
+        .with_exporter(exporter_provider.get())
         .with_batch_config(
             opentelemetry_sdk::trace::BatchConfigBuilder::default()
                 .with_max_queue_size(30000)
@@ -113,4 +115,45 @@ fn init_tracer_provider(
     global::set_tracer_provider(provider.clone());
 
     Ok(provider)
+}
+
+fn init_meter_provider(
+    resource: Resource,
+    exporter_provider: &ExporterProvider,
+) -> Result<metrics::SdkMeterProvider> {
+    let provider = opentelemetry_otlp::new_pipeline()
+        .metrics(opentelemetry_sdk::runtime::Tokio)
+        .with_exporter(exporter_provider.get())
+        .with_resource(resource)
+        .build()?;
+
+    global::set_meter_provider(provider.clone());
+
+    Ok(provider)
+}
+
+struct ExporterProvider {
+    endpoint: String,
+    metadata: MetadataMap,
+}
+impl ExporterProvider {
+    fn new(endpoint: &str, uptrace_dsn: Option<&String>) -> Result<Self> {
+        let mut metadata = MetadataMap::with_capacity(1);
+        if let Some(dsn) = uptrace_dsn {
+            metadata.insert("uptrace-dsn", dsn.parse()?);
+        };
+        Ok(Self {
+            endpoint: endpoint.to_string(),
+            metadata,
+        })
+    }
+
+    fn get(&self) -> TonicExporterBuilder {
+        opentelemetry_otlp::new_exporter()
+            .tonic()
+            .with_endpoint(&self.endpoint)
+            .with_timeout(Duration::from_secs(5))
+            .with_tls_config(Default::default())
+            .with_metadata(self.metadata.clone())
+    }
 }
