@@ -1,9 +1,12 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use opentelemetry::KeyValue;
+use opentelemetry::{global, trace::TracerProvider, KeyValue};
 use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_sdk::{trace::Tracer, Resource};
+use opentelemetry_sdk::{
+    trace::{self, Config},
+    Resource,
+};
 use tonic::metadata::MetadataMap;
 use tracing::{Dispatch, Level, Subscriber};
 use tracing_subscriber::{
@@ -40,12 +43,13 @@ where
     match config.otlp_endpoint.as_ref() {
         Some(endpoint) => {
             let filter = get_filter(config);
-            let tracer = init_tracer(
+            let provider = init_tracer_provider(
                 &config.id,
                 &config.label,
                 endpoint,
                 config.uptrace_dsn.as_ref(),
             )?;
+            let tracer = provider.tracer("oracle");
             let layer = tracing_opentelemetry::layer()
                 .with_tracer(tracer)
                 .with_filter(filter);
@@ -64,12 +68,12 @@ fn get_filter(config: &LogConfig) -> Targets {
         .with_target("oracles", config.level)
 }
 
-fn init_tracer(
+fn init_tracer_provider(
     id: &NodeId,
     name: &str,
     endpoint: &str,
     uptrace_dsn: Option<&String>,
-) -> Result<Tracer> {
+) -> Result<trace::TracerProvider> {
     opentelemetry::global::set_error_handler(|error| {
         tracing::error!("OpenTelemetry error occurred: {:#}", anyhow::anyhow!(error),);
     })?;
@@ -86,7 +90,7 @@ fn init_tracer(
         metadata.insert("uptrace-dsn", dsn.parse()?);
     }
 
-    let tracer = opentelemetry_otlp::new_pipeline()
+    let provider = opentelemetry_otlp::new_pipeline()
         .tracing()
         .with_exporter(
             opentelemetry_otlp::new_exporter()
@@ -103,8 +107,10 @@ fn init_tracer(
                 .with_scheduled_delay(Duration::from_millis(5000))
                 .build(),
         )
-        .with_trace_config(opentelemetry_sdk::trace::config().with_resource(resource))
+        .with_trace_config(Config::default().with_resource(resource))
         .install_batch(opentelemetry_sdk::runtime::Tokio)?;
 
-    Ok(tracer)
+    global::set_tracer_provider(provider.clone());
+
+    Ok(provider)
 }
