@@ -107,10 +107,17 @@ impl SignatureAggregator {
         let monitor_task = async move {
             loop {
                 let (last_updated, valid_until) = *payload_age_source.borrow();
-                let is_valid = SystemTime::now() < valid_until;
+                let is_valid: u64 = if SystemTime::now() < valid_until {
+                    1
+                } else {
+                    0
+                };
                 if let Ok(age) = SystemTime::now().duration_since(last_updated) {
                     if let Ok(age_in_millis) = u64::try_from(age.as_millis()) {
-                        debug!(histogram.payload_age = age_in_millis, is_valid);
+                        debug!(
+                            histogram.payload_age = age_in_millis,
+                            histogram.payload_is_valid = is_valid
+                        );
                     }
                 }
                 sleep(Duration::from_secs(1)).await;
