@@ -33,7 +33,7 @@ impl Drop for OtelGuard {
 }
 
 pub fn init_tracing(config: &LogConfig) -> Result<OtelGuard> {
-    let filter = get_filter(config);
+    let filter = get_filter(config.level);
     if config.json {
         let subscriber = Registry::default().with(fmt::layer().json().with_filter(filter));
         init_opentelemetry(config, subscriber)
@@ -56,7 +56,7 @@ where
             let tracer = tracer_provider.tracer("oracle");
             let tracer_layer = tracing_opentelemetry::layer()
                 .with_tracer(tracer)
-                .with_filter(get_filter(config));
+                .with_filter(get_filter(Level::DEBUG));
 
             let metrics_layer = tracing_opentelemetry::MetricsLayer::new(meter_provider.clone());
 
@@ -70,10 +70,10 @@ where
     }
 }
 
-fn get_filter(config: &LogConfig) -> Targets {
+fn get_filter(level: Level) -> Targets {
     Targets::new()
         .with_default(Level::INFO)
-        .with_target("oracles", config.level)
+        .with_target("oracles", level)
 }
 
 fn init_providers(

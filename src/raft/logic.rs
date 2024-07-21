@@ -6,7 +6,7 @@ use tokio::{
     sync::watch,
     time::{Duration, Instant},
 };
-use tracing::{info, trace, warn};
+use tracing::{debug, info, trace, warn};
 
 use crate::network::{IncomingMessage, NodeId};
 
@@ -368,7 +368,7 @@ impl RaftState {
             _ => RaftLeader::Unknown,
         };
         let has_leader: u64 = if leader == RaftLeader::Unknown { 0 } else { 1 };
-        info!(histogram.has_leader = has_leader);
+        debug!(histogram.has_leader = has_leader);
         self.status = status;
         self.leader_sink.send_if_modified(|old_leader| {
             let changed = *old_leader != leader;
