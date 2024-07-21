@@ -80,7 +80,7 @@ impl RaftState {
         timeout_freq: Duration,
         leader_sink: watch::Sender<RaftLeader>,
     ) -> Self {
-        RaftState {
+        let mut state = RaftState {
             id,
             quorum,
             warned_about_quorum: false,
@@ -95,7 +95,9 @@ impl RaftState {
             },
             term: 0,
             leader_sink,
-        }
+        };
+        state.clear_status();
+        state
     }
 
     fn leader(&self) -> Option<NodeId> {
@@ -365,6 +367,8 @@ impl RaftState {
             } => RaftLeader::Other(leader.clone()),
             _ => RaftLeader::Unknown,
         };
+        let has_leader: u64 = if leader == RaftLeader::Unknown { 0 } else { 1 };
+        info!(histogram.has_leader = has_leader);
         self.status = status;
         self.leader_sink.send_if_modified(|old_leader| {
             let changed = *old_leader != leader;

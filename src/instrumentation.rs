@@ -17,27 +17,33 @@ use tracing_subscriber::{
 
 use crate::{config::LogConfig, network::NodeId};
 
-pub struct TracingGuard;
-impl Drop for TracingGuard {
+pub enum OtelGuard {
+    Enabled(metrics::SdkMeterProvider),
+    Disabled,
+}
+impl Drop for OtelGuard {
     fn drop(&mut self) {
-        global::shutdown_tracer_provider();
+        if let Self::Enabled(meter_provider) = &self {
+            if let Err(err) = meter_provider.shutdown() {
+                eprintln!("{:?}", err);
+            }
+            global::shutdown_tracer_provider();
+        }
     }
 }
 
-pub fn init_tracing(config: &LogConfig) -> Result<TracingGuard> {
+pub fn init_tracing(config: &LogConfig) -> Result<OtelGuard> {
     let filter = get_filter(config);
     if config.json {
         let subscriber = Registry::default().with(fmt::layer().json().with_filter(filter));
-        init_opentelemetry(config, subscriber)?;
+        init_opentelemetry(config, subscriber)
     } else {
         let subscriber = Registry::default().with(fmt::layer().compact().with_filter(filter));
-        init_opentelemetry(config, subscriber)?;
+        init_opentelemetry(config, subscriber)
     }
-
-    Ok(TracingGuard)
 }
 
-fn init_opentelemetry<S>(config: &LogConfig, subscriber: S) -> Result<()>
+fn init_opentelemetry<S>(config: &LogConfig, subscriber: S) -> Result<OtelGuard>
 where
     S: Subscriber + for<'span> LookupSpan<'span> + Send + Sync,
 {
@@ -52,16 +58,16 @@ where
                 .with_tracer(tracer)
                 .with_filter(get_filter(config));
 
-            let metrics_layer = tracing_opentelemetry::MetricsLayer::new(meter_provider)
-                .with_filter(get_filter(config));
+            let metrics_layer = tracing_opentelemetry::MetricsLayer::new(meter_provider.clone());
 
-            Dispatch::new(subscriber.with(tracer_layer).with(metrics_layer)).init();
+            Dispatch::new(subscriber.with(metrics_layer).with(tracer_layer)).init();
+            Ok(OtelGuard::Enabled(meter_provider))
         }
         None => {
             Dispatch::new(subscriber).init();
+            Ok(OtelGuard::Disabled)
         }
-    };
-    Ok(())
+    }
 }
 
 fn get_filter(config: &LogConfig) -> Targets {
