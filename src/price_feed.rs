@@ -147,14 +147,8 @@ pub struct Validity {
 impl Default for Validity {
     fn default() -> Self {
         Self {
-            lower_bound: IntervalBound {
-                bound_type: IntervalBoundType::NegativeInfinity,
-                is_inclusive: false,
-            },
-            upper_bound: IntervalBound {
-                bound_type: IntervalBoundType::PositiveInfinity,
-                is_inclusive: false,
-            },
+            lower_bound: IntervalBound::start_of_time(false),
+            upper_bound: IntervalBound::end_of_time(false),
         }
     }
 }
@@ -183,6 +177,18 @@ pub struct IntervalBound {
     pub is_inclusive: bool,
 }
 impl IntervalBound {
+    pub fn start_of_time(is_inclusive: bool) -> Self {
+        Self {
+            bound_type: IntervalBoundType::NegativeInfinity,
+            is_inclusive,
+        }
+    }
+    pub fn end_of_time(is_inclusive: bool) -> Self {
+        Self {
+            bound_type: IntervalBoundType::PositiveInfinity,
+            is_inclusive,
+        }
+    }
     pub fn moment(moment: SystemTime, is_inclusive: bool) -> Self {
         let timestamp = moment
             .duration_since(UNIX_EPOCH)
@@ -335,20 +341,11 @@ fn decode_enum<'b, C, V: Decode<'b, C>>(
 mod tests {
     use num_bigint::BigUint;
 
-    use super::{deserialize, serialize, IntervalBound, IntervalBoundType, PriceFeed, Validity};
+    use super::{deserialize, serialize, IntervalBound, PriceFeed, Validity};
 
     #[test]
     fn should_serialize_infinite_validity() {
-        let validity = Validity {
-            lower_bound: IntervalBound {
-                bound_type: IntervalBoundType::NegativeInfinity,
-                is_inclusive: false,
-            },
-            upper_bound: IntervalBound {
-                bound_type: IntervalBoundType::PositiveInfinity,
-                is_inclusive: false,
-            },
-        };
+        let validity = Validity::default();
         let round_tripped = deserialize(&serialize(validity)).unwrap();
         assert_eq!(validity, round_tripped);
     }
