@@ -83,7 +83,10 @@ fn init_providers(
     uptrace_dsn: Option<&String>,
 ) -> Result<(trace::TracerProvider, metrics::SdkMeterProvider)> {
     global::set_error_handler(|error| {
-        tracing::error!("OpenTelemetry error occurred: {:#}", anyhow::anyhow!(error),);
+        let span = tracing::info_span!("opentelemetry_error_handler");
+        span.in_scope(|| {
+            tracing::error!("OpenTelemetry error occurred: {:#}", anyhow::anyhow!(error));
+        });
     })?;
 
     let resource = Resource::default().merge(&Resource::new([
