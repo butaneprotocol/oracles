@@ -1,5 +1,5 @@
 use tokio::sync::mpsc::{Receiver, Sender};
-use tracing::warn;
+use tracing::{warn, Span};
 
 use super::types::{IncomingMessage, NodeId, OutgoingMessage};
 
@@ -17,6 +17,7 @@ impl<T> NetworkSender<T> {
             .send(OutgoingMessage {
                 to: Some(to),
                 data: message,
+                span: Span::current(),
             })
             .await
         {
@@ -30,6 +31,7 @@ impl<T> NetworkSender<T> {
             .send(OutgoingMessage {
                 to: None,
                 data: message,
+                span: Span::current(),
             })
             .await
         {

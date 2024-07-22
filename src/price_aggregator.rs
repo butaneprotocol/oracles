@@ -7,9 +7,9 @@ use anyhow::Result;
 use dashmap::DashMap;
 use num_bigint::BigUint;
 use num_integer::Integer;
-use rust_decimal::Decimal;
+use rust_decimal::{prelude::ToPrimitive, Decimal};
 use tokio::{sync::watch::Sender, task::JoinSet, time::sleep};
-use tracing::{warn, Instrument};
+use tracing::{debug, warn, Instrument};
 
 use crate::{
     apis::{
@@ -130,13 +130,26 @@ impl PriceAggregator {
                 p * multiplier
             })
             .collect();
-        let price = conversions.value_in_usd(&synth.name);
-        let (collateral_prices, denominator) = normalize(&prices, price);
+        let synth_price = conversions.value_in_usd(&synth.name);
+
+        // track metrics for the different prices
+        for (collateral_name, collateral_price) in synth.collateral.iter().zip(prices.iter()) {
+            let price = (collateral_price / synth_price)
+                .to_f64()
+                .expect("infallible");
+            debug!(
+                collateral_name,
+                synthetic_name = synth.name,
+                histogram.collateral_price = price
+            );
+        }
+
+        let (collateral_prices, denominator) = normalize(&prices, synth_price);
         let valid_from = SystemTime::now();
         let valid_to = valid_from + Duration::from_secs(300);
 
         PriceFeedEntry {
-            price,
+            price: synth_price,
             data: PriceFeed {
                 collateral_prices,
                 synthetic: synth.name.clone(),

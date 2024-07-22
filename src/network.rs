@@ -1,19 +1,20 @@
 use anyhow::Result;
+use opentelemetry::Context;
 use tokio::{sync::mpsc, task::JoinSet};
-use tracing::{info, warn, Instrument};
+use tracing::{info, warn, Span};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
+use crate::config::NetworkConfig;
 use crate::raft::RaftMessage;
 use crate::signature_aggregator::signer::SignerMessage;
 use crate::{dkg::KeygenMessage, health::HealthSink};
 pub use channel::{NetworkChannel, NetworkReceiver, NetworkSender};
-pub use config::{NetworkConfig, Peer};
 use core::Core;
 use std::any::type_name;
 pub use test::TestNetwork;
 pub use types::{IncomingMessage, NodeId, OutgoingMessage};
 
 mod channel;
-mod config;
 mod core;
 mod test;
 mod types;
@@ -48,8 +49,8 @@ pub struct Network {
     pub id: NodeId,
     port: u16,
     core: Core,
-    outgoing_sender: mpsc::Sender<(Option<NodeId>, Message)>,
-    incoming_receiver: mpsc::Receiver<(NodeId, Message)>,
+    outgoing_sender: mpsc::Sender<(Option<NodeId>, Message, Context)>,
+    incoming_receiver: mpsc::Receiver<(NodeId, Message, Context)>,
     keygen: Option<MpscPair<KeygenMessage>>,
     raft: Option<MpscPair<RaftMessage>>,
     signer: Option<MpscPair<SignerMessage>>,
@@ -96,31 +97,25 @@ impl Network {
         let signer_sender = send_messages(&mut set, &sender, self.signer, Message::Signer);
 
         let mut receiver = self.incoming_receiver;
-        set.spawn(
-            async move {
-                while let Some((from, data)) = receiver.recv().await {
-                    match data {
-                        Message::Keygen(data) => {
-                            receive_message(from, data, &keygen_sender);
-                        }
-                        Message::Raft(data) => {
-                            receive_message(from, data, &raft_sender);
-                        }
-                        Message::Signer(data) => {
-                            receive_message(from, data, &signer_sender);
-                        }
+        set.spawn(async move {
+            while let Some((from, data, context)) = receiver.recv().await {
+                match data {
+                    Message::Keygen(data) => {
+                        receive_message(from, data, context, &keygen_sender);
+                    }
+                    Message::Raft(data) => {
+                        receive_message(from, data, context, &raft_sender);
+                    }
+                    Message::Signer(data) => {
+                        receive_message(from, data, context, &signer_sender);
                     }
                 }
             }
-            .in_current_span(),
-        );
+        });
 
-        set.spawn(
-            async move {
-                self.core.handle_network().await.unwrap();
-            }
-            .in_current_span(),
-        );
+        set.spawn(async move {
+            self.core.handle_network().await.unwrap();
+        });
 
         while let Some(x) = set.join_next().await {
             x?;
@@ -143,7 +138,7 @@ fn create_channel<T>(holder: &mut Option<MpscPair<T>>) -> NetworkChannel<T> {
 
 fn send_messages<T, F>(
     set: &mut JoinSet<()>,
-    core_sender: &mpsc::Sender<(Option<NodeId>, Message)>,
+    core_sender: &mpsc::Sender<(Option<NodeId>, Message, Context)>,
     holder: Option<MpscPair<T>>,
     wrap: F,
 ) -> Option<mpsc::Sender<IncomingMessage<T>>>
@@ -156,7 +151,10 @@ where
         set.spawn(async move {
             while let Some(message) = receiver.recv().await {
                 let wrapped = wrap(message.data);
-                core_sender.send((message.to, wrapped)).await.unwrap();
+                core_sender
+                    .send((message.to, wrapped, message.span.context()))
+                    .await
+                    .unwrap();
             }
         });
         Some(sender)
@@ -165,19 +163,29 @@ where
     }
 }
 
-fn receive_message<T>(from: NodeId, data: T, sender: &Option<mpsc::Sender<IncomingMessage<T>>>) {
+fn receive_message<T>(
+    from: NodeId,
+    data: T,
+    context: Context,
+    sender: &Option<mpsc::Sender<IncomingMessage<T>>>,
+) {
+    let span = Span::current();
+    span.set_parent(context);
     let message = IncomingMessage {
         from: from.clone(),
         data,
+        span: span.clone(),
     };
     if let Some(sender) = sender {
         if let Err(error) = sender.try_send(message) {
-            warn!(
-                "error processing {} message from {}: {}",
-                type_name::<T>(),
-                from,
-                error
-            )
+            span.in_scope(|| {
+                warn!(
+                    "error processing {} message from {}: {}",
+                    type_name::<T>(),
+                    from,
+                    error
+                );
+            });
         }
     }
 }

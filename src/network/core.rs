@@ -11,6 +11,8 @@ use ed25519::{signature::Signer, Signature};
 use ed25519_dalek::{SigningKey as PrivateKey, Verifier};
 use minicbor::{bytes::ByteVec, Decode, Decoder, Encode, Encoder};
 use minicbor_io::{AsyncReader, AsyncWriter};
+use opentelemetry::{propagation::TextMapPropagator, Context as OtelContext};
+use opentelemetry_sdk::propagation::TraceContextPropagator;
 use rand::thread_rng;
 use tokio::{
     join,
@@ -24,7 +26,7 @@ use tokio::{
     time::{sleep, timeout},
 };
 use tokio_util::compat::{Compat, TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
-use tracing::{error, info, trace, warn, Instrument};
+use tracing::{debug, error, info, info_span, trace, warn, Instrument, Level};
 use uuid::Uuid;
 use x25519_dalek::{self as ecdh, SharedSecret};
 
@@ -32,15 +34,12 @@ type Nonce = chacha20poly1305::aead::generic_array::GenericArray<u8, chacha20pol
 
 use crate::{
     cbor::{CborEcdhPublicKey, CborSignature, CborVerifyingKey},
+    config::{compute_node_id, NetworkConfig, Peer},
     health::{HealthSink, HealthStatus, Origin},
-    network::config::compute_node_id,
     raft::RaftMessage,
 };
 
-use super::{
-    config::{NetworkConfig, Peer},
-    Message as AppMessage, NodeId,
-};
+use super::{Message as AppMessage, NodeId};
 type EncodeSink = AsyncWriter<Compat<OwnedWriteHalf>>;
 type DecodeStream = AsyncReader<Compat<OwnedReadHalf>>;
 
@@ -81,10 +80,16 @@ struct ApplicationMessage {
     nonce: ByteVec,
     #[n(1)]
     payload: ByteVec,
+    #[n(2)]
+    text_map: HashMap<String, String>,
 }
 
 impl ApplicationMessage {
-    pub fn encrypt(message: AppMessage, cipher: &XChaCha20Poly1305) -> Self {
+    pub fn encrypt(
+        message: AppMessage,
+        text_map: HashMap<String, String>,
+        cipher: &XChaCha20Poly1305,
+    ) -> Self {
         let nonce: Nonce = {
             let mut rng = thread_rng();
             XChaCha20Poly1305::generate_nonce(&mut rng)
@@ -99,6 +104,7 @@ impl ApplicationMessage {
         Self {
             nonce: nonce_bytes.into(),
             payload: payload.into(),
+            text_map,
         }
     }
 
@@ -129,8 +135,9 @@ enum Message {
     Pong(#[n(0)] String),
 }
 
-type OutgoingMessageReceiver = mpsc::Receiver<(Option<NodeId>, AppMessage)>;
-type IncomingMessageSender = mpsc::Sender<(NodeId, AppMessage)>;
+type OutgoingMessageReceiver = mpsc::Receiver<(Option<NodeId>, AppMessage, OtelContext)>;
+type IncomingMessageSender = mpsc::Sender<(NodeId, AppMessage, OtelContext)>;
+type MessageAndContext = (AppMessage, OtelContext);
 
 #[derive(Clone)]
 pub struct Core {
@@ -183,25 +190,22 @@ impl Core {
             let core = self.clone();
             let peer = peer.clone();
 
-            trace!("This node will initiate connections to {}", peer.label);
+            debug!("This node will initiate connections to {}", peer.label);
 
             // Each peer gets a receiver that tells it when the app wants to send a message.
             // Hold onto the senders here
             let (outgoing_message_tx, outgoing_message_rx) = mpsc::channel(10);
             outgoing_message_txs.insert(peer.id.clone(), outgoing_message_tx);
 
-            set.spawn(
-                async move {
-                    core.handle_outgoing_connection(peer, outgoing_message_rx)
-                        .await
-                }
-                .in_current_span(),
-            );
+            set.spawn(async move {
+                core.handle_outgoing_connection(peer, outgoing_message_rx)
+                    .await
+            });
         }
 
         let outgoing_message_rxs = DashMap::new();
         for peer in incoming_peers {
-            trace!("This node will expect connections from {}", peer.label);
+            debug!("This node will expect connections from {}", peer.label);
 
             // Each peer gets a receiver that tells it when the app wants to send a message.
             // Build a map of these receivers for incoming connections.
@@ -217,12 +221,9 @@ impl Core {
         );
 
         // One task polls for outgoing messages, and tells the appropriate peer task to send them
-        set.spawn(
-            async move {
-                self.send_messages(outgoing_message_txs).await;
-            }
-            .in_current_span(),
-        );
+        set.spawn(async move {
+            self.send_messages(outgoing_message_txs).await;
+        });
 
         while let Some(x) = set.join_next().await {
             x?;
@@ -231,10 +232,13 @@ impl Core {
         Ok(())
     }
 
-    async fn send_messages(self, outgoing_message_txs: HashMap<NodeId, mpsc::Sender<AppMessage>>) {
+    async fn send_messages(
+        self,
+        outgoing_message_txs: HashMap<NodeId, mpsc::Sender<MessageAndContext>>,
+    ) {
         let mut outgoing_rx = self.outgoing_rx.lock_owned().await;
         let mut unhealthy_peers = HashSet::new();
-        while let Some((to, message)) = outgoing_rx.recv().await {
+        while let Some((to, message, context)) = outgoing_rx.recv().await {
             let recipients = match &to {
                 Some(id) => {
                     // Sending to one node
@@ -250,7 +254,7 @@ impl Core {
                 }
             };
             for (id, sender) in recipients {
-                match sender.try_send(message.clone()) {
+                match sender.try_send((message.clone(), context.clone())) {
                     Ok(()) => {
                         unhealthy_peers.remove(id);
                     }
@@ -266,7 +270,7 @@ impl Core {
 
     async fn accept_connections(
         self,
-        outgoing_message_rxs: DashMap<NodeId, Mutex<mpsc::Receiver<AppMessage>>>,
+        outgoing_message_rxs: DashMap<NodeId, Mutex<mpsc::Receiver<MessageAndContext>>>,
     ) {
         let addr = format!("0.0.0.0:{}", self.port);
         let outgoing_message_rxs = Arc::new(outgoing_message_rxs);
@@ -276,24 +280,24 @@ impl Core {
         while let Ok((stream, _)) = listener.accept().await {
             let core = self.clone();
             let rxs = outgoing_message_rxs.clone();
-            tokio::spawn(
-                async move {
-                    core.handle_incoming_connection(stream, rxs).await;
-                }
-                .in_current_span(),
-            );
+            tokio::spawn(async move {
+                core.handle_incoming_connection(stream, rxs).await;
+            });
         }
     }
 
     async fn handle_incoming_connection(
         self,
         stream: TcpStream,
-        rxs: Arc<DashMap<NodeId, Mutex<mpsc::Receiver<AppMessage>>>>,
+        rxs: Arc<DashMap<NodeId, Mutex<mpsc::Receiver<MessageAndContext>>>>,
     ) {
-        trace!(
-            "Incoming connection from {}, waiting for OpenConnection message",
-            stream.peer_addr().unwrap()
-        );
+        let span = info_span!("incoming_connection");
+        span.in_scope(|| {
+            debug!(
+                "Incoming connection from {}, waiting for OpenConnection message",
+                stream.peer_addr().unwrap()
+            )
+        });
 
         let mut them = format!("<unknown> ({})", stream.peer_addr().unwrap());
 
@@ -309,7 +313,6 @@ impl Core {
         {
             Ok((peer, peer_version, secret)) => (peer, peer_version, secret),
             Err(error) => {
-                warn!(them, "{:#}", error);
                 if let Some(peer_id) = peer_id {
                     self.report_unhealthy_connection(&peer_id, &format!("{:#}", error));
                 }
@@ -319,7 +322,7 @@ impl Core {
         };
 
         let Some(outgoing_message_rx_mutex) = rxs.get(&peer.id) else {
-            error!(them, "Missing outgoing message receiver");
+            span.in_scope(|| error!(them, "Missing outgoing message receiver"));
             self.report_unhealthy_connection(&peer.id, "Missing outgoing message receiver");
             try_send_disconnect(&them, &mut sink, "Missing outgoing message receiver".into()).await;
             return;
@@ -327,10 +330,12 @@ impl Core {
         let mut outgoing_message_rx = match outgoing_message_rx_mutex.try_lock() {
             Ok(lock) => lock,
             Err(_) => {
-                warn!(
-                    them,
-                    "Cannot establish a new incoming connection, we already have one"
-                );
+                span.in_scope(|| {
+                    warn!(
+                        them,
+                        "Cannot establish a new incoming connection, we already have one"
+                    )
+                });
                 try_send_disconnect(&them, &mut sink, "You are already connected".into()).await;
                 // do not report the connection as unhealthy, because we already have a healthy connection
                 return;
@@ -348,6 +353,7 @@ impl Core {
         .await;
     }
 
+    #[tracing::instrument(err(Debug, level = Level::WARN), skip_all, fields(peer.service=them))]
     async fn handshake_incoming(
         &self,
         them: &mut String,
@@ -367,7 +373,7 @@ impl Core {
                 return Err(anyhow!("expected OpenConnection, got empty message"));
             }
         };
-        trace!(them, "OpenConnection message received");
+        debug!(them, "OpenConnection message received");
 
         // Grab the ecdh nonce they sent us
         let other_ecdh_public_key: ecdh::PublicKey = message.ecdh_public_key.into();
@@ -421,7 +427,7 @@ impl Core {
         sink.write(Message::ConfirmConnection(message))
             .await
             .context("error sending ConfirmConnection message")?;
-        trace!(them, "ConfirmConnection message sent");
+        debug!(them, "ConfirmConnection message sent");
 
         let peer = peer.clone();
         let secret = ecdh_secret.diffie_hellman(&other_ecdh_public_key);
@@ -431,7 +437,7 @@ impl Core {
     async fn handle_outgoing_connection(
         self,
         peer: Peer,
-        mut outgoing_message_rx: mpsc::Receiver<AppMessage>,
+        mut outgoing_message_rx: mpsc::Receiver<MessageAndContext>,
     ) {
         let them = peer.label.clone();
         let mut sleep_seconds = 1;
@@ -443,7 +449,6 @@ impl Core {
             {
                 Ok(stream) => stream,
                 Err(error) => {
-                    warn!(them, "{:#}", error);
                     self.report_unhealthy_connection(&peer.id, &format!("{:#}", error));
                     sleep(Duration::from_secs(sleep_seconds)).await;
                     if sleep_seconds < 8 {
@@ -465,7 +470,6 @@ impl Core {
             {
                 Ok((peer_version, secret)) => (peer_version, secret),
                 Err(error) => {
-                    warn!(them, "{:#}", error);
                     self.report_unhealthy_connection(&peer.id, &format!("{:#}", error));
                     try_send_disconnect(&them, &mut sink, format!("{:#}", error)).await;
                     sleep(Duration::from_secs(sleep_seconds)).await;
@@ -490,14 +494,15 @@ impl Core {
         }
     }
 
+    #[tracing::instrument(err(Debug, level = Level::WARN), skip_all, fields(peer.service=peer.label))]
     async fn open_connection(&self, peer: &Peer) -> Result<TcpStream> {
         let them = peer.label.clone();
-        trace!(them, "Attempting to connect to {}", peer.id);
+        debug!(them, "Attempting to connect to {}", peer.id);
         let stream = TcpStream::connect(&peer.address)
             .await
             .context("error opening connection")?;
 
-        trace!(
+        debug!(
             them,
             "Opening connection to: {}",
             stream.peer_addr().unwrap()
@@ -505,10 +510,11 @@ impl Core {
         stream
             .set_nodelay(true)
             .context("error setting TCP_NODELAY")?;
-        trace!(them, "Set TCP_NODELAY");
+        debug!(them, "Set TCP_NODELAY");
         Ok(stream)
     }
 
+    #[tracing::instrument(err(Debug, level = Level::WARN), skip_all, fields(peer.service=peer.label))]
     async fn handshake_outgoing(
         &self,
         peer: &Peer,
@@ -537,7 +543,7 @@ impl Core {
         sink.write(Message::OpenConnection(Box::new(message)))
             .await
             .context("error sending open message")?;
-        trace!(
+        debug!(
             them,
             "OpenConnection message sent, waiting for ConfirmConnection response"
         );
@@ -559,7 +565,7 @@ impl Core {
                 return Err(anyhow!("Expected ConfirmConnection, got empty message"));
             }
         };
-        trace!(them, "ConfirmConnection message received");
+        debug!(them, "ConfirmConnection message received");
         if message.version != ORACLE_VERSION {
             warn!(
                 them,
@@ -589,7 +595,7 @@ impl Core {
         secret: SharedSecret,
         mut sink: EncodeSink,
         mut stream: DecodeStream,
-        outgoing_message_rx: &mut mpsc::Receiver<AppMessage>,
+        outgoing_message_rx: &mut mpsc::Receiver<MessageAndContext>,
     ) {
         let them = peer.label.clone();
         info!(them, "Connected to {}", peer.id);
@@ -629,14 +635,17 @@ impl Core {
             send_disconnect_tx.send_replace(disconnect_reason.clone());
             try_send_disconnect(&them, &mut sink, disconnect_reason).await;
         }
-        .in_current_span();
+        .instrument(info_span!("send", "otel.kind" = "producer"));
 
         // One task takes messages from the rest of the app and forwards them to the send task
         let send_outgoing_sink = send_sink.clone();
         let send_outgoing_chacha = chacha.clone();
         let send_outgoing_task = async move {
-            while let Some(message) = outgoing_message_rx.recv().await {
-                let message = ApplicationMessage::encrypt(message, &send_outgoing_chacha);
+            while let Some((message, context)) = outgoing_message_rx.recv().await {
+                let propagator = TraceContextPropagator::new();
+                let mut text_map = HashMap::new();
+                propagator.inject_context(&context, &mut text_map);
+                let message = ApplicationMessage::encrypt(message, text_map, &send_outgoing_chacha);
                 if let Err(e) = send_outgoing_sink.send(Message::Application(message)).await {
                     return format!("Failed to send message: {}", e);
                 }
@@ -645,7 +654,7 @@ impl Core {
         };
 
         // Another sends occasional pings to this peer, triggering a disconnect if it doesn't respond.
-        let ping_task = handle_ping(&peer.label, &peer_version, send_sink.clone(), pong_source);
+        let ping_task = handle_ping(&peer.label, send_sink.clone(), pong_source);
 
         // One more task receives all incoming messages and forwards them to other channels.
         let incoming_message_tx = self.incoming_tx.clone();
@@ -654,11 +663,16 @@ impl Core {
             loop {
                 match stream.read().await {
                     Ok(Some(Message::Application(message))) => {
+                        let propagator = TraceContextPropagator::new();
+                        let context = propagator.extract(&message.text_map);
                         let message = match message.decrypt(&chacha) {
                             Ok(message) => message,
                             Err(e) => break format!("Failed to decrypt incoming message: {:#}", e),
                         };
-                        if let Err(e) = incoming_message_tx.send((peer.id.clone(), message)).await {
+                        if let Err(e) = incoming_message_tx
+                            .send((peer.id.clone(), message, context))
+                            .await
+                        {
                             break format!("Failed to process incoming message: {}", e);
                         }
                     }
@@ -679,7 +693,7 @@ impl Core {
                         break format!("Expected Application message, got: {:?}", other);
                     }
                     Ok(None) => {
-                        trace!(them, "Expected Application message, got empty message");
+                        debug!(them, "Expected Application message, got empty message");
                         continue;
                     }
                     Err(e) => {
@@ -702,7 +716,8 @@ impl Core {
             };
             warn!(them, disconnect_reason, "disconnecting from peer");
             disconnect_tx.send_replace(disconnect_reason);
-        };
+        }
+        .instrument(info_span!("process", "otel.kind" = "consumer"));
 
         join!(send_task, process_task);
 
@@ -713,7 +728,11 @@ impl Core {
     async fn report_connected(&self, peer: &Peer) {
         if let Err(e) = self
             .incoming_tx
-            .send((peer.id.clone(), AppMessage::Raft(RaftMessage::Connect)))
+            .send((
+                peer.id.clone(),
+                AppMessage::Raft(RaftMessage::Connect),
+                OtelContext::new(),
+            ))
             .await
         {
             warn!(
@@ -726,7 +745,11 @@ impl Core {
     async fn report_disconnected(&self, peer: &Peer) {
         if let Err(e) = self
             .incoming_tx
-            .send((peer.id.clone(), AppMessage::Raft(RaftMessage::Disconnect)))
+            .send((
+                peer.id.clone(),
+                AppMessage::Raft(RaftMessage::Disconnect),
+                OtelContext::new(),
+            ))
             .await
         {
             warn!(
@@ -753,17 +776,9 @@ impl Core {
 const PING_TIMEOUT: Duration = Duration::from_millis(5000);
 async fn handle_ping(
     them: &str,
-    peer_version: &str,
     sink: mpsc::Sender<Message>,
     mut pong_source: mpsc::Receiver<String>,
 ) -> String {
-    // Don't try pinging someone on a version too old to support pings.
-    // TODO: remove this check after all test nodes are upgraded
-    if peer_version.starts_with("0.7.") {
-        loop {
-            sleep(PING_TIMEOUT).await;
-        }
-    }
     loop {
         let ping_id = Uuid::new_v4().to_string();
         if let Err(e) = sink
@@ -790,6 +805,7 @@ async fn handle_ping(
     }
 }
 
+#[tracing::instrument]
 pub(super) async fn try_send_disconnect(them: &str, sink: &mut EncodeSink, reason: String) {
     match timeout(
         Duration::from_secs(3),

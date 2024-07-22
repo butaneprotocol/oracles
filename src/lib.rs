@@ -4,6 +4,7 @@ pub mod cbor;
 pub mod config;
 pub mod dkg;
 pub mod health;
+pub mod instrumentation;
 pub mod keys;
 pub mod network;
 pub mod price_aggregator;

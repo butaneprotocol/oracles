@@ -53,6 +53,8 @@ impl Raft {
 
             let responses = match next_message {
                 Some(msg) => {
+                    let span = msg.span.clone();
+                    let _x = span.enter();
                     trace!("Received message: {:?}", msg);
                     state.receive(timestamp, msg)
                 }

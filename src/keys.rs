@@ -1,5 +1,7 @@
 use anyhow::{Context, Result};
 use bech32::{Bech32, Hrp};
+use ed25519::{pkcs8::DecodePrivateKey, KeypairBytes};
+use ed25519_dalek::SigningKey;
 use frost_ed25519::keys::{KeyPackage, PublicKeyPackage};
 use pallas_crypto::hash::Hasher;
 use std::{
@@ -44,6 +46,17 @@ pub fn read_frost_keys(
         PublicKeyPackage::deserialize(&public_key_bytes).context("Could not decode public key")?;
 
     Ok((private_key, public_key))
+}
+
+pub fn read_private_key() -> Result<SigningKey> {
+    let key_path = get_keys_directory()?.join("private.pem");
+    let key_pem_file = fs::read_to_string(&key_path).context(format!(
+        "Could not load private key from {}",
+        key_path.display()
+    ))?;
+    let decoded = KeypairBytes::from_pkcs8_pem(&key_pem_file)?;
+    let private_key = SigningKey::from_bytes(&decoded.secret_key);
+    Ok(private_key)
 }
 
 pub fn write_frost_keys(

@@ -1,13 +1,18 @@
-use std::{collections::HashMap, time::Duration};
+use std::{collections::HashMap, str::FromStr, time::Duration};
 
 use anyhow::Result;
 use config::{Config, Environment, File, FileFormat};
+use ed25519::{pkcs8::DecodePublicKey, PublicKeyBytes};
+use ed25519_dalek::{SigningKey, VerifyingKey};
 use kupon::AssetId;
 use rust_decimal::Decimal;
 use serde::Deserialize;
+use tracing::Level;
 
-#[derive(Debug, Deserialize)]
-pub struct OracleConfig {
+use crate::{keys, network::NodeId};
+
+#[derive(Deserialize)]
+struct RawOracleConfig {
     /// Deprecated, switch to network_port
     pub port: Option<u16>,
 
@@ -15,9 +20,29 @@ pub struct OracleConfig {
     pub health_port: u16,
     pub api_port: u16,
     pub consensus: bool,
-    pub peers: Vec<PeerConfig>,
+    pub peers: Vec<RawPeerConfig>,
     pub heartbeat_ms: u64,
     pub timeout_ms: u64,
+    pub logs: RawLogConfig,
+    pub frost_address: Option<String>,
+    pub keygen: KeygenConfig,
+    pub synthetics: Vec<SyntheticConfig>,
+    pub collateral: Vec<CollateralConfig>,
+    pub bybit: ByBitConfig,
+    pub sundaeswap: SundaeSwapConfig,
+    pub minswap: MinswapConfig,
+    pub spectrum: SpectrumConfig,
+}
+
+pub struct OracleConfig {
+    pub id: NodeId,
+    pub label: String,
+    pub network: NetworkConfig,
+    pub health_port: u16,
+    pub api_port: u16,
+    pub consensus: bool,
+    pub heartbeat: Duration,
+    pub timeout: Duration,
     pub logs: LogConfig,
     pub frost_address: Option<String>,
     pub keygen: KeygenConfig,
@@ -29,27 +54,7 @@ pub struct OracleConfig {
     pub spectrum: SpectrumConfig,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct LogConfig {
-    pub json: bool,
-    pub level: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct KeygenConfig {
-    pub enabled: bool,
-    pub min_signers: Option<u16>,
-}
-
 impl OracleConfig {
-    pub fn heartbeat(&self) -> Duration {
-        Duration::from_millis(self.heartbeat_ms)
-    }
-
-    pub fn timeout(&self) -> Duration {
-        Duration::from_millis(self.timeout_ms)
-    }
-
     pub fn hydrate_pools(&self, pools: &[Pool]) -> Vec<HydratedPool> {
         let assets = self.build_asset_lookup();
         pools
@@ -90,11 +95,124 @@ impl OracleConfig {
     }
 }
 
+impl TryFrom<RawOracleConfig> for OracleConfig {
+    type Error = anyhow::Error;
+
+    fn try_from(raw: RawOracleConfig) -> Result<Self, Self::Error> {
+        let private_key = keys::read_private_key()?;
+
+        let id = compute_node_id(&private_key.verifying_key());
+        let mut label = id.to_string();
+        let mut peers = vec![];
+
+        let all_nodes: Result<Vec<Peer>> = raw.peers.into_iter().map(|p| p.try_into()).collect();
+        for node in all_nodes? {
+            if node.id == id {
+                label = node.label;
+            } else {
+                peers.push(node);
+            }
+        }
+
+        let network = NetworkConfig {
+            port: raw.port.unwrap_or(raw.network_port),
+            id: id.clone(),
+            private_key,
+            peers,
+        };
+
+        let logs = LogConfig {
+            id: id.clone(),
+            label: label.clone(),
+            json: raw.logs.json,
+            level: Level::from_str(&raw.logs.level)?,
+            otlp_endpoint: raw.logs.otlp_endpoint,
+            uptrace_dsn: raw.logs.uptrace_dsn,
+        };
+
+        Ok(Self {
+            id,
+            label,
+            network,
+            health_port: raw.health_port,
+            api_port: raw.api_port,
+            consensus: raw.consensus,
+            heartbeat: Duration::from_millis(raw.heartbeat_ms),
+            timeout: Duration::from_millis(raw.timeout_ms),
+            logs,
+            frost_address: raw.frost_address,
+            keygen: raw.keygen,
+            synthetics: raw.synthetics,
+            collateral: raw.collateral,
+            bybit: raw.bybit,
+            sundaeswap: raw.sundaeswap,
+            minswap: raw.minswap,
+            spectrum: raw.spectrum,
+        })
+    }
+}
+
+pub struct NetworkConfig {
+    pub id: NodeId,
+    pub private_key: SigningKey,
+    pub port: u16,
+    pub peers: Vec<Peer>,
+}
+
+#[derive(Deserialize)]
+struct RawLogConfig {
+    pub json: bool,
+    pub level: String,
+    pub otlp_endpoint: Option<String>,
+    pub uptrace_dsn: Option<String>,
+}
+
+pub struct LogConfig {
+    pub id: NodeId,
+    pub label: String,
+    pub json: bool,
+    pub level: Level,
+    pub otlp_endpoint: Option<String>,
+    pub uptrace_dsn: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct KeygenConfig {
+    pub enabled: bool,
+    pub min_signers: Option<u16>,
+}
+
 #[derive(Debug, Deserialize, Clone)]
-pub struct PeerConfig {
+pub struct RawPeerConfig {
     pub label: Option<String>,
     pub address: String,
     pub public_key: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct Peer {
+    pub id: NodeId,
+    pub public_key: VerifyingKey,
+    pub label: String,
+    pub address: String,
+}
+impl TryFrom<RawPeerConfig> for Peer {
+    type Error = anyhow::Error;
+
+    fn try_from(raw: RawPeerConfig) -> Result<Self, Self::Error> {
+        let public_key = {
+            let key_bytes = PublicKeyBytes::from_public_key_pem(&raw.public_key)?;
+            VerifyingKey::from_bytes(&key_bytes.0)?
+        };
+        let id = compute_node_id(&public_key);
+        let label = raw.label.as_ref().unwrap_or(&raw.address).clone();
+        Ok(Self {
+            id,
+            public_key,
+            label,
+            address: raw.address,
+        })
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -181,5 +299,10 @@ pub fn load_config(config_files: &[String]) -> Result<OracleConfig> {
     let config = builder
         .add_source(Environment::with_prefix("ORACLE_"))
         .build()?;
-    Ok(config.try_deserialize()?)
+    let raw: RawOracleConfig = config.try_deserialize()?;
+    raw.try_into()
+}
+
+pub fn compute_node_id(public_key: &VerifyingKey) -> NodeId {
+    NodeId::new(hex::encode(public_key.as_bytes()))
 }

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use tokio::sync::mpsc;
+use tracing::Span;
 
 use crate::network::{
     IncomingMessage, NetworkChannel, NetworkReceiver, NetworkSender, NodeId, OutgoingMessage,
@@ -97,6 +98,7 @@ impl<T: Clone> TestNetwork<T> {
             let message = IncomingMessage {
                 from: from.clone(),
                 data: message.data.clone(),
+                span: Span::none(),
             };
             recipient.send(message).await.unwrap();
         }

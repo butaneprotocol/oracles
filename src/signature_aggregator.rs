@@ -1,8 +1,9 @@
 pub mod consensus_aggregator;
+pub mod price_comparator;
 pub mod signer;
 pub mod single_aggregator;
 
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use anyhow::Result;
 use consensus_aggregator::ConsensusSignatureAggregator;
@@ -13,13 +14,14 @@ pub use single_aggregator::SingleSignatureAggregator;
 use tokio::{
     select,
     sync::{mpsc, watch},
+    time::sleep,
 };
-use tracing::Instrument;
+use tracing::debug;
 
 use crate::{
     config::OracleConfig,
     network::{Network, NodeId},
-    price_feed::{PriceFeedEntry, SignedEntries},
+    price_feed::{IntervalBoundType, PriceFeedEntry, SignedEntries},
     raft::RaftLeader,
 };
 
@@ -94,12 +96,42 @@ impl SignatureAggregator {
                 SignatureAggregatorImplementation::Single(s) => s.run().await,
                 SignatureAggregatorImplementation::Consensus(c) => c.run().await,
             }
-        }
-        .in_current_span();
+        };
+
+        let (payload_age_sink, payload_age_source) = {
+            let now = SystemTime::now();
+            let later = now + Duration::from_secs(60);
+            watch::channel((now, later))
+        };
+
+        let monitor_task = async move {
+            loop {
+                let (last_updated, valid_until) = *payload_age_source.borrow();
+                let is_valid: u64 = if SystemTime::now() < valid_until {
+                    1
+                } else {
+                    0
+                };
+                if let Ok(age) = SystemTime::now().duration_since(last_updated) {
+                    if let Ok(age_in_millis) = u64::try_from(age.as_millis()) {
+                        debug!(
+                            histogram.payload_age = age_in_millis,
+                            histogram.payload_is_valid = is_valid
+                        );
+                    }
+                }
+                sleep(Duration::from_secs(1)).await;
+            }
+        };
 
         let mut payload_source = self.signed_entries_source;
         let publish_task = async move {
             while let Some((publisher, payload)) = payload_source.recv().await {
+                // update the payload age monitor now that we have a new payload
+                let last_updated = payload.timestamp;
+                let valid_to = find_end_of_payload_validity(&payload);
+                payload_age_sink.send_replace((last_updated, valid_to));
+
                 let entries = payload
                     .entries
                     .iter()
@@ -124,14 +156,38 @@ impl SignatureAggregator {
                 };
                 self.payload_sink.send_replace(payload);
             }
-        }
-        .in_current_span();
+        };
 
         select! {
             res = run_task => res,
+            res = monitor_task => res,
             res = publish_task => res,
         }
     }
+}
+
+fn find_end_of_payload_validity(payload: &SignedEntries) -> SystemTime {
+    let mut valid_to = None;
+    for price_feed in &payload.entries {
+        let upper_bound = price_feed.data.data.validity.upper_bound;
+        match upper_bound.bound_type {
+            IntervalBoundType::NegativeInfinity => {
+                return SystemTime::UNIX_EPOCH;
+            }
+            IntervalBoundType::PositiveInfinity => {
+                continue;
+            }
+            IntervalBoundType::Finite(unix_timestamp) => {
+                let payload_valid_to =
+                    SystemTime::UNIX_EPOCH + Duration::from_millis(unix_timestamp);
+                if valid_to.is_some_and(|v| v < payload_valid_to) {
+                    continue;
+                }
+                valid_to.replace(payload_valid_to);
+            }
+        }
+    }
+    valid_to.unwrap_or(SystemTime::UNIX_EPOCH)
 }
 
 #[derive(Serialize, Clone)]

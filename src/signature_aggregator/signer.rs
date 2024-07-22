@@ -17,17 +17,18 @@ use minicbor::{Decode, Encode};
 use rand::thread_rng;
 use rust_decimal::prelude::ToPrimitive;
 use tokio::sync::{mpsc, watch};
-use tracing::{info, instrument, warn};
+use tracing::{info, info_span, instrument, warn, Instrument, Span};
 use uuid::Uuid;
 
 use crate::{
     cbor::{CborIdentifier, CborSignatureShare, CborSigningCommitments, CborSigningPackage},
     network::{NetworkSender, NodeId},
     price_feed::{
-        deserialize, serialize, IntervalBound, IntervalBoundType, PriceFeed, PriceFeedEntry,
-        SignedEntries, SignedEntry, SignedPriceFeed, Validity,
+        deserialize, serialize, PriceFeed, PriceFeedEntry, SignedEntries, SignedEntry,
+        SignedPriceFeed,
     },
     raft::RaftLeader,
+    signature_aggregator::price_comparator::should_sign_all,
 };
 
 #[derive(Decode, Encode, Clone, Debug)]
@@ -49,7 +50,7 @@ impl Display for SignerMessage {
 #[derive(Decode, Encode, Clone, Debug)]
 pub enum SignerMessageData {
     #[n(0)]
-    RequestCommitment,
+    RequestCommitment(#[n(0)] CommitmentRequest),
     #[n(1)]
     Commit(#[n(0)] Commitment),
     #[n(2)]
@@ -62,13 +63,19 @@ pub enum SignerMessageData {
 impl Display for SignerMessageData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::RequestCommitment => f.write_str("RequestCommitment"),
+            Self::RequestCommitment(_) => f.write_str("RequestCommitment"),
             Self::Commit(_) => f.write_str("Commit"),
             Self::RequestSignature(_) => f.write_str("RequestSignature"),
             Self::Sign(_) => f.write_str("Sign"),
             Self::Publish(_) => f.write_str("Publish"),
         }
     }
+}
+
+#[derive(Decode, Encode, Clone, Debug)]
+pub struct CommitmentRequest {
+    #[n(0)]
+    price_feed: Vec<PriceFeed>,
 }
 
 #[derive(Decode, Encode, Clone, Debug)]
@@ -96,14 +103,14 @@ pub struct Signature {
 #[derive(Clone)]
 pub enum SignerEvent {
     RoundStarted,
-    Message(NodeId, SignerMessage),
+    Message(NodeId, SignerMessage, Span),
     LeaderChanged(RaftLeader),
 }
 impl Display for SignerEvent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::RoundStarted => f.write_str("RoundStarted"),
-            Self::Message(from, message) => {
+            Self::Message(from, message, _) => {
                 f.write_fmt(format_args!("Message{{from={},data={}}}", from, message))
             }
             Self::LeaderChanged(leader) => {
@@ -117,12 +124,14 @@ enum LeaderState {
     Ready,
     CollectingCommitments {
         round: String,
+        round_span: Span,
         price_data: Vec<PriceFeedEntry>,
-        commitments: Vec<Commitment>,
+        commitments: Vec<(NodeId, Commitment)>,
         my_nonces: Vec<SigningNonces>,
     },
     CollectingSignatures {
         round: String,
+        round_span: Span,
         price_data: Vec<PriceFeedEntry>,
         signatures: Vec<Signature>,
         packages: Vec<SigningPackage>,
@@ -135,8 +144,10 @@ impl Display for LeaderState {
             Self::CollectingCommitments {
                 round, commitments, ..
             } => {
-                let committed: Vec<Identifier> =
-                    commitments.iter().map(|c| c.identifier.into()).collect();
+                let committed: Vec<Identifier> = commitments
+                    .iter()
+                    .map(|(_, c)| c.identifier.into())
+                    .collect();
                 f.write_fmt(format_args!(
                     "{{role=Leader,state=CollectingCommitments,round={},committed={:?}}}",
                     round, committed
@@ -155,11 +166,22 @@ impl Display for LeaderState {
         }
     }
 }
+impl LeaderState {
+    fn round(&self) -> &str {
+        match self {
+            Self::Ready => "",
+            Self::CollectingCommitments { round, .. } => round,
+            Self::CollectingSignatures { round, .. } => round,
+        }
+    }
+}
 
 enum FollowerState {
     Ready,
     Committed {
         round: String,
+        round_span: Span,
+        price_data: Vec<PriceFeedEntry>,
         nonces: Vec<SigningNonces>,
     },
 }
@@ -174,6 +196,15 @@ impl Display for FollowerState {
         }
     }
 }
+impl FollowerState {
+    fn round(&self) -> &str {
+        match self {
+            Self::Ready => "",
+            Self::Committed { round, .. } => round,
+        }
+    }
+}
+
 enum SignerState {
     Leader(LeaderState),
     Follower(NodeId, FollowerState),
@@ -185,6 +216,15 @@ impl Display for SignerState {
             Self::Leader(state) => state.fmt(f),
             Self::Follower(_, state) => state.fmt(f),
             Self::Unknown => f.write_str("{role=Unknown}"),
+        }
+    }
+}
+impl SignerState {
+    pub fn round(&self) -> &str {
+        match self {
+            Self::Leader(state) => state.round(),
+            Self::Follower(_, state) => state.round(),
+            Self::Unknown => "",
         }
     }
 }
@@ -219,12 +259,12 @@ impl Signer {
         }
     }
 
-    #[instrument(skip_all, fields(state = %self.state))]
+    #[instrument(skip_all, fields(round = self.state.round(), state = %self.state))]
     pub async fn process(&mut self, event: SignerEvent) {
-        info!("Processing event: {}", event);
+        info!("Started event: {}", event);
         match self.do_process(event.clone()).await {
             Ok(()) => {
-                info!("Processed event: {}", event)
+                info!("Finished event: {}", event)
             }
             Err(error) => {
                 warn!(%error, "Error occurred during signing flow");
@@ -246,21 +286,27 @@ impl Signer {
                     self.request_commitments().await?;
                 }
             }
-            SignerEvent::Message(from, SignerMessage { round, data }) => match data {
-                SignerMessageData::RequestCommitment => {
-                    self.send_commitment(round).await?;
+            SignerEvent::Message(from, SignerMessage { round, data }, span) => match data {
+                SignerMessageData::RequestCommitment(request) => {
+                    self.send_commitment(round, request)
+                        .instrument(span)
+                        .await?;
                 }
                 SignerMessageData::Commit(commitment) => {
-                    self.process_commitment(round, from, commitment).await?;
+                    self.process_commitment(round, from, commitment)
+                        .instrument(span)
+                        .await?;
                 }
                 SignerMessageData::RequestSignature(request) => {
-                    self.send_signature(round, request).await?;
+                    self.send_signature(round, request).instrument(span).await?;
                 }
                 SignerMessageData::Sign(signature) => {
-                    self.process_signature(round, signature).await?;
+                    self.process_signature(round, signature)
+                        .instrument(span)
+                        .await?;
                 }
                 SignerMessageData::Publish(payload) => {
-                    self.publish(from, payload).await?;
+                    self.publish(from, payload).instrument(span).await?;
                 }
             },
         }
@@ -269,19 +315,27 @@ impl Signer {
 
     async fn request_commitments(&mut self) -> Result<()> {
         let round = Uuid::new_v4().to_string();
-
         let price_data = self.price_source.borrow().clone();
-        info!(
+
+        let round_span = info_span!(
+            "signer_round",
+            role = "leader",
             round,
-            ?price_data,
-            "Beginning round of signature collection, requesting commitments"
+            price_data = format!("{:#?}", price_data)
         );
+        round_span.follows_from(Span::current());
+
+        round_span
+            .in_scope(|| info!("Beginning round of signature collection, requesting commitments"));
+
+        let price_feed = price_data.iter().map(|entry| entry.data.clone()).collect();
+        let request = CommitmentRequest { price_feed };
 
         // request other folks commit
         self.message_sink
             .broadcast(SignerMessage {
                 round: round.clone(),
-                data: SignerMessageData::RequestCommitment,
+                data: SignerMessageData::RequestCommitment(request),
             })
             .await;
 
@@ -289,23 +343,51 @@ impl Signer {
         let (my_nonces, commitment) = self.commit(price_data.len());
         self.state = SignerState::Leader(LeaderState::CollectingCommitments {
             round,
+            round_span,
             price_data,
-            commitments: vec![commitment],
+            commitments: vec![(self.id.clone(), commitment)],
             my_nonces,
         });
 
         Ok(())
     }
 
-    async fn send_commitment(&mut self, round: String) -> Result<()> {
-        let SignerState::Follower(leader_id, _) = &self.state else {
+    async fn send_commitment(&mut self, round: String, request: CommitmentRequest) -> Result<()> {
+        let SignerState::Follower(leader_id, old_state) = &self.state else {
             // we're not a follower ATM
             return Ok(());
         };
         let leader_id = leader_id.clone();
+        let (round_span, price_data) = match old_state {
+            FollowerState::Committed {
+                round: curr_round,
+                round_span,
+                price_data,
+                ..
+            } if curr_round == &round => (round_span.clone(), price_data.clone()),
+            _ => {
+                let price_data = self.price_source.borrow().clone();
+                let round_span = info_span!(
+                    "signer_round",
+                    role = "follower",
+                    round,
+                    price_data = format!("{:#?}", price_data)
+                );
+                round_span.follows_from(Span::current());
+                (round_span, price_data)
+            }
+        };
+
+        let my_feed: Vec<PriceFeed> = price_data.iter().map(|entry| entry.data.clone()).collect();
+        if let Err(mismatch) = should_sign_all(&request.price_feed, &my_feed) {
+            round_span
+                .in_scope(|| warn!(error = mismatch, "Not sending commitment for this round"));
+            return Ok(());
+        }
 
         // Send our commitment
-        let commitment_count = self.price_source.borrow().len();
+        round_span.in_scope(|| info!("Sending commitment for this round"));
+        let commitment_count = price_data.len();
         let (nonces, commitment) = self.commit(commitment_count);
         self.message_sink
             .send(
@@ -320,7 +402,12 @@ impl Signer {
         // And wait to be asked to sign
         self.state = SignerState::Follower(
             leader_id.clone(),
-            FollowerState::Committed { round, nonces },
+            FollowerState::Committed {
+                round,
+                round_span,
+                price_data,
+                nonces,
+            },
         );
 
         Ok(())
@@ -334,6 +421,7 @@ impl Signer {
     ) -> Result<()> {
         let SignerState::Leader(LeaderState::CollectingCommitments {
             round: curr_round,
+            round_span,
             price_data,
             commitments,
             my_nonces,
@@ -346,15 +434,16 @@ impl Signer {
             // Commitment from a different round
             return Ok(());
         }
+        let round_span = round_span.clone();
 
         if commitments
             .iter()
-            .any(|c| c.identifier == commitment.identifier)
+            .any(|(_, c)| c.identifier == commitment.identifier)
         {
             // we saw this one
             return Ok(());
         }
-        commitments.push(commitment);
+        commitments.push((from, commitment));
 
         if commitments.len() < (*self.key.min_signers() as usize) {
             // still collecting
@@ -364,15 +453,22 @@ impl Signer {
         let mut commitment_maps = vec![BTreeMap::new(); price_data.len()];
         let mut recipients = vec![];
         // time to transition to signing
-        for commitment in commitments {
-            if from != self.id {
-                recipients.push(from.clone());
+        for (signer, commitment) in commitments {
+            if *signer != self.id {
+                recipients.push(signer.clone());
             }
             for (idx, c) in commitment.commitments.iter().enumerate() {
                 let comm: SigningCommitments = (*c).into();
                 commitment_maps[idx].insert(commitment.identifier.into(), comm);
             }
         }
+
+        round_span.in_scope(|| {
+            info!(
+                ?recipients,
+                "Collected enough commitments, time to collect signatures"
+            )
+        });
 
         let price_data = price_data.clone();
         // Request signatures from all the committees
@@ -401,6 +497,7 @@ impl Signer {
 
         self.state = SignerState::Leader(LeaderState::CollectingSignatures {
             round,
+            round_span,
             price_data,
             signatures: vec![my_signature],
             packages,
@@ -413,10 +510,11 @@ impl Signer {
         let packages: Vec<SigningPackage> =
             request.packages.into_iter().map(|i| i.into()).collect();
         let SignerState::Follower(
-            leader_id,
+            _,
             FollowerState::Committed {
                 round: curr_round,
-                nonces,
+                round_span,
+                ..
             },
         ) = &self.state
         else {
@@ -427,8 +525,36 @@ impl Signer {
             // Signature requested from a different round
             return Ok(());
         };
+        let round_span = round_span.clone();
 
-        let price_data = self.price_source.borrow().clone();
+        match self
+            .do_send_signature(round, &packages)
+            .instrument(round_span.clone())
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(error) => {
+                round_span.in_scope(|| warn!(?error));
+                Err(error)
+            }
+        }
+    }
+
+    // separated into its own method so that we can easily instrument the error
+    async fn do_send_signature(
+        &mut self,
+        round: String,
+        packages: &[SigningPackage],
+    ) -> Result<()> {
+        let SignerState::Follower(
+            leader_id,
+            FollowerState::Committed {
+                price_data, nonces, ..
+            },
+        ) = &self.state
+        else {
+            return Ok(());
+        };
 
         // Make sure we are OK with signing this
         if packages.len() != price_data.len() {
@@ -436,16 +562,17 @@ impl Signer {
                 "Mismatched price feed count. Is this server misconfigured?"
             ));
         }
-        for (package, my_feed) in packages.iter().zip(price_data.iter()) {
-            let leader_feed =
-                deserialize(package.message()).context("could not decode price_feed")?;
-            if let Err(mismatch) = should_sign(&leader_feed, &my_feed.data) {
-                return Err(anyhow!("Not signing payload: {}", mismatch));
-            }
+        let leader_feed: Result<Vec<PriceFeed>> = packages
+            .iter()
+            .map(|p| deserialize(p.message()).context("could not decode price_feed"))
+            .collect();
+        let my_feed: Vec<PriceFeed> = price_data.iter().map(|entry| entry.data.clone()).collect();
+        if let Err(mismatch) = should_sign_all(&leader_feed?, &my_feed) {
+            return Err(anyhow!("Not signing payload: {}", mismatch));
         }
 
         // Send our signature back to the leader
-        let signature = self.sign(&packages, nonces)?;
+        let signature = self.sign(packages, nonces)?;
         self.message_sink
             .send(
                 leader_id.clone(),
@@ -455,6 +582,7 @@ impl Signer {
                 },
             )
             .await;
+        info!("Sent signature for this round");
 
         // and vibe until we get back into the signature flow
         self.state = SignerState::Follower(leader_id.clone(), FollowerState::Ready);
@@ -465,6 +593,7 @@ impl Signer {
     async fn process_signature(&mut self, round: String, signature: Signature) -> Result<()> {
         let SignerState::Leader(LeaderState::CollectingSignatures {
             round: curr_round,
+            round_span,
             price_data,
             signatures,
             packages,
@@ -491,6 +620,9 @@ impl Signer {
             // still collecting
             return Ok(());
         }
+
+        round_span
+            .in_scope(|| info!("Collected all signatures, signing and completing this round"));
 
         // We've finally collected all the signatures we need! Now just aggregate them
         let mut signature_maps = vec![BTreeMap::new(); price_data.len()];
@@ -524,10 +656,7 @@ impl Signer {
             entries: payload_entries,
         };
 
-        self.signed_entries_sink
-            .send((self.id.clone(), payload.clone()))
-            .await
-            .context("Could not publish signed result")?;
+        self.publish(self.id.clone(), payload.clone()).await?;
 
         // Notify our peers that we've agreed to sign the payload
         self.message_sink
@@ -580,62 +709,6 @@ impl Signer {
     }
 }
 
-fn should_sign(leader_feed: &PriceFeed, my_feed: &PriceFeed) -> Result<(), String> {
-    if leader_feed.synthetic != my_feed.synthetic {
-        return Err(format!(
-            "mismatched synthetics: leader has {}, we have {}",
-            leader_feed.synthetic, my_feed.synthetic
-        ));
-    }
-    if !is_validity_close_enough(&leader_feed.validity, &my_feed.validity) {
-        return Err(format!(
-            "mismatched validity: leader has {:?}, we have {:?}",
-            leader_feed.validity, my_feed.validity
-        ));
-    }
-    if leader_feed.collateral_prices.len() != my_feed.collateral_prices.len() {
-        return Err(format!(
-            "wrong number of collateral prices: leader has {}, we have {}",
-            leader_feed.collateral_prices.len(),
-            my_feed.collateral_prices.len()
-        ));
-    }
-    // If one price is >1% less than the other, they're too distant to trust
-    for (leader_price, my_price) in leader_feed
-        .collateral_prices
-        .iter()
-        .zip(my_feed.collateral_prices.iter())
-    {
-        let leader_value = leader_price * &my_feed.denominator;
-        let my_value = my_price * &leader_feed.denominator;
-        let max_value = leader_value.clone().max(my_value.clone());
-        let min_value = leader_value.min(my_value);
-        let difference = &max_value - min_value;
-        if difference * 100u32 > max_value {
-            return Err(format!(
-                "collateral prices are too distant: leader has {}/{}, we have {}/{}",
-                leader_price, leader_feed.denominator, my_price, my_feed.denominator
-            ));
-        }
-    }
-    Ok(())
-}
-fn is_validity_close_enough(leader_validity: &Validity, my_validity: &Validity) -> bool {
-    are_bounds_close_enough(&leader_validity.lower_bound, &my_validity.lower_bound)
-        && are_bounds_close_enough(&leader_validity.upper_bound, &my_validity.upper_bound)
-}
-
-fn are_bounds_close_enough(leader_bound: &IntervalBound, my_bound: &IntervalBound) -> bool {
-    if let IntervalBoundType::Finite(leader_moment) = leader_bound.bound_type {
-        if let IntervalBoundType::Finite(my_moment) = my_bound.bound_type {
-            let difference = leader_moment.max(my_moment) - leader_moment.min(my_moment);
-            // allow up to 60 seconds difference between bounds
-            return difference < 1000 * 60;
-        }
-    }
-    leader_bound == my_bound
-}
-
 #[cfg(test)]
 mod tests {
     use anyhow::Result;
@@ -643,11 +716,15 @@ mod tests {
     use num_bigint::BigUint;
     use rand::thread_rng;
     use rust_decimal::{prelude::FromPrimitive, Decimal};
-    use tokio::sync::{mpsc, watch};
+    use tokio::sync::{
+        mpsc::{self, error::TryRecvError},
+        watch,
+    };
+    use tracing::{Instrument, Span};
 
     use crate::{
         network::{NetworkReceiver, NodeId, TestNetwork},
-        price_feed::{IntervalBound, PriceFeed, PriceFeedEntry, SignedEntries, Validity},
+        price_feed::{PriceFeed, PriceFeedEntry, SignedEntries, Validity},
         raft::RaftLeader,
         signature_aggregator::signer::SignerMessage,
     };
@@ -667,7 +744,12 @@ mod tests {
         async fn process_incoming_messages(&mut self) {
             while let Some(message) = self.receiver.try_recv().await {
                 self.signer
-                    .process(SignerEvent::Message(message.from, message.data))
+                    .process(SignerEvent::Message(
+                        message.from,
+                        message.data,
+                        Span::none(),
+                    ))
+                    .instrument(message.span)
                     .await;
             }
         }
@@ -744,6 +826,17 @@ mod tests {
         }
     }
 
+    fn assert_round_complete(payload_source: &mut mpsc::Receiver<(NodeId, SignedEntries)>) {
+        assert!(payload_source.try_recv().is_ok());
+    }
+
+    fn assert_round_not_complete(payload_source: &mut mpsc::Receiver<(NodeId, SignedEntries)>) {
+        assert!(matches!(
+            payload_source.try_recv(),
+            Err(TryRecvError::Empty)
+        ));
+    }
+
     fn price_feed_entry(
         synthetic: &str,
         price: f64,
@@ -809,7 +902,24 @@ mod tests {
         signers[0].process_incoming_messages().await;
 
         // leader should have published results
-        assert!(payload_source.recv().await.is_some());
+        assert_round_complete(&mut payload_source);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn should_sign_payload_with_quorum_of_three() -> Result<()> {
+        let price_data = vec![
+            price_feed_entry("ADA", 3.50, &[3, 4], 1),
+            price_feed_entry("BTN", 1.21, &[5, 8], 1),
+        ];
+
+        let (mut signers, mut network, mut payload_source) =
+            construct_signers(3, vec![price_data; 4]).await?;
+        assign_roles(&mut signers).await;
+        run_round(&mut signers, &mut network).await;
+
+        assert_round_complete(&mut payload_source);
 
         Ok(())
     }
@@ -824,7 +934,7 @@ mod tests {
         assign_roles(&mut signers).await;
         run_round(&mut signers, &mut network).await;
 
-        assert!(payload_source.recv().await.is_some());
+        assert_round_complete(&mut payload_source);
 
         Ok(())
     }
@@ -839,55 +949,7 @@ mod tests {
         assign_roles(&mut signers).await;
         run_round(&mut signers, &mut network).await;
 
-        assert!(payload_source.try_recv().is_err());
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn should_sign_close_enough_validity() -> Result<()> {
-        const TIMESTAMP: u64 = 1712723729359;
-        let mut leader_price = price_feed_entry("TOKEN", 3.50, &[1], 1);
-        leader_price.data.validity = Validity {
-            lower_bound: IntervalBound::unix_timestamp(TIMESTAMP, true),
-            upper_bound: IntervalBound::unix_timestamp(TIMESTAMP + 3000000, true),
-        };
-        let mut follower_price = price_feed_entry("TOKEN", 3.50, &[1], 1);
-        follower_price.data.validity = Validity {
-            lower_bound: IntervalBound::unix_timestamp(TIMESTAMP + 5000, true),
-            upper_bound: IntervalBound::unix_timestamp(TIMESTAMP + 3005000, true),
-        };
-
-        let (mut signers, mut network, mut payload_source) =
-            construct_signers(2, vec![vec![leader_price], vec![follower_price]]).await?;
-        assign_roles(&mut signers).await;
-        run_round(&mut signers, &mut network).await;
-
-        assert!(payload_source.recv().await.is_some());
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn should_not_sign_distant_validity() -> Result<()> {
-        const TIMESTAMP: u64 = 1712723729359;
-        let mut leader_price = price_feed_entry("TOKEN", 3.50, &[1], 1);
-        leader_price.data.validity = Validity {
-            lower_bound: IntervalBound::unix_timestamp(TIMESTAMP, true),
-            upper_bound: IntervalBound::unix_timestamp(TIMESTAMP + 3000000, true),
-        };
-        let mut follower_price = price_feed_entry("TOKEN", 3.50, &[1], 1);
-        follower_price.data.validity = Validity {
-            lower_bound: IntervalBound::unix_timestamp(TIMESTAMP + 5000000, true),
-            upper_bound: IntervalBound::unix_timestamp(TIMESTAMP + 8000000, true),
-        };
-
-        let (mut signers, mut network, mut payload_source) =
-            construct_signers(2, vec![vec![leader_price], vec![follower_price]]).await?;
-        assign_roles(&mut signers).await;
-        run_round(&mut signers, &mut network).await;
-
-        assert!(payload_source.try_recv().is_err());
+        assert_round_not_complete(&mut payload_source);
 
         Ok(())
     }
