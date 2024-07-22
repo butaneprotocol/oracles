@@ -3,7 +3,7 @@ mod logic;
 mod tests;
 
 use tokio::{sync::watch, time::Instant};
-use tracing::{info, trace};
+use tracing::{debug, info};
 
 use crate::network::{Network, NetworkChannel, NodeId};
 
@@ -55,7 +55,7 @@ impl Raft {
                 Some(msg) => {
                     let span = msg.span.clone();
                     let _x = span.enter();
-                    trace!("Received message: {:?}", msg);
+                    debug!("Received message: {:?}", msg);
                     state.receive(timestamp, msg)
                 }
                 None => state.tick(timestamp),

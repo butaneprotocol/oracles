@@ -6,7 +6,7 @@ use tokio::{
     sync::watch,
     time::{Duration, Instant},
 };
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, info, warn};
 
 use crate::network::{IncomingMessage, NodeId};
 
@@ -164,7 +164,7 @@ impl RaftState {
             RaftMessage::RequestVote {
                 term: requested_term,
             } => {
-                trace!(term = requested_term, "Vote requested by {}", from);
+                debug!(term = requested_term, "Vote requested by {}", from);
                 let peer = from.clone();
                 let is_new_term = *requested_term > self.term;
                 let (vote, reason) = if is_new_term {
@@ -191,7 +191,7 @@ impl RaftState {
                     }
                 };
 
-                trace!(
+                debug!(
                     term = requested_term,
                     reason = reason,
                     vote = vote,
@@ -233,15 +233,15 @@ impl RaftState {
                             return vec![];
                         }
                         if *term > self.term {
-                            trace!(
-                                term = term,
+                            debug!(
+                                term,
                                 my_term = self.term,
                                 "Updating to match peer's newer term"
                             );
                             self.term = *term;
                         }
                         if !vote {
-                            trace!(
+                            debug!(
                                 votes = prev_votes.len(),
                                 term,
                                 quorum = self.quorum,
@@ -252,7 +252,7 @@ impl RaftState {
 
                         let mut new_votes = prev_votes.clone();
                         new_votes.insert(from.clone());
-                        trace!(
+                        debug!(
                             votes = new_votes.len(),
                             term,
                             quorum = self.quorum,
@@ -337,7 +337,7 @@ impl RaftState {
         } else if is_leader && heartbeat_timeout {
             self.emit_has_leader(true);
             if !self.peers.is_empty() {
-                trace!("Sending heartbeats as leader");
+                debug!("Sending heartbeats as leader");
                 // Send heartbeats
                 self.last_event = timestamp;
                 self.peers
