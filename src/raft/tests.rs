@@ -4,6 +4,7 @@ use tokio::{
     sync::watch,
     time::{Duration, Instant},
 };
+use tracing::Span;
 
 use crate::{
     network::{IncomingMessage, NodeId},
@@ -592,6 +593,7 @@ impl Participant {
             IncomingMessage {
                 from: from.clone(),
                 data: message,
+                span: Span::none(),
             },
         )
     }

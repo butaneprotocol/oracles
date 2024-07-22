@@ -1,6 +1,7 @@
 use std::fmt::{self, Display};
 
 use serde::{Deserialize, Serialize};
+use tracing::Span;
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Eq, Ord, Hash, Serialize, Deserialize)]
 pub struct NodeId(String);
@@ -25,10 +26,12 @@ impl Display for NodeId {
 pub struct OutgoingMessage<T> {
     pub to: Option<NodeId>,
     pub data: T,
+    pub span: Span,
 }
 
 #[derive(Debug)]
 pub struct IncomingMessage<T> {
     pub from: NodeId,
     pub data: T,
+    pub span: Span,
 }

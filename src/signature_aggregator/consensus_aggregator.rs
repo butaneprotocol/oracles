@@ -89,9 +89,13 @@ impl ConsensusSignatureAggregator {
         let mut message_source = self.message_source;
         let message_received_task = async move {
             while let Some(incoming) = message_source.recv().await {
-                let span = info_span!("message_received");
+                let span = info_span!(parent: incoming.span, "message_received");
                 if let Err(err) = event_sink
-                    .send(SignerEvent::Message(incoming.from, incoming.data))
+                    .send(SignerEvent::Message(
+                        incoming.from,
+                        incoming.data,
+                        span.clone(),
+                    ))
                     .await
                 {
                     span.in_scope(|| warn!("Failed to receive message: {}", err));

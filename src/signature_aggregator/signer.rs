@@ -103,14 +103,14 @@ pub struct Signature {
 #[derive(Clone)]
 pub enum SignerEvent {
     RoundStarted,
-    Message(NodeId, SignerMessage),
+    Message(NodeId, SignerMessage, Span),
     LeaderChanged(RaftLeader),
 }
 impl Display for SignerEvent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::RoundStarted => f.write_str("RoundStarted"),
-            Self::Message(from, message) => {
+            Self::Message(from, message, _) => {
                 f.write_fmt(format_args!("Message{{from={},data={}}}", from, message))
             }
             Self::LeaderChanged(leader) => {
@@ -261,10 +261,10 @@ impl Signer {
 
     #[instrument(skip_all, fields(round = self.state.round(), state = %self.state))]
     pub async fn process(&mut self, event: SignerEvent) {
-        info!("Processing event: {}", event);
+        info!("Started event: {}", event);
         match self.do_process(event.clone()).await {
             Ok(()) => {
-                info!("Processed event: {}", event)
+                info!("Finished event: {}", event)
             }
             Err(error) => {
                 warn!(%error, "Error occurred during signing flow");
@@ -286,21 +286,27 @@ impl Signer {
                     self.request_commitments().await?;
                 }
             }
-            SignerEvent::Message(from, SignerMessage { round, data }) => match data {
+            SignerEvent::Message(from, SignerMessage { round, data }, span) => match data {
                 SignerMessageData::RequestCommitment(request) => {
-                    self.send_commitment(round, request).await?;
+                    self.send_commitment(round, request)
+                        .instrument(span)
+                        .await?;
                 }
                 SignerMessageData::Commit(commitment) => {
-                    self.process_commitment(round, from, commitment).await?;
+                    self.process_commitment(round, from, commitment)
+                        .instrument(span)
+                        .await?;
                 }
                 SignerMessageData::RequestSignature(request) => {
-                    self.send_signature(round, request).await?;
+                    self.send_signature(round, request).instrument(span).await?;
                 }
                 SignerMessageData::Sign(signature) => {
-                    self.process_signature(round, signature).await?;
+                    self.process_signature(round, signature)
+                        .instrument(span)
+                        .await?;
                 }
                 SignerMessageData::Publish(payload) => {
-                    self.publish(from, payload).await?;
+                    self.publish(from, payload).instrument(span).await?;
                 }
             },
         }
@@ -714,6 +720,7 @@ mod tests {
         mpsc::{self, error::TryRecvError},
         watch,
     };
+    use tracing::{Instrument, Span};
 
     use crate::{
         network::{NetworkReceiver, NodeId, TestNetwork},
@@ -737,7 +744,12 @@ mod tests {
         async fn process_incoming_messages(&mut self) {
             while let Some(message) = self.receiver.try_recv().await {
                 self.signer
-                    .process(SignerEvent::Message(message.from, message.data))
+                    .process(SignerEvent::Message(
+                        message.from,
+                        message.data,
+                        Span::none(),
+                    ))
+                    .instrument(message.span)
                     .await;
             }
         }

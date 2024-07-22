@@ -11,6 +11,8 @@ use ed25519::{signature::Signer, Signature};
 use ed25519_dalek::{SigningKey as PrivateKey, Verifier};
 use minicbor::{bytes::ByteVec, Decode, Decoder, Encode, Encoder};
 use minicbor_io::{AsyncReader, AsyncWriter};
+use opentelemetry::{propagation::TextMapPropagator, Context as OtelContext};
+use opentelemetry_sdk::propagation::TraceContextPropagator;
 use rand::thread_rng;
 use tokio::{
     join,
@@ -78,10 +80,16 @@ struct ApplicationMessage {
     nonce: ByteVec,
     #[n(1)]
     payload: ByteVec,
+    #[n(2)]
+    text_map: HashMap<String, String>,
 }
 
 impl ApplicationMessage {
-    pub fn encrypt(message: AppMessage, cipher: &XChaCha20Poly1305) -> Self {
+    pub fn encrypt(
+        message: AppMessage,
+        text_map: HashMap<String, String>,
+        cipher: &XChaCha20Poly1305,
+    ) -> Self {
         let nonce: Nonce = {
             let mut rng = thread_rng();
             XChaCha20Poly1305::generate_nonce(&mut rng)
@@ -96,6 +104,7 @@ impl ApplicationMessage {
         Self {
             nonce: nonce_bytes.into(),
             payload: payload.into(),
+            text_map,
         }
     }
 
@@ -126,8 +135,9 @@ enum Message {
     Pong(#[n(0)] String),
 }
 
-type OutgoingMessageReceiver = mpsc::Receiver<(Option<NodeId>, AppMessage)>;
-type IncomingMessageSender = mpsc::Sender<(NodeId, AppMessage)>;
+type OutgoingMessageReceiver = mpsc::Receiver<(Option<NodeId>, AppMessage, OtelContext)>;
+type IncomingMessageSender = mpsc::Sender<(NodeId, AppMessage, OtelContext)>;
+type MessageAndContext = (AppMessage, OtelContext);
 
 #[derive(Clone)]
 pub struct Core {
@@ -222,10 +232,13 @@ impl Core {
         Ok(())
     }
 
-    async fn send_messages(self, outgoing_message_txs: HashMap<NodeId, mpsc::Sender<AppMessage>>) {
+    async fn send_messages(
+        self,
+        outgoing_message_txs: HashMap<NodeId, mpsc::Sender<MessageAndContext>>,
+    ) {
         let mut outgoing_rx = self.outgoing_rx.lock_owned().await;
         let mut unhealthy_peers = HashSet::new();
-        while let Some((to, message)) = outgoing_rx.recv().await {
+        while let Some((to, message, context)) = outgoing_rx.recv().await {
             let recipients = match &to {
                 Some(id) => {
                     // Sending to one node
@@ -241,7 +254,7 @@ impl Core {
                 }
             };
             for (id, sender) in recipients {
-                match sender.try_send(message.clone()) {
+                match sender.try_send((message.clone(), context.clone())) {
                     Ok(()) => {
                         unhealthy_peers.remove(id);
                     }
@@ -257,7 +270,7 @@ impl Core {
 
     async fn accept_connections(
         self,
-        outgoing_message_rxs: DashMap<NodeId, Mutex<mpsc::Receiver<AppMessage>>>,
+        outgoing_message_rxs: DashMap<NodeId, Mutex<mpsc::Receiver<MessageAndContext>>>,
     ) {
         let addr = format!("0.0.0.0:{}", self.port);
         let outgoing_message_rxs = Arc::new(outgoing_message_rxs);
@@ -276,7 +289,7 @@ impl Core {
     async fn handle_incoming_connection(
         self,
         stream: TcpStream,
-        rxs: Arc<DashMap<NodeId, Mutex<mpsc::Receiver<AppMessage>>>>,
+        rxs: Arc<DashMap<NodeId, Mutex<mpsc::Receiver<MessageAndContext>>>>,
     ) {
         let span = info_span!("incoming_connection");
         span.in_scope(|| {
@@ -424,7 +437,7 @@ impl Core {
     async fn handle_outgoing_connection(
         self,
         peer: Peer,
-        mut outgoing_message_rx: mpsc::Receiver<AppMessage>,
+        mut outgoing_message_rx: mpsc::Receiver<MessageAndContext>,
     ) {
         let them = peer.label.clone();
         let mut sleep_seconds = 1;
@@ -582,7 +595,7 @@ impl Core {
         secret: SharedSecret,
         mut sink: EncodeSink,
         mut stream: DecodeStream,
-        outgoing_message_rx: &mut mpsc::Receiver<AppMessage>,
+        outgoing_message_rx: &mut mpsc::Receiver<MessageAndContext>,
     ) {
         let them = peer.label.clone();
         info!(them, "Connected to {}", peer.id);
@@ -628,8 +641,11 @@ impl Core {
         let send_outgoing_sink = send_sink.clone();
         let send_outgoing_chacha = chacha.clone();
         let send_outgoing_task = async move {
-            while let Some(message) = outgoing_message_rx.recv().await {
-                let message = ApplicationMessage::encrypt(message, &send_outgoing_chacha);
+            while let Some((message, context)) = outgoing_message_rx.recv().await {
+                let propagator = TraceContextPropagator::new();
+                let mut text_map = HashMap::new();
+                propagator.inject_context(&context, &mut text_map);
+                let message = ApplicationMessage::encrypt(message, text_map, &send_outgoing_chacha);
                 if let Err(e) = send_outgoing_sink.send(Message::Application(message)).await {
                     return format!("Failed to send message: {}", e);
                 }
@@ -647,11 +663,16 @@ impl Core {
             loop {
                 match stream.read().await {
                     Ok(Some(Message::Application(message))) => {
+                        let propagator = TraceContextPropagator::new();
+                        let context = propagator.extract(&message.text_map);
                         let message = match message.decrypt(&chacha) {
                             Ok(message) => message,
                             Err(e) => break format!("Failed to decrypt incoming message: {:#}", e),
                         };
-                        if let Err(e) = incoming_message_tx.send((peer.id.clone(), message)).await {
+                        if let Err(e) = incoming_message_tx
+                            .send((peer.id.clone(), message, context))
+                            .await
+                        {
                             break format!("Failed to process incoming message: {}", e);
                         }
                     }
@@ -707,7 +728,11 @@ impl Core {
     async fn report_connected(&self, peer: &Peer) {
         if let Err(e) = self
             .incoming_tx
-            .send((peer.id.clone(), AppMessage::Raft(RaftMessage::Connect)))
+            .send((
+                peer.id.clone(),
+                AppMessage::Raft(RaftMessage::Connect),
+                OtelContext::new(),
+            ))
             .await
         {
             warn!(
@@ -720,7 +745,11 @@ impl Core {
     async fn report_disconnected(&self, peer: &Peer) {
         if let Err(e) = self
             .incoming_tx
-            .send((peer.id.clone(), AppMessage::Raft(RaftMessage::Disconnect)))
+            .send((
+                peer.id.clone(),
+                AppMessage::Raft(RaftMessage::Disconnect),
+                OtelContext::new(),
+            ))
             .await
         {
             warn!(
