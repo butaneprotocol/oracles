@@ -8,7 +8,7 @@ use opentelemetry_sdk::{
     trace::{self, Config},
     Resource,
 };
-use tonic::metadata::MetadataMap;
+use tonic::{metadata::MetadataMap, transport::ClientTlsConfig};
 use tracing::{Dispatch, Level, Subscriber};
 use tracing_subscriber::{
     filter::Targets, fmt, layer::SubscriberExt, registry::LookupSpan, util::SubscriberInitExt,
@@ -159,7 +159,7 @@ impl ExporterProvider {
             .tonic()
             .with_endpoint(&self.endpoint)
             .with_timeout(Duration::from_secs(5))
-            .with_tls_config(Default::default())
+            .with_tls_config(ClientTlsConfig::new().with_webpki_roots())
             .with_metadata(self.metadata.clone())
     }
 }
