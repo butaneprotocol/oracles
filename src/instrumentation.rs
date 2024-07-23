@@ -160,6 +160,7 @@ impl ExporterProvider {
     fn get(&self) -> TonicExporterBuilder {
         opentelemetry_otlp::new_exporter()
             .tonic()
+            .with_compression(opentelemetry_otlp::Compression::Gzip)
             .with_endpoint(&self.endpoint)
             .with_timeout(Duration::from_secs(5))
             .with_tls_config(ClientTlsConfig::new().with_webpki_roots())
