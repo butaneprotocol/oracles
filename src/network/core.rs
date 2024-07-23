@@ -721,7 +721,7 @@ impl Core {
             warn!(them, disconnect_reason, "disconnecting from peer");
             disconnect_tx.send_replace(disconnect_reason);
         }
-        .instrument(info_span!("process", "otel.kind" = "consumer"));
+        .instrument(info_span!("process_network", "otel.kind" = "consumer"));
 
         join!(send_task, process_task);
 

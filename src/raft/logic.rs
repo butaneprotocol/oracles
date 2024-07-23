@@ -100,6 +100,29 @@ impl RaftState {
         state
     }
 
+    // How long until the next time we need to take action on our own?
+    pub fn next_event(&self, now: Instant) -> Instant {
+        // The default wait time is 10 seconds.
+        // This is only relevant when there aren't enough nodes connected to do raft,
+        // and it just controls how long we wait to warn about not having quorum
+        let mut next_event = now + Duration::from_secs(10);
+
+        let can_reach_quorum = (self.peers.len() + 1) >= self.quorum;
+        if can_reach_quorum {
+            // If we can reach quorum, this is when we'll hold our next election.
+            let election_time = self.last_event + self.timeout_freq.sub(self.jitter);
+            next_event = next_event.min(election_time);
+        }
+
+        if self.is_leader() {
+            // If we're the leader, this is when we'll send our next heartbeat.
+            let heartbeat_time = self.last_event + self.heartbeat_freq;
+            next_event = next_event.min(heartbeat_time);
+        }
+
+        next_event.max(now)
+    }
+
     fn leader(&self) -> Option<NodeId> {
         match &self.status {
             RaftStatus::Leader => Some(self.id.clone()),
