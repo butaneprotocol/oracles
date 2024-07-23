@@ -83,7 +83,10 @@ fn init_providers(
     uptrace_dsn: Option<&String>,
 ) -> Result<(trace::TracerProvider, metrics::SdkMeterProvider)> {
     global::set_error_handler(|error| {
-        tracing::error!("OpenTelemetry error occurred: {:#}", anyhow::anyhow!(error),);
+        let span = tracing::info_span!("opentelemetry_error_handler");
+        span.in_scope(|| {
+            tracing::error!("OpenTelemetry error occurred: {:#}", anyhow::anyhow!(error));
+        });
     })?;
 
     let resource = Resource::default().merge(&Resource::new([
@@ -157,6 +160,7 @@ impl ExporterProvider {
     fn get(&self) -> TonicExporterBuilder {
         opentelemetry_otlp::new_exporter()
             .tonic()
+            .with_compression(opentelemetry_otlp::Compression::Gzip)
             .with_endpoint(&self.endpoint)
             .with_timeout(Duration::from_secs(5))
             .with_tls_config(ClientTlsConfig::new().with_webpki_roots())

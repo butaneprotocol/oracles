@@ -6,7 +6,7 @@ use tokio::{
     sync::watch,
     time::{Duration, Instant},
 };
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, info, warn};
 
 use crate::network::{IncomingMessage, NodeId};
 
@@ -100,6 +100,29 @@ impl RaftState {
         state
     }
 
+    // How long until the next time we need to take action on our own?
+    pub fn next_event(&self, now: Instant) -> Instant {
+        // The default wait time is 10 seconds.
+        // This is only relevant when there aren't enough nodes connected to do raft,
+        // and it just controls how long we wait to warn about not having quorum
+        let mut next_event = now + Duration::from_secs(10);
+
+        let can_reach_quorum = (self.peers.len() + 1) >= self.quorum;
+        if can_reach_quorum {
+            // If we can reach quorum, this is when we'll hold our next election.
+            let election_time = self.last_event + self.timeout_freq.sub(self.jitter);
+            next_event = next_event.min(election_time);
+        }
+
+        if self.is_leader() {
+            // If we're the leader, this is when we'll send our next heartbeat.
+            let heartbeat_time = self.last_event + self.heartbeat_freq;
+            next_event = next_event.min(heartbeat_time);
+        }
+
+        next_event.max(now)
+    }
+
     fn leader(&self) -> Option<NodeId> {
         match &self.status {
             RaftStatus::Leader => Some(self.id.clone()),
@@ -164,7 +187,7 @@ impl RaftState {
             RaftMessage::RequestVote {
                 term: requested_term,
             } => {
-                trace!(term = requested_term, "Vote requested by {}", from);
+                debug!(term = requested_term, "Vote requested by {}", from);
                 let peer = from.clone();
                 let is_new_term = *requested_term > self.term;
                 let (vote, reason) = if is_new_term {
@@ -191,7 +214,7 @@ impl RaftState {
                     }
                 };
 
-                trace!(
+                debug!(
                     term = requested_term,
                     reason = reason,
                     vote = vote,
@@ -233,15 +256,15 @@ impl RaftState {
                             return vec![];
                         }
                         if *term > self.term {
-                            trace!(
-                                term = term,
+                            debug!(
+                                term,
                                 my_term = self.term,
                                 "Updating to match peer's newer term"
                             );
                             self.term = *term;
                         }
                         if !vote {
-                            trace!(
+                            debug!(
                                 votes = prev_votes.len(),
                                 term,
                                 quorum = self.quorum,
@@ -252,7 +275,7 @@ impl RaftState {
 
                         let mut new_votes = prev_votes.clone();
                         new_votes.insert(from.clone());
-                        trace!(
+                        debug!(
                             votes = new_votes.len(),
                             term,
                             quorum = self.quorum,
@@ -337,7 +360,7 @@ impl RaftState {
         } else if is_leader && heartbeat_timeout {
             self.emit_has_leader(true);
             if !self.peers.is_empty() {
-                trace!("Sending heartbeats as leader");
+                debug!("Sending heartbeats as leader");
                 // Send heartbeats
                 self.last_event = timestamp;
                 self.peers

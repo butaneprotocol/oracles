@@ -81,7 +81,7 @@ struct ApplicationMessage {
     #[n(1)]
     payload: ByteVec,
     #[n(2)]
-    text_map: HashMap<String, String>,
+    text_map: Option<HashMap<String, String>>,
 }
 
 impl ApplicationMessage {
@@ -104,7 +104,7 @@ impl ApplicationMessage {
         Self {
             nonce: nonce_bytes.into(),
             payload: payload.into(),
-            text_map,
+            text_map: Some(text_map),
         }
     }
 
@@ -664,7 +664,11 @@ impl Core {
                 match stream.read().await {
                     Ok(Some(Message::Application(message))) => {
                         let propagator = TraceContextPropagator::new();
-                        let context = propagator.extract(&message.text_map);
+                        let context = message
+                            .text_map
+                            .as_ref()
+                            .map(|m| propagator.extract(m))
+                            .unwrap_or_default();
                         let message = match message.decrypt(&chacha) {
                             Ok(message) => message,
                             Err(e) => break format!("Failed to decrypt incoming message: {:#}", e),
@@ -717,7 +721,7 @@ impl Core {
             warn!(them, disconnect_reason, "disconnecting from peer");
             disconnect_tx.send_replace(disconnect_reason);
         }
-        .instrument(info_span!("process", "otel.kind" = "consumer"));
+        .instrument(info_span!("process_network", "otel.kind" = "consumer"));
 
         join!(send_task, process_task);
 

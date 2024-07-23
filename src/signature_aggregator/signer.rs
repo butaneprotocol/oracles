@@ -259,7 +259,7 @@ impl Signer {
         }
     }
 
-    #[instrument(skip_all, fields(round = self.state.round(), state = %self.state))]
+    #[instrument(name = "process_signer", skip_all, fields(round = self.state.round(), state = %self.state))]
     pub async fn process(&mut self, event: SignerEvent) {
         info!("Started event: {}", event);
         match self.do_process(event.clone()).await {

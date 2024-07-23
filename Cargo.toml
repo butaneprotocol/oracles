@@ -32,7 +32,7 @@ minicbor-io = { version = "0.15", features = ["async-io"] }
 num-bigint = "0.4"
 num-integer = "0.1"
 opentelemetry = "0.24"
-opentelemetry-otlp = { version = "0.17", features = ["tls-webpki-roots"] }
+opentelemetry-otlp = { version = "0.17", features = ["gzip-tonic", "tls-webpki-roots"] }
 opentelemetry_sdk = { version = "0.24", features = ["rt-tokio"] }
 pallas-crypto = "0.29"
 pallas-primitives = "0.29"

@@ -2,8 +2,12 @@ mod logic;
 #[cfg(test)]
 mod tests;
 
-use tokio::{sync::watch, time::Instant};
-use tracing::{info, trace};
+use tokio::{
+    select,
+    sync::watch,
+    time::{sleep_until, Instant},
+};
+use tracing::{debug, info, info_span};
 
 use crate::network::{Network, NetworkChannel, NodeId};
 
@@ -48,25 +52,26 @@ impl Raft {
         let (sender, mut receiver) = self.channel.split();
         let mut state = self.state;
         loop {
-            let next_message = receiver.try_recv().await;
-            let timestamp = Instant::now();
-
-            let responses = match next_message {
-                Some(msg) => {
+            let next_event = state.next_event(Instant::now());
+            let responses = select! {
+                Some(msg) = receiver.recv() => {
                     let span = msg.span.clone();
-                    let _x = span.enter();
-                    trace!("Received message: {:?}", msg);
-                    state.receive(timestamp, msg)
-                }
-                None => state.tick(timestamp),
+                    span.in_scope(|| {
+                        debug!("Received message: {:?}", msg);
+                        state.receive(Instant::now(), msg)
+                    })
+                },
+                _ = sleep_until(next_event) => {
+                    let span = info_span!("raft_tick");
+                    span.in_scope(|| {
+                        state.tick(next_event)
+                    })
+                },
             };
-
             // Send out any responses
             for (peer, response) in responses {
                 sender.send(peer, response).await;
             }
-            // Yield back to the scheduler, so that other tasks can run
-            tokio::task::yield_now().await;
         }
     }
 }
