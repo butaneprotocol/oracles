@@ -92,12 +92,7 @@ mod tests {
         denominator: u64,
     ) -> PriceFeed {
         PriceFeed {
-            collateral_names: Some(
-                collateral_names
-                    .into_iter()
-                    .map(|&s| s.to_string())
-                    .collect(),
-            ),
+            collateral_names: Some(collateral_names.iter().map(|&s| s.to_string()).collect()),
             collateral_prices: collateral_prices
                 .iter()
                 .map(|&p| BigUint::from(p))
