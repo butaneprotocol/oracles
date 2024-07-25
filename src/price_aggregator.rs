@@ -140,7 +140,8 @@ impl PriceAggregator {
             debug!(
                 collateral_name,
                 synthetic_name = synth.name,
-                histogram.collateral_price = price
+                histogram.collateral_price = price,
+                "price metrics",
             );
         }
 
@@ -151,6 +152,7 @@ impl PriceAggregator {
         PriceFeedEntry {
             price: synth_price,
             data: PriceFeed {
+                collateral_names: Some(synth.collateral.clone()),
                 collateral_prices,
                 synthetic: synth.name.clone(),
                 denominator,

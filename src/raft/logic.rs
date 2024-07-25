@@ -358,7 +358,7 @@ impl RaftState {
                 .map(|peer| (peer.clone(), RaftMessage::RequestVote { term: self.term }))
                 .collect();
         } else if is_leader && heartbeat_timeout {
-            self.emit_has_leader(true);
+            self.emit_has_leader(true, true);
             if !self.peers.is_empty() {
                 debug!("Sending heartbeats as leader");
                 // Send heartbeats
@@ -391,7 +391,7 @@ impl RaftState {
             } => RaftLeader::Other(leader.clone()),
             _ => RaftLeader::Unknown,
         };
-        self.emit_has_leader(leader != RaftLeader::Unknown);
+        self.emit_has_leader(leader == RaftLeader::Myself, leader != RaftLeader::Unknown);
         self.status = status;
         self.leader_sink.send_if_modified(|old_leader| {
             let changed = *old_leader != leader;
@@ -402,8 +402,13 @@ impl RaftState {
         });
     }
 
-    fn emit_has_leader(&self, has_leader: bool) {
+    fn emit_has_leader(&self, is_leader: bool, has_leader: bool) {
         let has_leader: u64 = if has_leader { 1 } else { 0 };
-        debug!(histogram.has_leader = has_leader);
+        let is_leader: u64 = if is_leader { 1 } else { 0 };
+        debug!(
+            histogram.has_leader = has_leader,
+            histogram.is_leader = is_leader,
+            "leader metrics",
+        );
     }
 }

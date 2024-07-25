@@ -840,12 +840,14 @@ mod tests {
     fn price_feed_entry(
         synthetic: &str,
         price: f64,
+        collateral_names: &[&str],
         collateral_prices: &[u64],
         denominator: u64,
     ) -> PriceFeedEntry {
         PriceFeedEntry {
             price: Decimal::from_f64(price).unwrap(),
             data: PriceFeed {
+                collateral_names: Some(collateral_names.iter().map(|&s| s.to_string()).collect()),
                 collateral_prices: collateral_prices
                     .iter()
                     .map(|&p| BigUint::from(p))
@@ -860,8 +862,8 @@ mod tests {
     #[tokio::test]
     async fn should_sign_payload_with_quorum_of_two() -> Result<()> {
         let price_data = vec![
-            price_feed_entry("ADA", 3.50, &[3, 4], 1),
-            price_feed_entry("BTN", 1.21, &[5, 8], 1),
+            price_feed_entry("ADA", 3.50, &["A", "B"], &[3, 4], 1),
+            price_feed_entry("BTN", 1.21, &["A", "B"], &[5, 8], 1),
         ];
 
         let prices = vec![price_data.clone(); 3];
@@ -910,8 +912,8 @@ mod tests {
     #[tokio::test]
     async fn should_sign_payload_with_quorum_of_three() -> Result<()> {
         let price_data = vec![
-            price_feed_entry("ADA", 3.50, &[3, 4], 1),
-            price_feed_entry("BTN", 1.21, &[5, 8], 1),
+            price_feed_entry("ADA", 3.50, &["A", "B"], &[3, 4], 1),
+            price_feed_entry("BTN", 1.21, &["A", "B"], &[5, 8], 1),
         ];
 
         let (mut signers, mut network, mut payload_source) =
@@ -926,8 +928,8 @@ mod tests {
 
     #[tokio::test]
     async fn should_sign_close_enough_collateral_prices() -> Result<()> {
-        let leader_prices = vec![price_feed_entry("TOKEN", 3.50, &[2], 1)];
-        let follower_prices = vec![price_feed_entry("TOKEN", 3.50, &[199], 100)];
+        let leader_prices = vec![price_feed_entry("SYNTH", 3.50, &["A"], &[2], 1)];
+        let follower_prices = vec![price_feed_entry("SYNTH", 3.50, &["A"], &[199], 100)];
 
         let (mut signers, mut network, mut payload_source) =
             construct_signers(2, vec![leader_prices, follower_prices]).await?;
@@ -941,8 +943,8 @@ mod tests {
 
     #[tokio::test]
     async fn should_not_sign_distant_collateral_prices() -> Result<()> {
-        let leader_prices = vec![price_feed_entry("TOKEN", 3.50, &[2], 1)];
-        let follower_prices = vec![price_feed_entry("TOKEN", 3.50, &[3], 2)];
+        let leader_prices = vec![price_feed_entry("SYNTH", 3.50, &["A"], &[2], 1)];
+        let follower_prices = vec![price_feed_entry("SYNTH", 3.50, &["A"], &[3], 2)];
 
         let (mut signers, mut network, mut payload_source) =
             construct_signers(2, vec![leader_prices, follower_prices]).await?;
