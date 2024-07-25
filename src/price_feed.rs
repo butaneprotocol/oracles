@@ -83,6 +83,7 @@ impl<'b, C> Decode<'b, C> for SignedPriceFeed {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PriceFeed {
+    pub collateral_names: Option<Vec<String>>,
     pub collateral_prices: Vec<BigUint>,
     pub synthetic: String,
     pub denominator: BigUint,
@@ -131,6 +132,7 @@ impl<'b, C> Decode<'b, C> for PriceFeed {
         decode_struct_end(d)?;
 
         Ok(PriceFeed {
+            collateral_names: None,
             collateral_prices,
             synthetic,
             denominator,
@@ -362,7 +364,9 @@ mod tests {
 
     #[test]
     fn should_serialize_price_feed() {
+        // Note: the only thing that doesn't round trip is collateral_names
         let feed = PriceFeed {
+            collateral_names: None,
             collateral_prices: vec![BigUint::from(1u32), BigUint::from(u128::MAX) * 2u32],
             synthetic: "HIPI".into(),
             denominator: BigUint::from(31337u32),

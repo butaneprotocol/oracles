@@ -116,7 +116,8 @@ impl SignatureAggregator {
                     if let Ok(age_in_millis) = u64::try_from(age.as_millis()) {
                         debug!(
                             histogram.payload_age = age_in_millis,
-                            histogram.payload_is_valid = is_valid
+                            histogram.payload_is_valid = is_valid,
+                            "payload metrics"
                         );
                     }
                 }

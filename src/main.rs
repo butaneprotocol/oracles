@@ -177,7 +177,7 @@ async fn main() -> Result<()> {
     let config = Arc::new(load_config(&args.config_file)?);
 
     let _guard = instrumentation::init_tracing(&config.logs)?;
-    info_span!("init").in_scope(|| info!(foo = "bar", "Node starting..."));
+    info_span!("init").in_scope(|| info!("Node starting..."));
 
     if config.keygen.enabled {
         dkg::run(&config).await?;
