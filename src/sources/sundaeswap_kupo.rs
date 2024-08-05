@@ -10,8 +10,8 @@ use tokio::time::sleep;
 use tracing::{warn, Instrument};
 
 use crate::{
-    apis::source::PriceInfo,
     config::{HydratedPool, OracleConfig},
+    sources::source::PriceInfo,
 };
 
 use super::{

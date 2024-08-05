@@ -12,15 +12,15 @@ use tokio::{sync::watch::Sender, task::JoinSet, time::sleep};
 use tracing::{debug, warn, Instrument};
 
 use crate::{
-    apis::{
+    config::{CollateralConfig, OracleConfig, SyntheticConfig},
+    health::HealthSink,
+    price_feed::{IntervalBound, PriceFeed, PriceFeedEntry, Validity},
+    sources::{
         binance::BinanceSource, bybit::ByBitSource, coinbase::CoinbaseSource,
         maestro::MaestroSource, minswap::MinswapSource, source::PriceInfo,
         spectrum::SpectrumSource, sundaeswap::SundaeSwapSource,
         sundaeswap_kupo::SundaeSwapKupoSource,
     },
-    config::{CollateralConfig, OracleConfig, SyntheticConfig},
-    health::HealthSink,
-    price_feed::{IntervalBound, PriceFeed, PriceFeedEntry, Validity},
 };
 
 use self::{conversions::ConversionLookup, source_adapter::SourceAdapter};

@@ -7,7 +7,7 @@ use serde::Deserialize;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{trace, warn};
 
-use crate::apis::source::{PriceInfo, PriceSink};
+use crate::sources::source::{PriceInfo, PriceSink};
 
 use super::source::Source;
 

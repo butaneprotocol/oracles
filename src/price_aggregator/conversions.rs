@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use rust_decimal::Decimal;
 
 use crate::{
-    apis::source::PriceInfo,
     config::{CollateralConfig, SyntheticConfig},
+    sources::source::PriceInfo,
 };
 
 #[derive(Debug, Eq, Hash, PartialEq)]
@@ -86,8 +86,8 @@ mod tests {
     use rust_decimal::Decimal;
 
     use crate::{
-        apis::source::PriceInfo,
         config::{CollateralConfig, SyntheticConfig},
+        sources::source::PriceInfo,
     };
 
     use super::ConversionLookup;

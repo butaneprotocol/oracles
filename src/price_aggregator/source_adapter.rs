@@ -9,8 +9,8 @@ use tokio::{
 use tracing::{instrument, warn, Instrument};
 
 use crate::{
-    apis::source::{PriceInfo, Source},
     health::{HealthSink, HealthStatus, Origin},
+    sources::source::{PriceInfo, Source},
 };
 
 pub struct SourceAdapter {
