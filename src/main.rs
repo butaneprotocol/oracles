@@ -56,17 +56,18 @@ impl Node {
         // Construct a peer-to-peer network that can connect to peers, and dispatch messages to the correct state machine
         let mut network = Network::new(&config.network, health_sink.clone());
 
-        let (pa_tx, pa_rx) = watch::channel(vec![]);
+        let (price_feed_tx, price_feed_rx) = watch::channel(vec![]);
+        let (price_audit_tx, price_audit_rx) = watch::channel(vec![]);
 
-        let price_aggregator = PriceAggregator::new(pa_tx, config.clone())?;
+        let price_aggregator = PriceAggregator::new(price_feed_tx, price_audit_tx, config.clone())?;
 
         let (signature_aggregator, payload_source) = if config.consensus {
-            SignatureAggregator::consensus(&config, &mut network, pa_rx, leader_rx)?
+            SignatureAggregator::consensus(&config, &mut network, price_feed_rx, leader_rx)?
         } else {
-            SignatureAggregator::single(&network.id, pa_rx, leader_rx)?
+            SignatureAggregator::single(&network.id, price_feed_rx, leader_rx)?
         };
 
-        let api_server = APIServer::new(payload_source.clone());
+        let api_server = APIServer::new(&config, payload_source.clone(), price_audit_rx);
 
         let publisher = Publisher::new(&network.id, payload_source)?;
 

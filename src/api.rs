@@ -7,25 +7,48 @@ use axum::{
     routing::get,
     Json, Router,
 };
+use serde::Serialize;
 use serde_json::json;
 use tokio::{net::TcpListener, sync::watch, task::JoinSet};
 use tracing::{info, warn};
 
-use crate::signature_aggregator::{Payload, PayloadEntry};
+use crate::{
+    config::OracleConfig,
+    network::NodeId,
+    price_aggregator::TokenPrice,
+    signature_aggregator::{Payload, PayloadEntry},
+};
+
+#[derive(Clone, Serialize)]
+struct OracleIdentifiers {
+    id: NodeId,
+    name: String,
+}
 
 #[derive(Clone)]
 pub struct APIState {
     payload_source: Arc<watch::Receiver<Payload>>,
+    prices_source: Arc<watch::Receiver<Vec<TokenPrice>>>,
+    oracle: OracleIdentifiers,
 }
 
 pub struct APIServer {
     state: APIState,
 }
 impl APIServer {
-    pub fn new(payload_source: watch::Receiver<Payload>) -> Self {
+    pub fn new(
+        config: &OracleConfig,
+        payload_source: watch::Receiver<Payload>,
+        audit_source: watch::Receiver<Vec<TokenPrice>>,
+    ) -> Self {
         Self {
             state: APIState {
                 payload_source: Arc::new(payload_source),
+                oracle: OracleIdentifiers {
+                    id: config.id.clone(),
+                    name: config.label.clone(),
+                },
+                prices_source: Arc::new(audit_source),
             },
         }
     }
@@ -36,6 +59,7 @@ impl APIServer {
         let app = Router::new()
             .route("/payload", get(report_all_payloads))
             .route("/payload/:synthetic", get(report_payload))
+            .route("/prices", get(report_all_prices))
             .with_state(self.state);
         set.spawn(async move {
             info!("API server starting on port {}", port);
@@ -62,6 +86,21 @@ impl APIServer {
 async fn report_all_payloads(State(state): State<APIState>) -> impl IntoResponse {
     let payload = state.payload_source.borrow().clone();
     (StatusCode::OK, Json(payload))
+}
+
+#[derive(Serialize)]
+struct AllPricesResponse {
+    oracle: OracleIdentifiers,
+    prices: Vec<TokenPrice>,
+}
+
+async fn report_all_prices(State(state): State<APIState>) -> impl IntoResponse {
+    let prices = state.prices_source.borrow().clone();
+    let response = AllPricesResponse {
+        oracle: state.oracle.clone(),
+        prices,
+    };
+    (StatusCode::OK, Json(response))
 }
 
 pub enum Response {

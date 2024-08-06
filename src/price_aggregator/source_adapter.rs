@@ -14,7 +14,7 @@ use crate::{
 };
 
 pub struct SourceAdapter {
-    name: String,
+    pub name: String,
     source: Box<dyn Source + Send + Sync>,
     prices: Arc<DashMap<String, PriceInfo>>,
 }

@@ -23,19 +23,25 @@ use crate::{
     },
 };
 
-use self::{conversions::ConversionLookup, source_adapter::SourceAdapter};
+pub use self::conversions::{TokenPrice, TokenPriceSource};
+use self::{conversions::TokenPriceConverter, source_adapter::SourceAdapter};
 
 mod conversions;
 mod source_adapter;
 
 pub struct PriceAggregator {
-    tx: Arc<Sender<Vec<PriceFeedEntry>>>,
+    feed_tx: Arc<Sender<Vec<PriceFeedEntry>>>,
+    audit_tx: Arc<Sender<Vec<TokenPrice>>>,
     sources: Option<Vec<SourceAdapter>>,
     config: Arc<OracleConfig>,
 }
 
 impl PriceAggregator {
-    pub fn new(tx: Sender<Vec<PriceFeedEntry>>, config: Arc<OracleConfig>) -> Result<Self> {
+    pub fn new(
+        feed_tx: Sender<Vec<PriceFeedEntry>>,
+        audit_tx: Sender<Vec<TokenPrice>>,
+        config: Arc<OracleConfig>,
+    ) -> Result<Self> {
         let mut sources = vec![
             SourceAdapter::new(BinanceSource::new()),
             SourceAdapter::new(ByBitSource::new(&config)),
@@ -54,7 +60,8 @@ impl PriceAggregator {
             sources.push(SourceAdapter::new(SundaeSwapKupoSource::new(&config)?));
         }
         Ok(Self {
-            tx: Arc::new(tx),
+            feed_tx: Arc::new(feed_tx),
+            audit_tx: Arc::new(audit_tx),
             sources: Some(sources),
             config,
         })
@@ -64,7 +71,10 @@ impl PriceAggregator {
         let mut set = JoinSet::new();
 
         let sources = self.sources.take().unwrap();
-        let price_maps: Vec<_> = sources.iter().map(|s| s.get_prices()).collect();
+        let price_maps: Vec<_> = sources
+            .iter()
+            .map(|s| (s.name.clone(), s.get_prices()))
+            .collect();
 
         // Make each source update its price map asynchronously.
         for source in sources {
@@ -95,29 +105,36 @@ impl PriceAggregator {
         }
     }
 
-    fn report(&self, price_maps: &[Arc<DashMap<String, PriceInfo>>]) {
-        let mut prices: Vec<PriceInfo> = vec![];
-        for price_map in price_maps {
+    fn report(&self, price_maps: &[(String, Arc<DashMap<String, PriceInfo>>)]) {
+        let mut source_prices = vec![];
+        for (source, price_map) in price_maps {
             for price in price_map.iter() {
-                prices.push(price.value().clone());
+                source_prices.push((source.clone(), price.value().clone()));
             }
         }
 
-        let conversions =
-            ConversionLookup::new(&prices, &self.config.synthetics, &self.config.collateral);
-        let payloads = self
+        let converter = TokenPriceConverter::new(
+            &source_prices,
+            &self.config.synthetics,
+            &self.config.collateral,
+        );
+
+        let price_feeds = self
             .config
             .synthetics
             .iter()
-            .map(|s| self.compute_payload(s, &conversions))
+            .map(|s| self.compute_payload(s, &converter))
             .collect();
-        self.tx.send_replace(payloads);
+        self.feed_tx.send_replace(price_feeds);
+
+        let token_values = converter.token_prices();
+        self.audit_tx.send_replace(token_values);
     }
 
     fn compute_payload(
         &self,
         synth: &SyntheticConfig,
-        conversions: &ConversionLookup,
+        converter: &TokenPriceConverter,
     ) -> PriceFeedEntry {
         let prices: Vec<_> = synth
             .collateral
@@ -126,11 +143,11 @@ impl PriceAggregator {
                 let collateral = self.get_collateral(c.as_str());
                 let multiplier = Decimal::new(10i64.pow(synth.digits), 0)
                     / Decimal::new(10i64.pow(collateral.digits), 0);
-                let p = conversions.value_in_usd(&collateral.name);
+                let p = converter.value_in_usd(&collateral.name);
                 p * multiplier
             })
             .collect();
-        let synth_price = conversions.value_in_usd(&synth.name);
+        let synth_price = converter.value_in_usd(&synth.name);
 
         // track metrics for the different prices
         for (collateral_name, collateral_price) in synth.collateral.iter().zip(prices.iter()) {
