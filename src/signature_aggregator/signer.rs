@@ -1015,4 +1015,27 @@ mod tests {
 
         Ok(())
     }
+
+    #[tokio::test]
+    async fn should_sign_some_collateral_prices_but_not_others() -> Result<()> {
+        let leader_prices = vec![
+            price_feed_entry("GOOD", 3.50, &["A"], &[2], 1),
+            price_feed_entry("BAD", 3.50, &["A"], &[2], 1),
+        ];
+        let follower_prices = vec![
+            price_feed_entry("GOOD", 3.50, &["A"], &[2], 1),
+            price_feed_entry("BAD", 3.50, &["A"], &[3], 2),
+        ];
+
+        let (mut signers, mut network, mut payload_source) =
+            construct_signers(2, vec![leader_prices, follower_prices]).await?;
+        assign_roles(&mut signers).await;
+        run_round(&mut signers, &mut network).await;
+
+        let signed_entries = assert_round_complete(&mut payload_source)?;
+        assert_eq!(signed_entries.entries.len(), 1);
+        assert_eq!(signed_entries.entries[0].data.data.synthetic, "GOOD");
+
+        Ok(())
+    }
 }
