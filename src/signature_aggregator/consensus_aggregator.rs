@@ -8,6 +8,7 @@ use tokio::{
     time::sleep,
 };
 use tracing::{info_span, warn};
+use uuid::Uuid;
 
 use crate::{
     config::OracleConfig,
@@ -62,8 +63,9 @@ impl ConsensusSignatureAggregator {
                 if !matches!(*leader.borrow(), RaftLeader::Myself) {
                     continue;
                 }
-                let span = info_span!("new_round");
-                if let Err(err) = sink.send(SignerEvent::RoundStarted).await {
+                let round = Uuid::new_v4().to_string();
+                let span = info_span!("new_round", round);
+                if let Err(err) = sink.send(SignerEvent::RoundStarted(round)).await {
                     span.in_scope(|| warn!("Failed to start new round: {}", err));
                     break;
                 }

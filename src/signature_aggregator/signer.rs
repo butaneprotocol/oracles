@@ -18,7 +18,6 @@ use rand::thread_rng;
 use rust_decimal::prelude::ToPrimitive;
 use tokio::sync::{mpsc, watch};
 use tracing::{info, info_span, instrument, warn, Instrument, Span};
-use uuid::Uuid;
 
 use crate::{
     cbor::{CborIdentifier, CborSignatureShare, CborSigningCommitments, CborSigningPackage},
@@ -104,14 +103,14 @@ pub struct Signature {
 
 #[derive(Clone)]
 pub enum SignerEvent {
-    RoundStarted,
+    RoundStarted(String),
     Message(NodeId, SignerMessage, Span),
     LeaderChanged(RaftLeader),
 }
 impl Display for SignerEvent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::RoundStarted => f.write_str("RoundStarted"),
+            Self::RoundStarted(round) => f.write_fmt(format_args!("RoundStarted{{round={}}}", round)),
             Self::Message(from, message, _) => {
                 f.write_fmt(format_args!("Message{{from={},data={}}}", from, message))
             }
@@ -286,9 +285,9 @@ impl Signer {
                     RaftLeader::Unknown => SignerState::Unknown,
                 };
             }
-            SignerEvent::RoundStarted => {
+            SignerEvent::RoundStarted(round) => {
                 if matches!(self.state, SignerState::Leader(_)) {
-                    self.request_commitments().await?;
+                    self.request_commitments(round).await?;
                 }
             }
             SignerEvent::Message(from, SignerMessage { round, data }, span) => match data {
@@ -318,8 +317,7 @@ impl Signer {
         Ok(())
     }
 
-    async fn request_commitments(&mut self) -> Result<()> {
-        let round = Uuid::new_v4().to_string();
+    async fn request_commitments(&mut self, round: String) -> Result<()> {
         let price_data = self.price_source.borrow().clone();
 
         let round_span = info_span!(
@@ -906,7 +904,7 @@ mod tests {
         signers: &mut [SignerOrchestrator],
         network: &mut TestNetwork<SignerMessage>,
     ) {
-        signers[0].process(SignerEvent::RoundStarted).await;
+        signers[0].process(SignerEvent::RoundStarted("round".into())).await;
         while network.drain().await {
             for signer in signers.iter_mut() {
                 signer.process_incoming_messages().await;
@@ -959,7 +957,7 @@ mod tests {
         let leader_id = assign_roles(&mut signers).await;
 
         // Start the round
-        signers[0].process(SignerEvent::RoundStarted).await;
+        signers[0].process(SignerEvent::RoundStarted("round".into())).await;
 
         // Leader should have broadcast a request to all followers
         let message = network.drain_one(&signers[0].id).await.remove(0);
