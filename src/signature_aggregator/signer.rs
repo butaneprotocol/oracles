@@ -1,10 +1,10 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fmt::{self, Display},
     time::SystemTime,
 };
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use frost_ed25519::{
     aggregate,
     keys::{KeyPackage, PublicKeyPackage},
@@ -28,8 +28,10 @@ use crate::{
         SignedPriceFeed,
     },
     raft::RaftLeader,
-    signature_aggregator::price_comparator::should_sign_all,
+    signature_aggregator::price_comparator::choose_feeds_to_sign,
 };
+
+use super::price_comparator::ComparisonResult;
 
 #[derive(Decode, Encode, Clone, Debug)]
 pub struct SignerMessage {
@@ -83,13 +85,13 @@ pub struct Commitment {
     #[n(0)]
     pub identifier: CborIdentifier,
     #[n(1)]
-    pub commitments: Vec<CborSigningCommitments>,
+    pub commitments: BTreeMap<String, CborSigningCommitments>,
 }
 
 #[derive(Decode, Encode, Clone, Debug)]
 pub struct SignatureRequest {
     #[n(0)]
-    packages: Vec<CborSigningPackage>,
+    packages: BTreeMap<String, CborSigningPackage>,
 }
 
 #[derive(Decode, Encode, Clone, Debug)]
@@ -97,7 +99,7 @@ pub struct Signature {
     #[n(0)]
     pub identifier: CborIdentifier,
     #[n(1)]
-    pub signatures: Vec<CborSignatureShare>,
+    pub signatures: BTreeMap<String, CborSignatureShare>,
 }
 
 #[derive(Clone)]
@@ -127,14 +129,14 @@ enum LeaderState {
         round_span: Span,
         price_data: Vec<PriceFeedEntry>,
         commitments: Vec<(NodeId, Commitment)>,
-        my_nonces: Vec<SigningNonces>,
+        my_nonces: BTreeMap<String, SigningNonces>,
     },
     CollectingSignatures {
         round: String,
         round_span: Span,
         price_data: Vec<PriceFeedEntry>,
         signatures: Vec<Signature>,
-        packages: Vec<SigningPackage>,
+        packages: BTreeMap<String, SigningPackage>,
     },
 }
 impl Display for LeaderState {
@@ -144,7 +146,7 @@ impl Display for LeaderState {
             Self::CollectingCommitments {
                 round, commitments, ..
             } => {
-                let committed: Vec<Identifier> = commitments
+                let committed: BTreeSet<Identifier> = commitments
                     .iter()
                     .map(|(_, c)| c.identifier.into())
                     .collect();
@@ -159,8 +161,11 @@ impl Display for LeaderState {
                 packages,
                 ..
             } => {
-                let committed: Vec<_> = packages[0].signing_commitments().keys().collect();
-                let signed: Vec<_> = signatures.iter().map(|s| s.identifier).collect();
+                let committed: BTreeSet<_> = packages
+                    .values()
+                    .flat_map(|p| p.signing_commitments().keys())
+                    .collect();
+                let signed: BTreeSet<_> = signatures.iter().map(|s| s.identifier).collect();
                 f.write_fmt(format_args!("{{role=Leader,state=CollectingSignatures,round={},committed={:?},signed={:?}}}", round, committed, signed))
             }
         }
@@ -182,7 +187,7 @@ enum FollowerState {
         round: String,
         round_span: Span,
         price_data: Vec<PriceFeedEntry>,
-        nonces: Vec<SigningNonces>,
+        nonces: BTreeMap<String, SigningNonces>,
     },
 }
 impl Display for FollowerState {
@@ -340,7 +345,11 @@ impl Signer {
             .await;
 
         // And commit ourself
-        let (my_nonces, commitment) = self.commit(price_data.len());
+        let all_synthetics: Vec<_> = price_data
+            .iter()
+            .map(|entry| entry.data.synthetic.as_str())
+            .collect();
+        let (my_nonces, commitment) = self.commit(&all_synthetics);
         self.state = SignerState::Leader(LeaderState::CollectingCommitments {
             round,
             round_span,
@@ -379,16 +388,27 @@ impl Signer {
         };
 
         let my_feed: Vec<PriceFeed> = price_data.iter().map(|entry| entry.data.clone()).collect();
-        if let Err(mismatch) = should_sign_all(&request.price_feed, &my_feed) {
-            round_span
-                .in_scope(|| warn!(error = mismatch, "Not sending commitment for this round"));
-            return Ok(());
+        let mut synthetics_to_sign = vec![];
+        for (synthetic, result) in choose_feeds_to_sign(&request.price_feed, &my_feed) {
+            match result {
+                ComparisonResult::Sign => {
+                    synthetics_to_sign.push(synthetic);
+                }
+                ComparisonResult::DoNotSign(reason) => {
+                    round_span.in_scope(|| {
+                        warn!(
+                            synthetic,
+                            error = reason,
+                            "Not sending commitment for this synthetic in this round"
+                        )
+                    });
+                }
+            }
         }
 
         // Send our commitment
         round_span.in_scope(|| info!("Sending commitment for this round"));
-        let commitment_count = price_data.len();
-        let (nonces, commitment) = self.commit(commitment_count);
+        let (nonces, commitment) = self.commit(&synthetics_to_sign);
         self.message_sink
             .send(
                 leader_id.clone(),
@@ -445,21 +465,26 @@ impl Signer {
         }
         commitments.push((from, commitment));
 
+        // TODO: don't stop after the first N committers if any of them are not fully committed
         if commitments.len() < (*self.key.min_signers() as usize) {
             // still collecting
             return Ok(());
         }
 
-        let mut commitment_maps = vec![BTreeMap::new(); price_data.len()];
+        // Map<synthetic, Map<Identifier, SigningCommitments>>
+        let mut commitment_maps = BTreeMap::new();
         let mut recipients = vec![];
         // time to transition to signing
         for (signer, commitment) in commitments {
             if *signer != self.id {
                 recipients.push(signer.clone());
             }
-            for (idx, c) in commitment.commitments.iter().enumerate() {
+            for (synthetic, c) in commitment.commitments.iter() {
                 let comm: SigningCommitments = (*c).into();
-                commitment_maps[idx].insert(commitment.identifier.into(), comm);
+                commitment_maps
+                    .entry(synthetic.clone())
+                    .or_insert(BTreeMap::new())
+                    .insert(commitment.identifier.into(), comm);
             }
         }
 
@@ -471,15 +496,25 @@ impl Signer {
         });
 
         let price_data = price_data.clone();
+        let mut packages = BTreeMap::new();
         // Request signatures from all the committees
-        let messages: Vec<Vec<u8>> = price_data.iter().map(|e| serialize(&e.data)).collect();
-        let packages: Vec<SigningPackage> = commitment_maps
-            .into_iter()
-            .zip(messages)
-            .map(|(c, m)| SigningPackage::new(c, &m))
+        for entry in &price_data {
+            let synthetic = &entry.data.synthetic;
+            let message = serialize(&entry.data);
+            let Some(commitments) = commitment_maps.remove(synthetic) else {
+                continue;
+            };
+            if commitments.len() < (*self.key.min_signers() as usize) {
+                // Don't have enough commitments for this particular package.
+                continue;
+            }
+            let package = SigningPackage::new(commitments, &message);
+            packages.insert(synthetic.clone(), package);
+        }
+        let wire_packages: BTreeMap<String, CborSigningPackage> = packages
+            .iter()
+            .map(|(synthetic, p)| (synthetic.clone(), p.clone().into()))
             .collect();
-        let wire_packages: Vec<CborSigningPackage> =
-            packages.iter().map(|p| p.clone().into()).collect();
         let send_to_recipient_tasks = recipients.into_iter().map(|recipient| {
             let message = SignerMessage {
                 round: round.clone(),
@@ -507,8 +542,11 @@ impl Signer {
     }
 
     async fn send_signature(&mut self, round: String, request: SignatureRequest) -> Result<()> {
-        let packages: Vec<SigningPackage> =
-            request.packages.into_iter().map(|i| i.into()).collect();
+        let packages: BTreeMap<String, SigningPackage> = request
+            .packages
+            .into_iter()
+            .map(|(synthetic, i)| (synthetic, i.into()))
+            .collect();
         let SignerState::Follower(
             _,
             FollowerState::Committed {
@@ -544,7 +582,7 @@ impl Signer {
     async fn do_send_signature(
         &mut self,
         round: String,
-        packages: &[SigningPackage],
+        packages: &BTreeMap<String, SigningPackage>,
     ) -> Result<()> {
         let SignerState::Follower(
             leader_id,
@@ -556,23 +594,27 @@ impl Signer {
             return Ok(());
         };
 
-        // Make sure we are OK with signing this
-        if packages.len() != price_data.len() {
-            return Err(anyhow!(
-                "Mismatched price feed count. Is this server misconfigured?"
-            ));
-        }
         let leader_feed: Result<Vec<PriceFeed>> = packages
-            .iter()
+            .values()
             .map(|p| deserialize(p.message()).context("could not decode price_feed"))
             .collect();
         let my_feed: Vec<PriceFeed> = price_data.iter().map(|entry| entry.data.clone()).collect();
-        if let Err(mismatch) = should_sign_all(&leader_feed?, &my_feed) {
-            return Err(anyhow!("Not signing payload: {}", mismatch));
+
+        // Find the set which we are OK with signing
+        let mut nonces_to_sign = nonces.clone();
+        for (synthetic, result) in choose_feeds_to_sign(&leader_feed?, &my_feed) {
+            if let ComparisonResult::DoNotSign(reason) = result {
+                warn!(
+                    synthetic,
+                    error = reason,
+                    "Not signing this synthetic in this round"
+                );
+                nonces_to_sign.remove(synthetic);
+            }
         }
 
         // Send our signature back to the leader
-        let signature = self.sign(packages, nonces)?;
+        let signature = self.sign(packages, &nonces_to_sign)?;
         self.message_sink
             .send(
                 leader_id.clone(),
@@ -625,29 +667,42 @@ impl Signer {
             .in_scope(|| info!("Collected all signatures, signing and completing this round"));
 
         // We've finally collected all the signatures we need! Now just aggregate them
-        let mut signature_maps = vec![BTreeMap::new(); price_data.len()];
+        let mut signature_maps = BTreeMap::new();
         for signature in signatures {
-            for (index, s) in signature.signatures.iter().enumerate() {
+            for (synthetic, s) in signature.signatures.iter() {
                 let sig: SignatureShare = (*s).into();
-                signature_maps[index].insert(signature.identifier.into(), sig);
+                signature_maps
+                    .entry(synthetic.clone())
+                    .or_insert(BTreeMap::new())
+                    .insert(signature.identifier.into(), sig);
             }
         }
 
-        let mut signatures = vec![];
-        for (package, sigs) in packages.iter().zip(signature_maps) {
-            let signature = aggregate(package, &sigs, &self.public_key)?;
-            signatures.push(signature.serialize()?);
+        let mut signatures = BTreeMap::new();
+        for (synthetic, package) in packages.iter() {
+            let Some(sigs) = signature_maps.get(synthetic) else {
+                continue;
+            };
+            if sigs.len() < (*self.key.min_signers() as usize) {
+                // Don't have enough signatures for this particular entry
+                continue;
+            }
+            let signature = aggregate(package, sigs, &self.public_key)?;
+            signatures.insert(synthetic.clone(), signature.serialize()?);
         }
 
         let payload_entries = price_data
             .iter()
-            .zip(signatures)
-            .map(|(price, signature)| SignedEntry {
-                price: price.price.to_f64().expect("Could not convert decimal"),
-                data: SignedPriceFeed {
-                    data: price.data.clone(),
-                    signature,
-                },
+            .filter_map(|entry| {
+                // If we don't have a signature in the map, we're not signing this price feed
+                let signature = signatures.remove(&entry.data.synthetic)?;
+                Some(SignedEntry {
+                    price: entry.price.to_f64().expect("Could not convert decimal"),
+                    data: SignedPriceFeed {
+                        data: entry.data.clone(),
+                        signature,
+                    },
+                })
             })
             .collect();
 
@@ -681,13 +736,13 @@ impl Signer {
         Ok(())
     }
 
-    fn commit(&self, commitment_count: usize) -> (Vec<SigningNonces>, Commitment) {
-        let mut nonces = vec![];
-        let mut commitments = vec![];
-        for _ in 0..commitment_count {
+    fn commit(&self, synthetics: &[&str]) -> (BTreeMap<String, SigningNonces>, Commitment) {
+        let mut nonces = BTreeMap::new();
+        let mut commitments = BTreeMap::new();
+        for synthetic in synthetics {
             let (nonce, commitment) = round1::commit(self.key.signing_share(), &mut thread_rng());
-            nonces.push(nonce);
-            commitments.push(commitment.into());
+            nonces.insert(synthetic.to_string(), nonce);
+            commitments.insert(synthetic.to_string(), commitment.into());
         }
         let commitment = Commitment {
             identifier: (*self.key.identifier()).into(),
@@ -696,11 +751,17 @@ impl Signer {
         (nonces, commitment)
     }
 
-    fn sign(&self, packages: &[SigningPackage], nonces: &[SigningNonces]) -> Result<Signature> {
-        let mut signatures = vec![];
-        for (package, nonce) in packages.iter().zip(nonces) {
-            let signature = round2::sign(package, nonce, &self.key)?;
-            signatures.push(signature.into());
+    fn sign(
+        &self,
+        packages: &BTreeMap<String, SigningPackage>,
+        nonces: &BTreeMap<String, SigningNonces>,
+    ) -> Result<Signature> {
+        let mut signatures = BTreeMap::new();
+        for (synthetic, nonce) in nonces {
+            if let Some(package) = packages.get(synthetic) {
+                let signature = round2::sign(package, nonce, &self.key)?;
+                signatures.insert(synthetic.clone(), signature.into());
+            };
         }
         Ok(Signature {
             identifier: (*self.key.identifier()).into(),
