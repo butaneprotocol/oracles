@@ -777,10 +777,7 @@ mod tests {
     use num_bigint::BigUint;
     use rand::thread_rng;
     use rust_decimal::{prelude::FromPrimitive, Decimal};
-    use tokio::sync::{
-        mpsc::{self, error::TryRecvError},
-        watch,
-    };
+    use tokio::sync::{mpsc, watch};
     use tracing::{Instrument, Span};
 
     use crate::{
@@ -887,15 +884,13 @@ mod tests {
         }
     }
 
-    fn assert_round_complete(payload_source: &mut mpsc::Receiver<(NodeId, SignedEntries)>) {
-        assert!(payload_source.try_recv().is_ok());
-    }
-
-    fn assert_round_not_complete(payload_source: &mut mpsc::Receiver<(NodeId, SignedEntries)>) {
-        assert!(matches!(
-            payload_source.try_recv(),
-            Err(TryRecvError::Empty)
-        ));
+    fn assert_round_complete(
+        payload_source: &mut mpsc::Receiver<(NodeId, SignedEntries)>,
+    ) -> Result<SignedEntries> {
+        match payload_source.try_recv() {
+            Ok((_, entries)) => Ok(entries),
+            Err(x) => Err(x.into()),
+        }
     }
 
     fn price_feed_entry(
@@ -965,7 +960,8 @@ mod tests {
         signers[0].process_incoming_messages().await;
 
         // leader should have published results
-        assert_round_complete(&mut payload_source);
+        let signed_entries = assert_round_complete(&mut payload_source)?;
+        assert_eq!(signed_entries.entries.len(), 2);
 
         Ok(())
     }
@@ -982,7 +978,8 @@ mod tests {
         assign_roles(&mut signers).await;
         run_round(&mut signers, &mut network).await;
 
-        assert_round_complete(&mut payload_source);
+        let signed_entries = assert_round_complete(&mut payload_source)?;
+        assert_eq!(signed_entries.entries.len(), 2);
 
         Ok(())
     }
@@ -997,7 +994,8 @@ mod tests {
         assign_roles(&mut signers).await;
         run_round(&mut signers, &mut network).await;
 
-        assert_round_complete(&mut payload_source);
+        let signed_entries = assert_round_complete(&mut payload_source)?;
+        assert_eq!(signed_entries.entries.len(), 1);
 
         Ok(())
     }
@@ -1012,7 +1010,8 @@ mod tests {
         assign_roles(&mut signers).await;
         run_round(&mut signers, &mut network).await;
 
-        assert_round_not_complete(&mut payload_source);
+        let signed_entries = assert_round_complete(&mut payload_source)?;
+        assert_eq!(signed_entries.entries.len(), 0);
 
         Ok(())
     }
