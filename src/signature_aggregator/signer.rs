@@ -103,14 +103,25 @@ pub struct Signature {
 
 #[derive(Clone)]
 pub enum SignerEvent {
+    /// We are the leader, and a new round of distributed signing has begun.
     RoundStarted(String),
+    /// We are the leader, and the "grace period" for the current round is over.
+    /// We want to wrap up this round ASAP, even if we don't have enough signatures for everything.
+    RoundGracePeriodEnded(String),
+    /// A new message has arrived from another node.
     Message(NodeId, SignerMessage, Span),
+    /// There is a new leader (maybe this node, maybe another node, maybe we don't know).
     LeaderChanged(RaftLeader),
 }
 impl Display for SignerEvent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::RoundStarted(round) => f.write_fmt(format_args!("RoundStarted{{round={}}}", round)),
+            Self::RoundStarted(round) => {
+                f.write_fmt(format_args!("RoundStarted{{round={}}}", round))
+            }
+            Self::RoundGracePeriodEnded(round) => {
+                f.write_fmt(format_args!("RoundGracePeriodEnded{{round={}}}", round))
+            }
             Self::Message(from, message, _) => {
                 f.write_fmt(format_args!("Message{{from={},data={}}}", from, message))
             }
@@ -290,6 +301,11 @@ impl Signer {
                     self.request_commitments(round).await?;
                 }
             }
+            SignerEvent::RoundGracePeriodEnded(round) => {
+                if matches!(self.state, SignerState::Leader(_)) {
+                    self.finish_collecting_commitments(round).await?;
+                }
+            }
             SignerEvent::Message(from, SignerMessage { round, data }, span) => match data {
                 SignerMessageData::RequestCommitment(request) => {
                     self.send_commitment(round, request)
@@ -440,9 +456,8 @@ impl Signer {
         let SignerState::Leader(LeaderState::CollectingCommitments {
             round: curr_round,
             round_span,
-            price_data,
             commitments,
-            my_nonces,
+            ..
         }) = &mut self.state
         else {
             // we're not the leader ATM, or not waiting for commitments
@@ -468,7 +483,33 @@ impl Signer {
             return Ok(());
         }
 
-        // Map<synthetic, Map<Identifier, SigningCommitments>>
+        round_span.in_scope(|| {
+            info!("Collected enough commitments!");
+        });
+
+        self.finish_collecting_commitments(round).await?;
+
+        Ok(())
+    }
+
+    async fn finish_collecting_commitments(&mut self, round: String) -> Result<()> {
+        let SignerState::Leader(LeaderState::CollectingCommitments {
+            round: curr_round,
+            round_span,
+            price_data,
+            commitments,
+            my_nonces,
+        }) = &mut self.state
+        else {
+            // we're not the leader ATM, or not waiting for commitments
+            return Ok(());
+        };
+        if *curr_round != round {
+            // Just double-checking that we're collecting sigs for the right round
+            return Ok(());
+        }
+        let round_span = round_span.clone();
+
         let mut commitment_maps = BTreeMap::new();
         let mut recipients = vec![];
         // time to transition to signing
@@ -485,12 +526,7 @@ impl Signer {
             }
         }
 
-        round_span.in_scope(|| {
-            info!(
-                ?recipients,
-                "Collected enough commitments, time to collect signatures"
-            )
-        });
+        round_span.in_scope(|| info!(?recipients, "Time to collect signatures"));
 
         let price_data = price_data.clone();
         let mut packages = BTreeMap::new();
@@ -904,7 +940,17 @@ mod tests {
         signers: &mut [SignerOrchestrator],
         network: &mut TestNetwork<SignerMessage>,
     ) {
-        signers[0].process(SignerEvent::RoundStarted("round".into())).await;
+        signers[0]
+            .process(SignerEvent::RoundStarted("round".into()))
+            .await;
+        while network.drain().await {
+            for signer in signers.iter_mut() {
+                signer.process_incoming_messages().await;
+            }
+        }
+        signers[0]
+            .process(SignerEvent::RoundGracePeriodEnded("round".into()))
+            .await;
         while network.drain().await {
             for signer in signers.iter_mut() {
                 signer.process_incoming_messages().await;
@@ -957,7 +1003,9 @@ mod tests {
         let leader_id = assign_roles(&mut signers).await;
 
         // Start the round
-        signers[0].process(SignerEvent::RoundStarted("round".into())).await;
+        signers[0]
+            .process(SignerEvent::RoundStarted("round".into()))
+            .await;
 
         // Leader should have broadcast a request to all followers
         let message = network.drain_one(&signers[0].id).await.remove(0);
@@ -1068,27 +1116,66 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn should_choose_subset_of_nodes_with_most_signatures() -> Result<()> {
+    async fn should_keep_collecting_commitments_if_not_all_synthetics_are_covered() -> Result<()> {
         let leader_prices = vec![
             price_feed_entry("ALL_MATCH", 3.50, &["A"], &[2], 1),
             price_feed_entry("SOME_MATCH", 3.50, &["A"], &[2], 1),
         ];
-        let follower1_prices = vec![
+        let partially_matching_prices = vec![
             price_feed_entry("ALL_MATCH", 3.50, &["A"], &[2], 1),
             price_feed_entry("SOME_MATCH", 3.50, &["A"], &[3], 2),
         ];
-        let follower2_prices = vec![
-            price_feed_entry("ALL_MATCH", 3.50, &["A"], &[2], 1),
-            price_feed_entry("SOME_MATCH", 3.50, &["A"], &[2], 1),
-        ];
 
-        let (mut signers, mut network, mut payload_source) =
-            construct_signers(2, vec![leader_prices, follower1_prices, follower2_prices]).await?;
+        // Follower #1 has some, but not all, values in common with the leader.
+        // Follower #2 has all values in common with the leader.
+        // The network is deterministic in these tests; follower #1 will commit before it.
+        let (mut signers, mut network, mut payload_source) = construct_signers(
+            2,
+            vec![
+                leader_prices.clone(),
+                partially_matching_prices,
+                leader_prices,
+            ],
+        )
+        .await?;
         assign_roles(&mut signers).await;
         run_round(&mut signers, &mut network).await;
 
         let signed_entries = assert_round_complete(&mut payload_source)?;
         assert_eq!(signed_entries.entries.len(), 2);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn should_stop_collecting_commitments_if_node_is_disconnected() -> Result<()> {
+        let leader_prices = vec![
+            price_feed_entry("ALL_MATCH", 3.50, &["A"], &[2], 1),
+            price_feed_entry("SOME_MATCH", 3.50, &["A"], &[2], 1),
+        ];
+        let partially_matching_prices = vec![
+            price_feed_entry("ALL_MATCH", 3.50, &["A"], &[2], 1),
+            price_feed_entry("SOME_MATCH", 3.50, &["A"], &[3], 2),
+        ];
+
+        // Follower #1 has some, but not all, values in common with the leader.
+        // Follower #2 is disconnected.
+        let (mut signers, mut network, mut payload_source) = construct_signers(
+            2,
+            vec![
+                leader_prices.clone(),
+                partially_matching_prices,
+                leader_prices,
+            ],
+        )
+        .await?;
+        network.disconnect(&signers[2].id);
+
+        assign_roles(&mut signers).await;
+        run_round(&mut signers, &mut network).await;
+
+        let signed_entries = assert_round_complete(&mut payload_source)?;
+        assert_eq!(signed_entries.entries.len(), 1);
 
         Ok(())
     }

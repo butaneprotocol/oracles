@@ -54,19 +54,31 @@ impl ConsensusSignatureAggregator {
     pub async fn run(self) {
         let (event_sink, mut event_source) = mpsc::channel(10);
 
-        // Every 10 seconds, if we're the leader, send the signer a "round started" event
+        // Every 10 seconds, if we're the leader, send the signer a "round started" event.
+        // 5 seconds after that, send a "grace period expired" event.
         let leader = self.leader_source.clone();
         let sink = event_sink.clone();
         let new_round_task = async move {
             loop {
-                sleep(Duration::from_secs(10)).await;
+                sleep(Duration::from_secs(5)).await;
                 if !matches!(*leader.borrow(), RaftLeader::Myself) {
                     continue;
                 }
                 let round = Uuid::new_v4().to_string();
                 let span = info_span!("new_round", round);
-                if let Err(err) = sink.send(SignerEvent::RoundStarted(round)).await {
+                if let Err(err) = sink.send(SignerEvent::RoundStarted(round.clone())).await {
                     span.in_scope(|| warn!("Failed to start new round: {}", err));
+                    break;
+                }
+                drop(span);
+
+                sleep(Duration::from_secs(5)).await;
+                if !matches!(*leader.borrow(), RaftLeader::Myself) {
+                    continue;
+                }
+                let span = info_span!("grace_period_timeout", round);
+                if let Err(err) = sink.send(SignerEvent::RoundGracePeriodEnded(round)).await {
+                    span.in_scope(|| warn!("Failed to end grace period for round: {}", err));
                     break;
                 }
             }
