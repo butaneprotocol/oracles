@@ -27,7 +27,6 @@ pub struct ConsensusSignatureAggregator {
 impl ConsensusSignatureAggregator {
     pub fn new(
         config: &OracleConfig,
-        id: NodeId,
         channel: NetworkChannel<SignerMessage>,
         price_source: watch::Receiver<Vec<PriceFeedEntry>>,
         leader_source: watch::Receiver<RaftLeader>,
@@ -36,7 +35,7 @@ impl ConsensusSignatureAggregator {
         let (key, public_key) = Self::load_keys(config)?;
         let (outgoing_message_sink, message_source) = channel.split();
         let signer = Signer::new(
-            id,
+            config.id.clone(),
             key,
             public_key,
             price_source,

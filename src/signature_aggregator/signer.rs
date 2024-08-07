@@ -465,8 +465,7 @@ impl Signer {
         }
         commitments.push((from, commitment));
 
-        // TODO: don't stop after the first N committers if any of them are not fully committed
-        if commitments.len() < (*self.key.min_signers() as usize) {
+        if needs_more_commitments(commitments, &self.key, &self.public_key) {
             // still collecting
             return Ok(());
         }
@@ -770,6 +769,37 @@ impl Signer {
     }
 }
 
+fn needs_more_commitments(
+    commitments: &[(NodeId, Commitment)],
+    key: &KeyPackage,
+    public_key: &PublicKeyPackage,
+) -> bool {
+    let min_signers = *key.min_signers() as usize;
+    let max_signers = public_key.verifying_shares().len();
+    if commitments.len() < min_signers {
+        // If not enough nodes have committed, we can't sign anything
+        return true;
+    }
+    if commitments.len() == max_signers {
+        // If every node has committed, there's no point in waiting for more commitments.
+        // Just collect as many signatures as we can.
+        return false;
+    }
+    let mut commitment_counts = BTreeMap::new();
+    for (_, commitment) in commitments.iter() {
+        for synthetic in commitment.commitments.keys() {
+            *commitment_counts.entry(synthetic).or_default() += 1;
+        }
+    }
+
+    // If we have enough commitments for every synthetic, we're done!
+    // Note that we can assume there's at least one commitment for every
+    // synthetic, because as the leader we already committed to signing everything
+    commitment_counts
+        .into_values()
+        .any(|count: usize| count < min_signers)
+}
+
 #[cfg(test)]
 mod tests {
     use anyhow::Result;
@@ -1035,6 +1065,32 @@ mod tests {
         let signed_entries = assert_round_complete(&mut payload_source)?;
         assert_eq!(signed_entries.entries.len(), 1);
         assert_eq!(signed_entries.entries[0].data.data.synthetic, "GOOD");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn should_choose_subset_of_nodes_with_most_signatures() -> Result<()> {
+        let leader_prices = vec![
+            price_feed_entry("ALL_MATCH", 3.50, &["A"], &[2], 1),
+            price_feed_entry("SOME_MATCH", 3.50, &["A"], &[2], 1),
+        ];
+        let follower1_prices = vec![
+            price_feed_entry("ALL_MATCH", 3.50, &["A"], &[2], 1),
+            price_feed_entry("SOME_MATCH", 3.50, &["A"], &[3], 2),
+        ];
+        let follower2_prices = vec![
+            price_feed_entry("ALL_MATCH", 3.50, &["A"], &[2], 1),
+            price_feed_entry("SOME_MATCH", 3.50, &["A"], &[2], 1),
+        ];
+
+        let (mut signers, mut network, mut payload_source) =
+            construct_signers(2, vec![leader_prices, follower1_prices, follower2_prices]).await?;
+        assign_roles(&mut signers).await;
+        run_round(&mut signers, &mut network).await;
+
+        let signed_entries = assert_round_complete(&mut payload_source)?;
+        assert_eq!(signed_entries.entries.len(), 2);
 
         Ok(())
     }

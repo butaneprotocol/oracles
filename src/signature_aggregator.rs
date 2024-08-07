@@ -75,7 +75,6 @@ impl SignatureAggregator {
 
         let aggregator = ConsensusSignatureAggregator::new(
             config,
-            network.id.clone(),
             network.signer_channel(),
             price_source,
             leader_source,
