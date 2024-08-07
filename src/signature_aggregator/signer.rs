@@ -85,6 +85,8 @@ pub struct Commitment {
     pub identifier: CborIdentifier,
     #[n(1)]
     pub commitments: BTreeMap<String, CborSigningCommitments>,
+    #[n(2)]
+    pub price_feed: Vec<PriceFeed>,
 }
 
 #[derive(Decode, Encode, Clone, Debug)]
@@ -349,8 +351,10 @@ impl Signer {
         round_span
             .in_scope(|| info!("Beginning round of signature collection, requesting commitments"));
 
-        let price_feed = price_data.iter().map(|entry| entry.data.clone()).collect();
-        let request = CommitmentRequest { price_feed };
+        let price_feed: Vec<_> = price_data.iter().map(|entry| entry.data.clone()).collect();
+        let request = CommitmentRequest {
+            price_feed: price_feed.clone(),
+        };
 
         // request other folks commit
         self.message_sink
@@ -365,7 +369,7 @@ impl Signer {
             .iter()
             .map(|entry| entry.data.synthetic.as_str())
             .collect();
-        let (my_nonces, commitment) = self.commit(&all_synthetics);
+        let (my_nonces, commitment) = self.commit(&all_synthetics, &price_feed);
         self.state = SignerState::Leader(LeaderState::CollectingCommitments {
             round,
             round_span,
@@ -424,7 +428,7 @@ impl Signer {
 
         // Send our commitment
         round_span.in_scope(|| info!("Sending commitment for this round"));
-        let (nonces, commitment) = self.commit(&synthetics_to_sign);
+        let (nonces, commitment) = self.commit(&synthetics_to_sign, &my_feed);
         self.message_sink
             .send(
                 leader_id.clone(),
@@ -779,7 +783,11 @@ impl Signer {
         Ok(())
     }
 
-    fn commit(&self, synthetics: &[&str]) -> (BTreeMap<String, SigningNonces>, Commitment) {
+    fn commit(
+        &self,
+        synthetics: &[&str],
+        price_feed: &[PriceFeed],
+    ) -> (BTreeMap<String, SigningNonces>, Commitment) {
         let mut nonces = BTreeMap::new();
         let mut commitments = BTreeMap::new();
         for synthetic in synthetics {
@@ -790,6 +798,7 @@ impl Signer {
         let commitment = Commitment {
             identifier: (*self.key.identifier()).into(),
             commitments,
+            price_feed: price_feed.to_vec(),
         };
         (nonces, commitment)
     }
