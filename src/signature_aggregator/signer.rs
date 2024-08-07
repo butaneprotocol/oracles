@@ -147,6 +147,7 @@ enum LeaderState {
         price_data: Vec<PriceFeedEntry>,
         signatures: Vec<Signature>,
         packages: BTreeMap<String, SigningPackage>,
+        waiting_for: BTreeSet<NodeId>,
     },
 }
 impl Display for LeaderState {
@@ -169,6 +170,7 @@ impl Display for LeaderState {
                 round,
                 signatures,
                 packages,
+                waiting_for,
                 ..
             } => {
                 let committed: BTreeSet<_> = packages
@@ -176,7 +178,7 @@ impl Display for LeaderState {
                     .flat_map(|p| p.signing_commitments().keys())
                     .collect();
                 let signed: BTreeSet<_> = signatures.iter().map(|s| s.identifier).collect();
-                f.write_fmt(format_args!("{{role=Leader,state=CollectingSignatures,round={},committed={:?},signed={:?}}}", round, committed, signed))
+                f.write_fmt(format_args!("{{role=Leader,state=CollectingSignatures,round={},committed={:?},signed={:?},waiting_for={:?}}}", round, committed, signed, waiting_for))
             }
         }
     }
@@ -321,7 +323,7 @@ impl Signer {
                     self.send_signature(round, request).instrument(span).await?;
                 }
                 SignerMessageData::Sign(signature) => {
-                    self.process_signature(round, signature)
+                    self.process_signature(round, from, signature)
                         .instrument(span)
                         .await?;
                 }
@@ -548,7 +550,7 @@ impl Signer {
             .iter()
             .map(|(synthetic, p)| (synthetic.clone(), p.clone().into()))
             .collect();
-        let send_to_recipient_tasks = recipients.into_iter().map(|recipient| {
+        let send_to_recipient_tasks = recipients.iter().cloned().map(|recipient| {
             let message = SignerMessage {
                 round: round.clone(),
                 data: SignerMessageData::RequestSignature(SignatureRequest {
@@ -569,6 +571,7 @@ impl Signer {
             price_data,
             signatures: vec![my_signature],
             packages,
+            waiting_for: recipients.into_iter().collect(),
         });
 
         Ok(())
@@ -665,13 +668,19 @@ impl Signer {
         Ok(())
     }
 
-    async fn process_signature(&mut self, round: String, signature: Signature) -> Result<()> {
+    async fn process_signature(
+        &mut self,
+        round: String,
+        from: NodeId,
+        signature: Signature,
+    ) -> Result<()> {
         let SignerState::Leader(LeaderState::CollectingSignatures {
             round: curr_round,
             round_span,
             price_data,
             signatures,
             packages,
+            waiting_for,
         }) = &mut self.state
         else {
             // We're not a leader, or we're not waiting for signatures
@@ -690,8 +699,9 @@ impl Signer {
             return Ok(());
         }
         signatures.push(signature);
+        waiting_for.remove(&from);
 
-        if signatures.len() < (*self.key.min_signers() as usize) {
+        if !waiting_for.is_empty() {
             // still collecting
             return Ok(());
         }
@@ -1176,6 +1186,35 @@ mod tests {
 
         let signed_entries = assert_round_complete(&mut payload_source)?;
         assert_eq!(signed_entries.entries.len(), 1);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn should_collect_different_signatures_from_different_nodes() -> Result<()> {
+        let leader_prices = vec![
+            price_feed_entry("FIRST", 3.50, &["A"], &[2], 1),
+            price_feed_entry("SECOND", 3.50, &["A"], &[2], 1),
+        ];
+        let follower1_prices = vec![
+            price_feed_entry("FIRST", 3.50, &["A"], &[2], 1),
+            price_feed_entry("SECOND", 3.50, &["A"], &[3], 2),
+        ];
+        let follower2_prices = vec![
+            price_feed_entry("FIRST", 3.50, &["A"], &[3], 2),
+            price_feed_entry("SECOND", 3.50, &["A"], &[2], 1),
+        ];
+
+        // Follower #1 agrees with the leader on one price, follower #2 on another.
+        // We can only sign two payloads if we wait for both of them to finish.
+        let (mut signers, mut network, mut payload_source) =
+            construct_signers(2, vec![leader_prices, follower1_prices, follower2_prices]).await?;
+
+        assign_roles(&mut signers).await;
+        run_round(&mut signers, &mut network).await;
+
+        let signed_entries = assert_round_complete(&mut payload_source)?;
+        assert_eq!(signed_entries.entries.len(), 2);
 
         Ok(())
     }
