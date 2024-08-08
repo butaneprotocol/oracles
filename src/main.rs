@@ -64,7 +64,7 @@ impl Node {
         let (signature_aggregator, payload_source) = if config.consensus {
             SignatureAggregator::consensus(&config, &mut network, price_feed_rx, leader_rx)?
         } else {
-            SignatureAggregator::single(&network.id, price_feed_rx, leader_rx)?
+            SignatureAggregator::single(&config, price_feed_rx, leader_rx)?
         };
 
         let api_server = APIServer::new(&config, payload_source.clone(), price_audit_rx);
