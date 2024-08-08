@@ -513,6 +513,36 @@ async fn should_start_new_election_if_current_election_times_out() {
 }
 
 #[tokio::test]
+async fn should_stop_sending_messages_if_we_abdicate() {
+    let start_time = Instant::now();
+    let heartbeat_freq = Duration::from_millis(1000);
+    let timeout_freq = Duration::from_millis(2000);
+
+    let (mut state, [other_id1, other_id2, other_id3], _) =
+        generate_state(start_time, heartbeat_freq, timeout_freq);
+    assert_eq!(state.receive(&other_id1, RaftMessage::Connect), vec![]);
+    assert_eq!(state.receive(&other_id2, RaftMessage::Connect), vec![]);
+    let term = state.become_leader();
+
+    // While we're leader, we send heartbeats
+    assert_eq!(
+        state.tick(heartbeat_freq),
+        vec![
+            (other_id1, RaftMessage::Heartbeat { term }),
+            (other_id2, RaftMessage::Heartbeat { term })
+        ]
+    );
+
+    // Once we're not, we stop heartbeating
+    state.abdicate();
+    assert_eq!(state.tick(heartbeat_freq), vec![]);
+    // And also don't run in the next election
+    assert_eq!(state.tick(timeout_freq), vec![]);
+    // And also don't tell newcomers that we're leader
+    assert_eq!(state.receive(&other_id3, RaftMessage::Connect), vec![]);
+}
+
+#[tokio::test]
 async fn should_reset_new_election_timeout_after_voting() {
     let start_time = Instant::now();
     let heartbeat_freq = Duration::from_millis(1000);
@@ -603,6 +633,10 @@ impl Participant {
         self.state.tick(self.now)
     }
 
+    pub fn abdicate(&mut self) {
+        self.state.abdicate();
+    }
+
     pub fn begin_election(&mut self) -> (Vec<NodeId>, usize) {
         // "run" for long enough to start another election
         let begin_election_messages = self.tick(self.timeout_freq);
@@ -621,7 +655,7 @@ impl Participant {
         (peers, term)
     }
 
-    pub fn become_leader(&mut self) {
+    pub fn become_leader(&mut self) -> usize {
         // "run" for long enough to start another election
         let (peers, term) = self.begin_election();
         for peer in peers {
@@ -633,7 +667,7 @@ impl Participant {
                 assert!(heartbeat_messages
                     .iter()
                     .all(|(_, message)| matches!(message, RaftMessage::Heartbeat { .. })));
-                return;
+                return term;
             }
         }
         panic!("Failed to become leader");
