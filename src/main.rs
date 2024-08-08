@@ -50,7 +50,7 @@ impl Node {
         // Construct a peer-to-peer network that can connect to peers, and dispatch messages to the correct state machine
         let mut network = Network::new(&config.network, health_sink.clone());
 
-        let (raft, _raft_client) = Raft::new(&config, &mut network, leader_tx);
+        let (raft, raft_client) = Raft::new(&config, &mut network, leader_tx);
 
         let (price_feed_tx, price_feed_rx) = watch::channel(vec![]);
         let (price_audit_tx, price_audit_rx) = watch::channel(vec![]);
@@ -58,9 +58,15 @@ impl Node {
         let price_aggregator = PriceAggregator::new(price_feed_tx, price_audit_tx, config.clone())?;
 
         let (signature_aggregator, payload_source) = if config.consensus {
-            SignatureAggregator::consensus(&config, &mut network, price_feed_rx, leader_rx)?
+            SignatureAggregator::consensus(
+                &config,
+                &mut network,
+                raft_client,
+                price_feed_rx,
+                leader_rx,
+            )?
         } else {
-            SignatureAggregator::single(&config, price_feed_rx, leader_rx)?
+            SignatureAggregator::single(&config, raft_client, price_feed_rx, leader_rx)?
         };
 
         let api_server = APIServer::new(&config, payload_source.clone(), price_audit_rx);
