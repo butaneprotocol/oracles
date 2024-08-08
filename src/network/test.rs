@@ -8,6 +8,7 @@ use crate::network::{
 };
 
 pub struct TestNetwork<T: Clone> {
+    id_count: usize,
     outgoing: HashMap<NodeId, mpsc::Receiver<OutgoingMessage<T>>>,
     incoming: HashMap<NodeId, mpsc::Sender<IncomingMessage<T>>>,
 }
@@ -21,13 +22,15 @@ impl<T: Clone> Default for TestNetwork<T> {
 impl<T: Clone> TestNetwork<T> {
     pub fn new() -> Self {
         Self {
+            id_count: 0,
             outgoing: HashMap::new(),
             incoming: HashMap::new(),
         }
     }
 
     pub fn connect(&mut self) -> (NodeId, NetworkChannel<T>) {
-        let node_id = NodeId::new(self.outgoing.len().to_string());
+        let node_id = NodeId::new(self.id_count.to_string());
+        self.id_count += 1;
 
         let (outgoing_tx, outgoing_rx) = mpsc::channel(10);
         self.outgoing.insert(node_id.clone(), outgoing_rx);
@@ -39,6 +42,11 @@ impl<T: Clone> TestNetwork<T> {
 
         let channel = NetworkChannel::new(sender, receiver);
         (node_id, channel)
+    }
+
+    pub fn disconnect(&mut self, node_id: &NodeId) {
+        self.outgoing.remove(node_id);
+        self.incoming.remove(node_id);
     }
 
     pub fn reconnect(&mut self, node_id: &NodeId) -> NetworkChannel<T> {
