@@ -30,7 +30,7 @@ use crate::{
     signature_aggregator::price_comparator::choose_feeds_to_sign,
 };
 
-use super::price_comparator::ComparisonResult;
+use super::{price_comparator::ComparisonResult, price_instrumentation::PriceInstrumentation};
 
 #[derive(Decode, Encode, Clone, Debug)]
 pub struct SignerMessage {
@@ -256,6 +256,7 @@ pub struct Signer {
     message_sink: NetworkSender<SignerMessage>,
     signed_entries_sink: mpsc::Sender<(NodeId, SignedEntries)>,
     state: SignerState,
+    price_tracker: PriceInstrumentation,
 }
 
 impl Signer {
@@ -275,6 +276,7 @@ impl Signer {
             message_sink,
             signed_entries_sink,
             state: SignerState::Unknown,
+            price_tracker: PriceInstrumentation::default(),
         }
     }
 
@@ -299,10 +301,11 @@ impl Signer {
                     RaftLeader::Other(id) => SignerState::Follower(id, FollowerState::Ready),
                     RaftLeader::Unknown => SignerState::Unknown,
                 };
+                self.price_tracker.end_round();
             }
             SignerEvent::RoundStarted(round) => {
                 if matches!(self.state, SignerState::Leader(_)) {
-                    self.request_commitments(round).await?;
+                    self.begin_round(round).await?;
                 }
             }
             SignerEvent::RoundGracePeriodEnded(round) => {
@@ -337,8 +340,9 @@ impl Signer {
         Ok(())
     }
 
-    async fn request_commitments(&mut self, round: String) -> Result<()> {
+    async fn begin_round(&mut self, round: String) -> Result<()> {
         let price_data = self.price_source.borrow().clone();
+        self.price_tracker.begin_round(&round, &price_data);
 
         let round_span = info_span!(
             "signer_round",
@@ -459,6 +463,9 @@ impl Signer {
         from: NodeId,
         commitment: Commitment,
     ) -> Result<()> {
+        self.price_tracker
+            .track_prices(&round, &commitment.price_feed);
+
         let SignerState::Leader(LeaderState::CollectingCommitments {
             round: curr_round,
             round_span,
