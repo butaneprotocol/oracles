@@ -4,6 +4,7 @@ pub mod signer;
 pub mod single_aggregator;
 
 use std::{
+    collections::{BTreeMap, BTreeSet},
     sync::Arc,
     time::{Duration, SystemTime},
 };
@@ -20,18 +21,20 @@ use tokio::{
     sync::{mpsc, watch},
     time::sleep,
 };
-use tracing::debug;
+use tracing::{debug, info_span, warn};
 
 use crate::{
     config::OracleConfig,
     network::{Network, NodeId},
     price_feed::{IntervalBoundType, PriceFeedEntry, SignedEntries, SignedEntry},
-    raft::RaftLeader,
+    raft::{RaftClient, RaftLeader},
 };
 
 pub struct SignatureAggregator {
+    id: NodeId,
     implementation: SignatureAggregatorImplementation,
     synthetics: Vec<String>,
+    raft_client: RaftClient,
     signed_entries_source: mpsc::Receiver<(NodeId, SignedEntries)>,
     payload_sink: watch::Sender<Payload>,
 }
@@ -43,9 +46,50 @@ enum SignatureAggregatorImplementation {
 impl SignatureAggregator {
     pub fn single(
         config: &OracleConfig,
+        raft_client: RaftClient,
         price_source: watch::Receiver<Vec<PriceFeedEntry>>,
         leader_source: watch::Receiver<RaftLeader>,
     ) -> Result<(Self, watch::Receiver<Payload>)> {
+        SignatureAggregator::new(config, raft_client, |signed_entries_sink| {
+            let implementation = SingleSignatureAggregator::new(
+                &config.id,
+                price_source,
+                leader_source,
+                signed_entries_sink,
+            )?;
+            Ok(SignatureAggregatorImplementation::Single(implementation))
+        })
+    }
+
+    pub fn consensus(
+        config: &OracleConfig,
+        network: &mut Network,
+        raft_client: RaftClient,
+        price_source: watch::Receiver<Vec<PriceFeedEntry>>,
+        leader_source: watch::Receiver<RaftLeader>,
+    ) -> Result<(Self, watch::Receiver<Payload>)> {
+        SignatureAggregator::new(config, raft_client, |signed_entries_sink| {
+            let implementation = ConsensusSignatureAggregator::new(
+                config,
+                network.signer_channel(),
+                price_source,
+                leader_source,
+                signed_entries_sink,
+            )?;
+            Ok(SignatureAggregatorImplementation::Consensus(implementation))
+        })
+    }
+
+    fn new<F>(
+        config: &OracleConfig,
+        raft_client: RaftClient,
+        factory: F,
+    ) -> Result<(Self, watch::Receiver<Payload>)>
+    where
+        F: FnOnce(
+            mpsc::Sender<(NodeId, SignedEntries)>,
+        ) -> Result<SignatureAggregatorImplementation>,
+    {
         let synthetics = config.synthetics.iter().map(|s| s.name.clone()).collect();
         let (signed_entries_sink, signed_entries_source) = mpsc::channel(10);
         let (payload_sink, mut payload_source) = watch::channel(Payload {
@@ -55,46 +99,12 @@ impl SignatureAggregator {
         });
         payload_source.mark_unchanged();
 
-        let aggregator = SingleSignatureAggregator::new(
-            &config.id,
-            price_source,
-            leader_source,
-            signed_entries_sink,
-        )?;
+        let implementation = factory(signed_entries_sink)?;
         let aggregator = SignatureAggregator {
-            implementation: SignatureAggregatorImplementation::Single(aggregator),
+            id: config.id.clone(),
+            implementation,
             synthetics,
-            signed_entries_source,
-            payload_sink,
-        };
-        Ok((aggregator, payload_source))
-    }
-
-    pub fn consensus(
-        config: &OracleConfig,
-        network: &mut Network,
-        price_source: watch::Receiver<Vec<PriceFeedEntry>>,
-        leader_source: watch::Receiver<RaftLeader>,
-    ) -> Result<(Self, watch::Receiver<Payload>)> {
-        let synthetics = config.synthetics.iter().map(|s| s.name.clone()).collect();
-        let (signed_entries_sink, signed_entries_source) = mpsc::channel(10);
-        let (payload_sink, mut payload_source) = watch::channel(Payload {
-            publisher: network.id.clone(),
-            timestamp: SystemTime::now(),
-            entries: vec![],
-        });
-        payload_source.mark_unchanged();
-
-        let aggregator = ConsensusSignatureAggregator::new(
-            config,
-            network.signer_channel(),
-            price_source,
-            leader_source,
-            signed_entries_sink,
-        )?;
-        let aggregator = SignatureAggregator {
-            implementation: SignatureAggregatorImplementation::Consensus(aggregator),
-            synthetics,
+            raft_client,
             signed_entries_source,
             payload_sink,
         };
@@ -112,11 +122,11 @@ impl SignatureAggregator {
 
         let payload_ages: DashMap<String, (SystemTime, SystemTime)> = self
             .synthetics
-            .into_iter()
+            .iter()
             .map(|synthetic| {
                 let now = SystemTime::now();
                 let later = now + Duration::from_secs(60);
-                (synthetic, (now, later))
+                (synthetic.clone(), (now, later))
             })
             .collect();
         let payload_ages = Arc::new(payload_ages);
@@ -149,15 +159,60 @@ impl SignatureAggregator {
             }
         };
 
+        let id = self.id;
+        let synthetics = self.synthetics;
+        let raft_client = self.raft_client;
         let mut payload_source = self.signed_entries_source;
         let publish_task = async move {
+            // map of synthetic name to number of times it's failed in a row
+            let mut synthetic_failures: BTreeMap<String, usize> =
+                synthetics.iter().map(|s| (s.clone(), 0)).collect();
+
             while let Some((publisher, payload)) = payload_source.recv().await {
+                let span = info_span!("publish_entries");
                 // update the payload age monitor now that we have a new payload
                 let last_updated = payload.timestamp;
                 for entry in &payload.entries {
                     let synthetic = entry.data.data.synthetic.clone();
                     let valid_until = find_end_of_entry_validity(entry);
                     payload_ages.insert(synthetic, (last_updated, valid_until));
+                }
+
+                if publisher == id {
+                    // count the number of times we failed to publish some synthetic
+                    let updated: BTreeSet<_> = payload
+                        .entries
+                        .iter()
+                        .map(|e| &e.data.data.synthetic)
+                        .collect();
+                    let mut something_failed_too_often = false;
+                    for (synthetic, failures) in synthetic_failures.iter_mut() {
+                        if updated.contains(synthetic) {
+                            *failures = 0;
+                        } else {
+                            *failures += 1;
+                            span.in_scope(|| {
+                                warn!(
+                                    synthetic,
+                                    failures, "Could not publish new price feed for synthetic"
+                                );
+                            });
+                            if *failures >= 5 {
+                                something_failed_too_often = true;
+                            }
+                        }
+                    }
+                    // If we failed to publish some synthetic 5x in a row, we should stop publishing
+                    if something_failed_too_often {
+                        span.in_scope(|| {
+                            warn!("Too many failures, we are no longer fit to be leader");
+                        });
+                        raft_client.abdicate();
+                    }
+                } else {
+                    for failures in synthetic_failures.values_mut() {
+                        *failures = 0;
+                    }
                 }
 
                 let entries = payload

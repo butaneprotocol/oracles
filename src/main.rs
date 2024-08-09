@@ -44,17 +44,13 @@ struct Node {
 
 impl Node {
     pub fn new(config: Arc<OracleConfig>) -> Result<Self> {
-        let heartbeat = config.heartbeat;
-        let timeout = config.timeout;
-
-        // quorum is set to a majority of expected nodes (which includes ourself!)
-        let quorum = ((config.network.peers.len() + 1) / 2) + 1;
-
         let (leader_tx, leader_rx) = watch::channel(RaftLeader::Unknown);
         let (health_server, health_sink) = HealthServer::new(&config.network, leader_rx.clone());
 
         // Construct a peer-to-peer network that can connect to peers, and dispatch messages to the correct state machine
         let mut network = Network::new(&config.network, health_sink.clone());
+
+        let (raft, raft_client) = Raft::new(&config, &mut network, leader_tx);
 
         let (price_feed_tx, price_feed_rx) = watch::channel(vec![]);
         let (price_audit_tx, price_audit_rx) = watch::channel(vec![]);
@@ -62,16 +58,20 @@ impl Node {
         let price_aggregator = PriceAggregator::new(price_feed_tx, price_audit_tx, config.clone())?;
 
         let (signature_aggregator, payload_source) = if config.consensus {
-            SignatureAggregator::consensus(&config, &mut network, price_feed_rx, leader_rx)?
+            SignatureAggregator::consensus(
+                &config,
+                &mut network,
+                raft_client,
+                price_feed_rx,
+                leader_rx,
+            )?
         } else {
-            SignatureAggregator::single(&config, price_feed_rx, leader_rx)?
+            SignatureAggregator::single(&config, raft_client, price_feed_rx, leader_rx)?
         };
 
         let api_server = APIServer::new(&config, payload_source.clone(), price_audit_rx);
 
         let publisher = Publisher::new(&network.id, payload_source)?;
-
-        let raft = Raft::new(quorum, heartbeat, timeout, &mut network, leader_tx);
 
         Ok(Node {
             api_server,

@@ -44,7 +44,9 @@ pub enum RaftStatus {
     Candidate {
         votes: BTreeSet<NodeId>,
     },
-    Leader,
+    Leader {
+        abdicating: bool,
+    },
 }
 
 #[derive(Eq, PartialEq, Clone, Debug)]
@@ -125,7 +127,7 @@ impl RaftState {
 
     fn leader(&self) -> Option<NodeId> {
         match &self.status {
-            RaftStatus::Leader => Some(self.id.clone()),
+            RaftStatus::Leader { .. } => Some(self.id.clone()),
             RaftStatus::Follower {
                 leader: Some(leader),
                 ..
@@ -135,7 +137,14 @@ impl RaftState {
     }
 
     fn is_leader(&self) -> bool {
-        matches!(self.status, RaftStatus::Leader)
+        matches!(self.status, RaftStatus::Leader { .. })
+    }
+
+    pub fn abdicate(&mut self) -> Vec<(NodeId, RaftMessage)> {
+        if let RaftStatus::Leader { abdicating } = &mut self.status {
+            *abdicating = true;
+        }
+        vec![]
     }
 
     pub fn receive(
@@ -148,7 +157,7 @@ impl RaftState {
             RaftMessage::Connect => {
                 info!("New peer {}", from);
                 self.peers.insert(from.clone());
-                if matches!(self.status, RaftStatus::Leader) {
+                if matches!(self.status, RaftStatus::Leader { abdicating: false }) {
                     // Let them know right away that we're the leader
                     let response = RaftMessage::Heartbeat { term: self.term };
                     vec![(from.clone(), response)]
@@ -195,7 +204,7 @@ impl RaftState {
                     (true, "First candidate of new term")
                 } else {
                     match &self.status {
-                        RaftStatus::Leader => (false, "Already elected self"),
+                        RaftStatus::Leader { .. } => (false, "Already elected self"),
                         RaftStatus::Follower {
                             leader: _,
                             voted_for: Some(candidate),
@@ -291,7 +300,7 @@ impl RaftState {
                                 quorum = self.quorum,
                                 "Election won"
                             );
-                            self.set_status(RaftStatus::Leader);
+                            self.set_status(RaftStatus::Leader { abdicating: false });
                             // Immediately send a heartbeat to make leader election stable
                             return self
                                 .peers
@@ -315,11 +324,15 @@ impl RaftState {
 
     pub fn tick(&mut self, timestamp: Instant) -> Vec<(NodeId, RaftMessage)> {
         let actual_timeout = self.timeout_freq.sub(self.jitter);
-        let is_leader = self.is_leader();
         let elapsed_time = timestamp.duration_since(self.last_event);
         let heartbeat_timeout = elapsed_time > self.heartbeat_freq;
         let election_timeout = elapsed_time > actual_timeout;
         let can_reach_quorum = (self.peers.len() + 1) >= self.quorum;
+        let (is_leader, abdicating) = if let RaftStatus::Leader { abdicating } = &self.status {
+            (true, *abdicating)
+        } else {
+            (false, false)
+        };
 
         if election_timeout && !can_reach_quorum {
             if !self.warned_about_quorum {
@@ -333,7 +346,7 @@ impl RaftState {
                 self.warned_about_quorum = true;
             }
             vec![]
-        } else if election_timeout && can_reach_quorum {
+        } else if election_timeout && can_reach_quorum && !abdicating {
             info!(
                 term = self.term + 1,
                 nodes = self.peers.len() + 1,
@@ -357,7 +370,7 @@ impl RaftState {
                 .iter()
                 .map(|peer| (peer.clone(), RaftMessage::RequestVote { term: self.term }))
                 .collect();
-        } else if is_leader && heartbeat_timeout {
+        } else if is_leader && heartbeat_timeout && !abdicating {
             self.emit_has_leader(true, true);
             if !self.peers.is_empty() {
                 debug!("Sending heartbeats as leader");
@@ -384,7 +397,7 @@ impl RaftState {
 
     fn set_status(&mut self, status: RaftStatus) {
         let leader = match &status {
-            RaftStatus::Leader => RaftLeader::Myself,
+            RaftStatus::Leader { .. } => RaftLeader::Myself,
             RaftStatus::Follower {
                 leader: Some(leader),
                 ..
