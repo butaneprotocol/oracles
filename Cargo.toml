@@ -31,6 +31,8 @@ minicbor = { version = "0.20", features = ["derive", "std"] }
 minicbor-io = { version = "0.15", features = ["async-io"] }
 num-bigint = "0.4"
 num-integer = "0.1"
+num-rational = "0.4"
+num-traits = "0.2"
 opentelemetry = "0.24"
 opentelemetry-otlp = { version = "0.17", features = ["gzip-tonic", "tls-webpki-roots"] }
 opentelemetry_sdk = { version = "0.24", features = ["rt-tokio"] }
