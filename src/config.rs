@@ -19,6 +19,7 @@ struct RawOracleConfig {
     pub network_port: u16,
     pub health_port: u16,
     pub api_port: u16,
+    pub network_timeout_ms: u64,
     pub consensus: bool,
     pub peers: Vec<RawPeerConfig>,
     pub heartbeat_ms: u64,
@@ -119,6 +120,7 @@ impl TryFrom<RawOracleConfig> for OracleConfig {
             id: id.clone(),
             private_key,
             peers,
+            timeout: Duration::from_millis(raw.network_timeout_ms),
         };
 
         let logs = LogConfig {
@@ -157,6 +159,7 @@ pub struct NetworkConfig {
     pub private_key: SigningKey,
     pub port: u16,
     pub peers: Vec<Peer>,
+    pub timeout: Duration,
 }
 
 #[derive(Deserialize)]
