@@ -154,7 +154,8 @@ impl EncodeSink {
     }
 
     async fn write_with_timeout(&mut self, timeout: Duration, val: Message) -> Result<()> {
-        time::timeout(timeout, self.0.write(val)).await
+        time::timeout(timeout, self.0.write(val))
+            .await
             .context("write timed out")?
             .context("write failed")?;
         Ok(())
@@ -172,7 +173,8 @@ impl DecodeStream {
     }
 
     async fn read_with_timeout(&mut self, timeout: Duration) -> Result<Option<Message>> {
-        let res = time::timeout(timeout, self.0.read()).await
+        let res = time::timeout(timeout, self.0.read())
+            .await
             .context("read timed out")?
             .context("read failed")?;
         Ok(res)
@@ -319,12 +321,22 @@ impl Core {
         info!("Listening on: {}", addr);
 
         let listener = TcpListener::bind(addr).await.unwrap();
-        while let Ok((stream, _)) = listener.accept().await {
-            let core = self.clone();
-            let rxs = outgoing_message_rxs.clone();
-            tokio::spawn(async move {
-                core.handle_incoming_connection(stream, rxs).await;
-            });
+        loop {
+            match listener.accept().await {
+                Ok((stream, _)) => {
+                    let core = self.clone();
+                    let rxs = outgoing_message_rxs.clone();
+                    tokio::spawn(async move {
+                        core.handle_incoming_connection(stream, rxs).await;
+                    });
+                }
+                Err(error) => {
+                    let span = info_span!("failed_incoming_connection");
+                    span.in_scope(|| {
+                        warn!("Error listening for new connections: {}", error);
+                    });
+                }
+            };
         }
     }
 
@@ -535,8 +547,9 @@ impl Core {
     async fn open_connection(&self, peer: &Peer) -> Result<TcpStream> {
         let them = peer.label.clone();
         debug!(them, "Attempting to connect to {}", peer.id);
-        let stream = TcpStream::connect(&peer.address)
+        let stream = time::timeout(self.timeout, TcpStream::connect(&peer.address))
             .await
+            .context("timeout opening connection")?
             .context("error opening connection")?;
 
         debug!(
@@ -848,8 +861,12 @@ async fn handle_ping(
 
 #[tracing::instrument]
 pub(super) async fn try_send_disconnect(them: &str, sink: &mut EncodeSink, reason: String) {
-    match sink.write_with_timeout(Duration::from_secs(3), Message::Disconnect(reason)).await.context("could not send disconnect message") {
-        Ok(()) => {},
-        Err(error) => warn!(them, "{:#}", error)
+    match sink
+        .write_with_timeout(Duration::from_secs(3), Message::Disconnect(reason))
+        .await
+        .context("could not send disconnect message")
+    {
+        Ok(()) => {}
+        Err(error) => warn!(them, "{:#}", error),
     }
 }
