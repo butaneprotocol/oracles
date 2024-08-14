@@ -586,6 +586,41 @@ async fn should_reset_new_election_timeout_after_voting() {
     );
 }
 
+#[tokio::test]
+async fn should_not_reset_new_election_timeout_after_receiving_old_heartbeat() {
+    let start_time = Instant::now();
+    let heartbeat_freq = Duration::from_millis(1000);
+    let timeout_freq = Duration::from_millis(2000);
+
+    let (mut state, [other_id1, other_id2], _) =
+        generate_state(start_time, heartbeat_freq, timeout_freq);
+    assert_eq!(state.receive(&other_id1, RaftMessage::Connect), vec![]);
+    assert_eq!(state.receive(&other_id2, RaftMessage::Connect), vec![]);
+
+    state.become_follower(&other_id1, 10);
+
+    // run for a while, but not long enough to time out
+    assert_eq!(
+        state.tick(timeout_freq / 2 + Duration::from_millis(500)),
+        vec![]
+    );
+
+    // receive a heartbeat from node 2, it thinks it's leader but its vote is too old
+    assert_eq!(
+        state.receive(&other_id2, RaftMessage::Heartbeat { term: 5 }),
+        []
+    );
+
+    // now if we run for long enough to trigger the old timeout, it should still get triggered
+    assert_eq!(
+        state.tick(timeout_freq / 2),
+        vec![
+            (other_id1.clone(), RaftMessage::RequestVote { term: 11 }),
+            (other_id2.clone(), RaftMessage::RequestVote { term: 11 }),
+        ]
+    );
+}
+
 fn generate_state<const N: usize>(
     start_time: Instant,
     heartbeat_freq: Duration,
