@@ -9,7 +9,7 @@ use tokio::{
     select,
     time::{sleep, Duration},
 };
-use tokio_tungstenite::{connect_async, tungstenite::Message};
+use tokio_websockets::{ClientBuilder, Message};
 use tracing::{warn, Instrument};
 
 use crate::config::OracleConfig;
@@ -72,7 +72,8 @@ impl ByBitSource {
     }
 
     async fn query_impl(&self, sink: &PriceSink) -> Result<()> {
-        let (mut stream, _) = connect_async(URL).await?;
+        let uri = URL.try_into()?;
+        let (mut stream, _) = ClientBuilder::from_uri(uri).connect().await?;
 
         stream
             .send(
@@ -107,9 +108,10 @@ impl ByBitSource {
 
         let consumer = async move {
             while let Some(result) = stream.next().await {
-                match result? {
-                    Message::Text(content) => {
-                        let response: ByBitResponse = serde_json::from_str(&content)?;
+                let message = result?;
+                match message.as_text() {
+                    Some(content) => {
+                        let response: ByBitResponse = serde_json::from_str(content)?;
                         let data = match response {
                             ByBitResponse::StatusResponse { success, ret_msg } => {
                                 if !success {
@@ -163,8 +165,8 @@ impl ByBitSource {
                         };
                         sink.send(price_info)?;
                     }
-                    other => {
-                        return Err(anyhow!("Unexpected response {:?}", other));
+                    None => {
+                        return Err(anyhow!("Unexpected response {:?}", message));
                     }
                 };
             }

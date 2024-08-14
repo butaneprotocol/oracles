@@ -4,7 +4,7 @@ use anyhow::{anyhow, Result};
 use futures::{future::BoxFuture, FutureExt, SinkExt, StreamExt};
 use rust_decimal::Decimal;
 use serde::Deserialize;
-use tokio_tungstenite::{connect_async, tungstenite::Message};
+use tokio_websockets::{ClientBuilder, Message};
 use tracing::{trace, warn};
 
 use crate::sources::source::{PriceInfo, PriceSink};
@@ -37,28 +37,30 @@ impl BinanceSource {
     }
 
     async fn query_impl(&self, sink: &PriceSink) -> Result<()> {
-        let (mut stream, _) = connect_async(URL).await?;
+        let uri = URL.try_into()?;
+        let (mut stream, _) = ClientBuilder::from_uri(uri).connect().await?;
         trace!("Connected to binance!");
 
         while let Some(res) = stream.next().await {
-            match res {
-                Ok(Message::Text(contents)) => {
-                    if let Err(err) = process_binance_message(contents, sink) {
-                        warn!("Unexpected error updating binance data: {:?}", err);
-                    }
-                }
-                Ok(Message::Ping(data)) => {
-                    trace!("Ping received from binance: {:?}", data);
-                    if let Err(err) = stream.send(Message::Pong(data)).await {
-                        warn!("Unexpected error replying to binance ping: {}", err);
-                    }
-                }
-                Ok(message) => {
-                    warn!("Unexpected response from binance: {:?}", message);
-                }
+            let message = match res {
+                Ok(msg) => msg,
                 Err(error) => {
                     warn!("Error from binance: {:?}", error);
+                    continue;
                 }
+            };
+            if let Some(contents) = message.as_text() {
+                if let Err(err) = process_binance_message(contents, sink) {
+                    warn!("Unexpected error updating binance data: {:?}", err);
+                }
+            } else if message.is_ping() {
+                let data = message.into_payload();
+                trace!("Ping received from binance: {:?}", data);
+                if let Err(err) = stream.send(Message::pong(data)).await {
+                    warn!("Unexpected error replying to binance ping: {}", err);
+                }
+            } else {
+                warn!("Unexpected response from binance: {:?}", message);
             }
         }
 
@@ -79,8 +81,8 @@ struct BinanceMarkPriceMessageData {
     volume_base: String,
 }
 
-fn process_binance_message(contents: String, sink: &PriceSink) -> Result<()> {
-    let message: BinanceMarkPriceMessage = serde_json::from_str(&contents)?;
+fn process_binance_message(contents: &str, sink: &PriceSink) -> Result<()> {
+    let message: BinanceMarkPriceMessage = serde_json::from_str(contents)?;
 
     let currency = match message.stream.find("usdt") {
         Some(index) => &message.stream[0..index],

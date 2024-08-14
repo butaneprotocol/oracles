@@ -4,7 +4,7 @@ use anyhow::{anyhow, Result};
 use futures::{future::BoxFuture, FutureExt, SinkExt, StreamExt};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use tokio_tungstenite::{connect_async, tungstenite::Message};
+use tokio_websockets::{ClientBuilder, Message};
 use tracing::{trace, warn};
 
 use super::source::{PriceInfo, PriceSink, Source};
@@ -35,7 +35,8 @@ impl CoinbaseSource {
 
     async fn query_impl(&self, sink: &PriceSink) -> Result<()> {
         trace!("Connecting to coinbase");
-        let (mut stream, _) = connect_async(URL).await?;
+        let uri = URL.try_into()?;
+        let (mut stream, _) = ClientBuilder::from_uri(uri).connect().await?;
 
         let request = CoinbaseRequest::Subscribe {
             product_ids: vec![
@@ -149,9 +150,9 @@ impl TryFrom<Message> for CoinbaseResponse {
     type Error = anyhow::Error;
 
     fn try_from(value: Message) -> Result<Self> {
-        match value {
-            Message::Text(msg) => Ok(serde_json::from_str(&msg)?),
-            x => Err(anyhow::anyhow!("Unexpected response: {:?}", x)),
+        match value.as_text() {
+            Some(msg) => Ok(serde_json::from_str(msg)?),
+            None => Err(anyhow::anyhow!("Unexpected response: {:?}", value)),
         }
     }
 }
