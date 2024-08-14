@@ -189,8 +189,8 @@ impl RaftState {
                         info!(term = term, leader = %from, "New leader");
                     }
                     self.warned_about_quorum = false;
+                    self.last_event = timestamp;
                 }
-                self.last_event = timestamp;
                 vec![]
             }
             RaftMessage::RequestVote {
