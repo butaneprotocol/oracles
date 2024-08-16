@@ -106,6 +106,16 @@ MAESTRO_API_KEY=[key goes here]
 ```
 If you don't pass an API key, the oracle will still run, but it won't include maestro pricing data.
 
+### Set up FXRatesAPI
+
+FXRatesAPI needs an API key as well. To get a key for this API, visit https://fxratesapi.com/auth/signup and create an account. The free tier is fine.
+
+The oracle reads the key from the environment variable `FXRATESAPI_API_KEY`. You can add it to your `.env` file:
+```sh
+FXRATESAPI_API_KEY=[key goes here]
+```
+The oracle will run without an FXRatesAPI key, but this API is currently the only source of truth for some fiat currencies, so it is highly recommended to create one.
+
 ## Running
 
 ```sh
