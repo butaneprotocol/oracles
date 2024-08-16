@@ -6,17 +6,17 @@ use std::{env, sync::Arc, time::Duration};
 use tokio::{task::JoinSet, time::sleep};
 use tracing::{warn, Instrument};
 
-use crate::sources::source::{PriceInfo, PriceSink};
+use crate::{
+    config::{MaestroTokenConfig, OracleConfig},
+    sources::source::{PriceInfo, PriceSink},
+};
 
 use super::source::Source;
 
-// TODO: currencies shouldn't be hard-coded
-const TOKENS: [&str; 6] = ["LENFI", "iUSD", "MIN", "SNEK", "ENCS", "DJED"];
-
-fn ohlc_url(cnt: &str) -> String {
+fn ohlc_url(config: &MaestroTokenConfig) -> String {
     format!(
-        "https://mainnet.gomaestro-api.org/v1/markets/dexs/ohlc/minswap/ADA-{}",
-        cnt
+        "https://mainnet.gomaestro-api.org/v1/markets/dexs/ohlc/{}/{}-{}",
+        config.dex, config.unit, config.token,
     )
 }
 
@@ -24,6 +24,7 @@ fn ohlc_url(cnt: &str) -> String {
 pub struct MaestroSource {
     api_key: Arc<String>,
     client: Arc<Client>,
+    tokens: Arc<Vec<MaestroTokenConfig>>,
 }
 
 impl Source for MaestroSource {
@@ -32,7 +33,7 @@ impl Source for MaestroSource {
     }
 
     fn tokens(&self) -> Vec<String> {
-        TOKENS.iter().map(|t| t.to_string()).collect()
+        self.tokens.iter().map(|t| t.token.to_string()).collect()
     }
 
     fn query<'a>(&'a self, sink: &'a PriceSink) -> BoxFuture<Result<()>> {
@@ -41,19 +42,24 @@ impl Source for MaestroSource {
 }
 
 impl MaestroSource {
-    pub fn new() -> Result<Option<Self>> {
+    pub fn new(config: &OracleConfig) -> Result<Option<Self>> {
         let Ok(api_key) = env::var("MAESTRO_API_KEY") else {
             return Ok(None);
         };
         let api_key = Arc::new(api_key);
         let client = Arc::new(Client::builder().build()?);
-        Ok(Some(Self { api_key, client }))
+        let tokens = Arc::new(config.maestro.tokens.clone());
+        Ok(Some(Self {
+            api_key,
+            client,
+            tokens,
+        }))
     }
 
     async fn query_impl(&self, sink: &PriceSink) -> Result<()> {
         loop {
             let mut set = JoinSet::new();
-            for token in TOKENS {
+            for token in self.tokens.iter().cloned() {
                 let other = self.clone();
                 let sink = sink.clone();
                 set.spawn(async move { other.query_one(token, sink).await }.in_current_span());
@@ -68,10 +74,10 @@ impl MaestroSource {
         }
     }
 
-    async fn query_one(&self, token: &str, sink: PriceSink) -> Result<()> {
+    async fn query_one(&self, config: MaestroTokenConfig, sink: PriceSink) -> Result<()> {
         let response = self
             .client
-            .get(ohlc_url(token))
+            .get(ohlc_url(&config))
             .query(&[("limit", "1"), ("resolution", "1d")])
             .header("Accept", "application/json")
             .header("api-key", self.api_key.as_str())
@@ -86,13 +92,13 @@ impl MaestroSource {
         if res == 0.0 {
             return Err(anyhow!(
                 "Maestro reported value of {} as zero, ignoring",
-                token
+                config.token
             ));
         }
 
         sink.send(PriceInfo {
-            token: token.to_string(),
-            unit: "ADA".to_string(),
+            token: config.token.to_string(),
+            unit: config.unit.to_string(),
             value: res.try_into()?,
             reliability: volume.try_into()?,
         })?;

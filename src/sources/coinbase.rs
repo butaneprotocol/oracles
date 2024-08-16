@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{collections::BTreeMap, str::FromStr};
 
 use anyhow::{anyhow, Result};
 use futures::{future::BoxFuture, FutureExt, SinkExt, StreamExt};
@@ -7,12 +7,15 @@ use serde::{Deserialize, Serialize};
 use tokio_websockets::{ClientBuilder, Message};
 use tracing::{trace, warn};
 
+use crate::config::{CoinbaseTokenConfig, OracleConfig};
+
 use super::source::{PriceInfo, PriceSink, Source};
 
 const URL: &str = "wss://ws-feed.exchange.coinbase.com";
 
-#[derive(Default)]
-pub struct CoinbaseSource;
+pub struct CoinbaseSource {
+    products: BTreeMap<String, CoinbaseTokenConfig>,
+}
 
 impl Source for CoinbaseSource {
     fn name(&self) -> String {
@@ -20,7 +23,7 @@ impl Source for CoinbaseSource {
     }
 
     fn tokens(&self) -> Vec<String> {
-        vec!["ADA".into(), "BTCb".into(), "SOLp".into(), "MATICb".into()]
+        self.products.values().map(|p| p.token.clone()).collect()
     }
 
     fn query<'a>(&'a self, sink: &'a PriceSink) -> BoxFuture<Result<()>> {
@@ -29,8 +32,14 @@ impl Source for CoinbaseSource {
 }
 
 impl CoinbaseSource {
-    pub fn new() -> Self {
-        Self
+    pub fn new(config: &OracleConfig) -> Self {
+        let products = config
+            .coinbase
+            .tokens
+            .iter()
+            .map(|t| (t.product_id.clone(), t.clone()))
+            .collect();
+        Self { products }
     }
 
     async fn query_impl(&self, sink: &PriceSink) -> Result<()> {
@@ -39,12 +48,7 @@ impl CoinbaseSource {
         let (mut stream, _) = ClientBuilder::from_uri(uri).connect().await?;
 
         let request = CoinbaseRequest::Subscribe {
-            product_ids: vec![
-                "ADA-USD".into(),
-                "BTC-USD".into(),
-                "MATIC-USD".into(),
-                "SOL-USD".into(),
-            ],
+            product_ids: self.products.keys().cloned().collect(),
             channels: vec!["ticker".into()],
         };
         stream.send(request.try_into()?).await?;
@@ -85,29 +89,20 @@ impl CoinbaseSource {
         else {
             return Err(anyhow!("Unexpected response from coinbase: {:?}", response));
         };
-        let mut value = Decimal::from_str(&price)?;
+        let Some(product) = self.products.get(&product_id) else {
+            return Err(anyhow!("Unrecognized price to match: {}", product_id));
+        };
+        let value = Decimal::from_str(&price)?;
         if value.is_zero() {
             return Err(anyhow!(
                 "Coinbase reported value of {} as zero, ignoring",
                 product_id
             ));
         }
-        let (token, unit) = match product_id.as_str() {
-            "ADA-USD" => ("ADA", "USD"),
-            "BTC-USD" => ("BTCb", "USD"),
-            "MATIC-USD" => ("MATICb", "USD"),
-            "SOL-USD" => {
-                value = Decimal::ONE / value;
-                ("SOLp", "USD")
-            }
-            _ => {
-                return Err(anyhow!("Unrecognized price to match: {}", product_id));
-            }
-        };
         let volume = Decimal::from_str(&volume_24h)?;
         Ok(PriceInfo {
-            token: token.into(),
-            unit: unit.into(),
+            token: product.token.clone(),
+            unit: product.unit.clone(),
             value,
             reliability: volume,
         })

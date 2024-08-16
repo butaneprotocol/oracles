@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{collections::BTreeMap, str::FromStr};
 
 use anyhow::{anyhow, Result};
 use futures::{future::BoxFuture, FutureExt, SinkExt, StreamExt};
@@ -7,15 +7,18 @@ use serde::Deserialize;
 use tokio_websockets::{ClientBuilder, Message};
 use tracing::{trace, warn};
 
-use crate::sources::source::{PriceInfo, PriceSink};
+use crate::{
+    config::{BinanceTokenConfig, OracleConfig},
+    sources::source::{PriceInfo, PriceSink},
+};
 
 use super::source::Source;
 
-// TODO: currencies shouldn't be hard-coded?
-const URL: &str = "wss://fstream.binance.com/stream?streams=btcusdt@ticker/adausdt@ticker/solusdt@ticker/maticusdt@ticker";
+const BASE_URL: &str = "wss://fstream.binance.com/stream";
 
-#[derive(Default)]
-pub struct BinanceSource;
+pub struct BinanceSource {
+    streams: BTreeMap<String, BinanceTokenConfig>,
+}
 
 impl Source for BinanceSource {
     fn name(&self) -> String {
@@ -23,7 +26,7 @@ impl Source for BinanceSource {
     }
 
     fn tokens(&self) -> Vec<String> {
-        vec!["ADA".into(), "BTCb".into(), "SOLp".into(), "MATICb".into()]
+        self.streams.values().map(|c| c.token.clone()).collect()
     }
 
     fn query<'a>(&'a self, sink: &'a PriceSink) -> BoxFuture<Result<()>> {
@@ -32,12 +35,25 @@ impl Source for BinanceSource {
 }
 
 impl BinanceSource {
-    pub fn new() -> Self {
-        Self
+    pub fn new(config: &OracleConfig) -> Self {
+        let streams = config
+            .binance
+            .tokens
+            .iter()
+            .map(|t| (t.stream.clone(), t.clone()))
+            .collect();
+        Self { streams }
     }
 
     async fn query_impl(&self, sink: &PriceSink) -> Result<()> {
-        let uri = URL.try_into()?;
+        let streams = self
+            .streams
+            .keys()
+            .map(|k| k.as_str())
+            .collect::<Vec<&str>>()
+            .join("/");
+        let url = format!("{BASE_URL}?streams={streams}");
+        let uri = url.try_into()?;
         let (mut stream, _) = ClientBuilder::from_uri(uri).connect().await?;
         trace!("Connected to binance!");
 
@@ -50,7 +66,7 @@ impl BinanceSource {
                 }
             };
             if let Some(contents) = message.as_text() {
-                if let Err(err) = process_binance_message(contents, sink) {
+                if let Err(err) = self.process_binance_message(contents, sink) {
                     warn!("Unexpected error updating binance data: {:?}", err);
                 }
             } else if message.is_ping() {
@@ -66,6 +82,29 @@ impl BinanceSource {
 
         Err(anyhow!("Connection to binance closed"))
     }
+
+    fn process_binance_message(&self, contents: &str, sink: &PriceSink) -> Result<()> {
+        let message: BinanceMarkPriceMessage = serde_json::from_str(contents)?;
+        let Some(stream) = self.streams.get(&message.stream) else {
+            return Err(anyhow!("Unrecognized currency {}", message.stream));
+        };
+        let token = &stream.token;
+        let value = Decimal::from_str(&message.data.price)?;
+        if value.is_zero() {
+            warn!("Binance reported value of {} as zero, ignoring", token);
+            return Ok(());
+        }
+        let volume = Decimal::from_str(&message.data.volume_base)?;
+
+        sink.send(PriceInfo {
+            token: token.to_string(),
+            unit: stream.unit.to_string(),
+            value,
+            reliability: volume,
+        })?;
+
+        Ok(())
+    }
 }
 
 #[derive(Deserialize)]
@@ -79,38 +118,4 @@ struct BinanceMarkPriceMessageData {
     price: String,
     #[serde(rename(deserialize = "v"))]
     volume_base: String,
-}
-
-fn process_binance_message(contents: &str, sink: &PriceSink) -> Result<()> {
-    let message: BinanceMarkPriceMessage = serde_json::from_str(contents)?;
-
-    let currency = match message.stream.find("usdt") {
-        Some(index) => &message.stream[0..index],
-        None => return Err(anyhow!("Malformed stream {}", message.stream)),
-    };
-    let mut value = Decimal::from_str(&message.data.price)?;
-    if value.is_zero() {
-        warn!("Binance reported value of {} as zero, ignoring", currency);
-        return Ok(());
-    }
-    let token = match currency {
-        "btc" => "BTCb",
-        "ada" => "ADA",
-        "sol" => {
-            value = Decimal::ONE / value;
-            "SOLp"
-        }
-        "matic" => "MATICb",
-        _ => return Err(anyhow!("Unrecognized currency {}", message.stream)),
-    };
-    let volume = Decimal::from_str(&message.data.volume_base)?;
-
-    sink.send(PriceInfo {
-        token: token.to_string(),
-        unit: "USD".to_string(),
-        value,
-        reliability: volume,
-    })?;
-
-    Ok(())
 }
