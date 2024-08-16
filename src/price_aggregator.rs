@@ -49,7 +49,7 @@ impl PriceAggregator {
             SourceAdapter::new(MinswapSource::new(&config)?),
             SourceAdapter::new(SpectrumSource::new(&config)?),
         ];
-        if let Some(maestro_source) = MaestroSource::new()? {
+        if let Some(maestro_source) = MaestroSource::new(&config)? {
             sources.push(SourceAdapter::new(maestro_source));
         } else {
             warn!("Not querying maestro, because no MAESTRO_API_KEY was provided");

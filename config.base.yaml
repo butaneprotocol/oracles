@@ -178,6 +178,26 @@ coinbase:
     - token: SOL
       unit: USD
       product_id: SOL-USD
+maestro:
+  tokens:
+    - token: DJED
+      unit: ADA
+      dex: minswap
+    - token: ENCS
+      unit: ADA
+      dex: minswap
+    - token: iUSD
+      unit: ADA
+      dex: minswap
+    - token: LENFI
+      unit: ADA
+      dex: minswap
+    - token: MIN
+      unit: ADA
+      dex: minswap
+    - token: SNEK
+      unit: ADA
+      dex: minswap
 sundaeswap:
   use_api: false
   kupo_address: http://kupo:1442

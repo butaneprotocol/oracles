@@ -32,6 +32,7 @@ struct RawOracleConfig {
     pub binance: BinanceConfig,
     pub bybit: ByBitConfig,
     pub coinbase: CoinbaseConfig,
+    pub maestro: MaestroConfig,
     pub sundaeswap: SundaeSwapConfig,
     pub minswap: MinswapConfig,
     pub spectrum: SpectrumConfig,
@@ -54,6 +55,7 @@ pub struct OracleConfig {
     pub bybit: ByBitConfig,
     pub binance: BinanceConfig,
     pub coinbase: CoinbaseConfig,
+    pub maestro: MaestroConfig,
     pub sundaeswap: SundaeSwapConfig,
     pub minswap: MinswapConfig,
     pub spectrum: SpectrumConfig,
@@ -149,6 +151,7 @@ impl TryFrom<RawOracleConfig> for OracleConfig {
             binance: raw.binance,
             bybit: raw.bybit,
             coinbase: raw.coinbase,
+            maestro: raw.maestro,
             sundaeswap: raw.sundaeswap,
             minswap: raw.minswap,
             spectrum: raw.spectrum,
@@ -270,6 +273,18 @@ pub struct CoinbaseTokenConfig {
     pub token: String,
     pub unit: String,
     pub product_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MaestroConfig {
+    pub tokens: Vec<MaestroTokenConfig>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct MaestroTokenConfig {
+    pub token: String,
+    pub unit: String,
+    pub dex: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]
