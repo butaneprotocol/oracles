@@ -102,14 +102,14 @@ currencies:
     price: 0.5923
     digits: 6
   - name: EUR
-    price: 1.06
+    price: 1.0931
     digits: 6
   - name: iUSD
     asset_id: f66d78b4a3cb3d37afa0ec36461e51ecbde00f26c8f0a68f94b69880.69555344
     price: 0.79
     digits: 6
   - name: JPY
-    price: 0.0067484985
+    price: 0.006900120752113162
     digits: 6
   - name: LENFI
     asset_id: 8fef2d34078659493ce161a6c7fba4b56afefa8535296a5743f69587.41414441
