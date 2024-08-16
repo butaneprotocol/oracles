@@ -43,9 +43,9 @@ impl PriceAggregator {
         config: Arc<OracleConfig>,
     ) -> Result<Self> {
         let mut sources = vec![
-            SourceAdapter::new(BinanceSource::new()),
+            SourceAdapter::new(BinanceSource::new(&config)),
             SourceAdapter::new(ByBitSource::new(&config)),
-            SourceAdapter::new(CoinbaseSource::new()),
+            SourceAdapter::new(CoinbaseSource::new(&config)),
             SourceAdapter::new(MinswapSource::new(&config)?),
             SourceAdapter::new(SpectrumSource::new(&config)?),
         ];

@@ -29,7 +29,9 @@ struct RawOracleConfig {
     pub keygen: KeygenConfig,
     pub synthetics: Vec<SyntheticConfig>,
     pub currencies: Vec<CurrencyConfig>,
+    pub binance: BinanceConfig,
     pub bybit: ByBitConfig,
+    pub coinbase: CoinbaseConfig,
     pub sundaeswap: SundaeSwapConfig,
     pub minswap: MinswapConfig,
     pub spectrum: SpectrumConfig,
@@ -50,6 +52,8 @@ pub struct OracleConfig {
     pub synthetics: Vec<SyntheticConfig>,
     pub currencies: Vec<CurrencyConfig>,
     pub bybit: ByBitConfig,
+    pub binance: BinanceConfig,
+    pub coinbase: CoinbaseConfig,
     pub sundaeswap: SundaeSwapConfig,
     pub minswap: MinswapConfig,
     pub spectrum: SpectrumConfig,
@@ -142,7 +146,9 @@ impl TryFrom<RawOracleConfig> for OracleConfig {
             keygen: raw.keygen,
             synthetics: raw.synthetics,
             currencies: raw.currencies,
+            binance: raw.binance,
             bybit: raw.bybit,
+            coinbase: raw.coinbase,
             sundaeswap: raw.sundaeswap,
             minswap: raw.minswap,
             spectrum: raw.spectrum,
@@ -231,6 +237,18 @@ pub struct CurrencyConfig {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct BinanceConfig {
+    pub tokens: Vec<BinanceTokenConfig>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct BinanceTokenConfig {
+    pub token: String,
+    pub unit: String,
+    pub stream: String,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct ByBitConfig {
     pub tokens: Vec<ByBitTokenConfig>,
 }
@@ -240,6 +258,18 @@ pub struct ByBitTokenConfig {
     pub token: String,
     pub unit: String,
     pub stream: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CoinbaseConfig {
+    pub tokens: Vec<CoinbaseTokenConfig>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct CoinbaseTokenConfig {
+    pub token: String,
+    pub unit: String,
+    pub product_id: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]

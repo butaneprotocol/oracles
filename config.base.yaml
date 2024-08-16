@@ -136,20 +136,48 @@ currencies:
   - name: USD
     price: 1
     digits: 6
+binance:
+  tokens:
+    - token: ADA
+      unit: USD
+      stream: adausdt@ticker
+    - token: BTC
+      unit: USD
+      stream: btcusdt@ticker
+    - token: MATIC
+      unit: USD
+      stream: maticusdt@ticker
+    - token: SOL
+      unit: USD
+      stream: solusdt@ticker
 bybit:
   tokens:
     - token: ADA
       unit: USD
       stream: ADAUSDT
-    - token: BTCb
+    - token: BTC
       unit: USD
       stream: BTCUSDT
-    - token: MATICb
+    - token: MATIC
       unit: USD
       stream: MATICUSDT
-    - token: SOLp
+    - token: SOL
       unit: USD
       stream: SOLUSDT
+coinbase:
+  tokens:
+    - token: ADA
+      unit: USD
+      product_id: ADA-USD
+    - token: BTC
+      unit: USD
+      product_id: BTC-USD
+    - token: MATIC
+      unit: USD
+      product_id: MATIC-USD
+    - token: SOL
+      unit: USD
+      product_id: SOL-USD
 sundaeswap:
   use_api: false
   kupo_address: http://kupo:1442

@@ -135,9 +135,6 @@ impl ByBitSource {
                                         data.symbol
                                     );
                                     None
-                                } else if info.token == "SOLp" {
-                                    // We track inverse solana prices
-                                    Some(Decimal::ONE / p)
                                 } else {
                                     Some(p)
                                 }
