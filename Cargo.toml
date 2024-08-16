@@ -45,8 +45,8 @@ rustls = { version = "0.23", default-features = false, features = ["logging", "r
 serde = "1.0"
 serde_json = "1.0.114"
 tokio = { version = "1.36.0", features = ["full"] }
-tokio-tungstenite = { version = "0.23.0", features = ["rustls-tls-webpki-roots"] }
 tokio-util = { version = "0.7", features = ["full"] }
+tokio-websockets = { version = "0.9", features = ["client", "rustls-webpki-roots", "ring", "rand"] }
 tonic = "0.12"
 tracing = "0.1.40"
 tracing-opentelemetry = "0.25"
