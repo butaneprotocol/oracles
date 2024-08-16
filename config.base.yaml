@@ -272,3 +272,8 @@ spectrum:
       asset_id: f8fd67ee46f66da669f68dc941090eb753687636b47fc6fd7f5e6254.534e454b5f4144415f4e4654
   max_concurrency: 3
   retries: 3
+fxratesapi:
+  currencies:
+    - EUR
+    - JPY
+  base: USD
