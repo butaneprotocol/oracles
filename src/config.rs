@@ -28,7 +28,7 @@ struct RawOracleConfig {
     pub frost_address: Option<String>,
     pub keygen: KeygenConfig,
     pub synthetics: Vec<SyntheticConfig>,
-    pub collateral: Vec<CollateralConfig>,
+    pub currencies: Vec<CurrencyConfig>,
     pub bybit: ByBitConfig,
     pub sundaeswap: SundaeSwapConfig,
     pub minswap: MinswapConfig,
@@ -48,7 +48,7 @@ pub struct OracleConfig {
     pub frost_address: Option<String>,
     pub keygen: KeygenConfig,
     pub synthetics: Vec<SyntheticConfig>,
-    pub collateral: Vec<CollateralConfig>,
+    pub currencies: Vec<CurrencyConfig>,
     pub bybit: ByBitConfig,
     pub sundaeswap: SundaeSwapConfig,
     pub minswap: MinswapConfig,
@@ -76,15 +76,11 @@ impl OracleConfig {
             .collect()
     }
 
-    fn build_asset_lookup(&self) -> HashMap<&String, &CollateralConfig> {
-        let mut result = HashMap::new();
-        for collateral in &self.collateral {
-            result.insert(&collateral.name, collateral);
-        }
-        result
+    fn build_asset_lookup(&self) -> HashMap<&String, &CurrencyConfig> {
+        self.currencies.iter().map(|c| (&c.name, c)).collect()
     }
 
-    fn find_asset_id(asset: &CollateralConfig) -> Option<AssetId> {
+    fn find_asset_id(asset: &CurrencyConfig) -> Option<AssetId> {
         if asset.name == "ADA" {
             return None;
         }
@@ -145,7 +141,7 @@ impl TryFrom<RawOracleConfig> for OracleConfig {
             frost_address: raw.frost_address,
             keygen: raw.keygen,
             synthetics: raw.synthetics,
-            collateral: raw.collateral,
+            currencies: raw.currencies,
             bybit: raw.bybit,
             sundaeswap: raw.sundaeswap,
             minswap: raw.minswap,
@@ -221,13 +217,13 @@ impl TryFrom<RawPeerConfig> for Peer {
 #[derive(Debug, Deserialize)]
 pub struct SyntheticConfig {
     pub name: String,
-    pub price: Decimal,
-    pub digits: u32,
+    pub backing_currency: String,
+    pub invert: bool,
     pub collateral: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct CollateralConfig {
+pub struct CurrencyConfig {
     pub name: String,
     pub asset_id: Option<String>,
     pub price: Decimal,

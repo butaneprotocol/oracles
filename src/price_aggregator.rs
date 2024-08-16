@@ -12,7 +12,7 @@ use tokio::{sync::watch::Sender, task::JoinSet, time::sleep};
 use tracing::{debug, warn, Instrument};
 
 use crate::{
-    config::{CollateralConfig, OracleConfig, SyntheticConfig},
+    config::{OracleConfig, SyntheticConfig},
     health::HealthSink,
     price_feed::{IntervalBound, PriceFeed, PriceFeedEntry, Validity},
     sources::{
@@ -116,7 +116,7 @@ impl PriceAggregator {
         let converter = TokenPriceConverter::new(
             &source_prices,
             &self.config.synthetics,
-            &self.config.collateral,
+            &self.config.currencies,
         );
 
         let price_feeds = self
@@ -136,14 +136,15 @@ impl PriceAggregator {
         synth: &SyntheticConfig,
         converter: &TokenPriceConverter,
     ) -> PriceFeedEntry {
+        let synth_digits = self.get_digits(&synth.name);
         let prices: Vec<_> = synth
             .collateral
             .iter()
             .map(|c| {
-                let collateral = self.get_collateral(c.as_str());
-                let multiplier = Decimal::new(10i64.pow(synth.digits), 0)
-                    / Decimal::new(10i64.pow(collateral.digits), 0);
-                let p = converter.value_in_usd(&collateral.name);
+                let collateral_digits = self.get_digits(c.as_str());
+                let multiplier = Decimal::new(10i64.pow(synth_digits), 0)
+                    / Decimal::new(10i64.pow(collateral_digits), 0);
+                let p = converter.value_in_usd(c.as_str());
                 p * multiplier
             })
             .collect();
@@ -181,11 +182,14 @@ impl PriceAggregator {
         }
     }
 
-    fn get_collateral(&self, collateral: &str) -> &CollateralConfig {
-        let Some(config) = self.config.collateral.iter().find(|c| c.name == collateral) else {
-            panic!("Unrecognized collateral {}", collateral);
+    fn get_digits(&self, currency: &str) -> u32 {
+        if let Some(synth_config) = self.config.synthetics.iter().find(|s| s.name == currency) {
+            return self.get_digits(&synth_config.backing_currency);
+        }
+        let Some(config) = self.config.currencies.iter().find(|c| c.name == currency) else {
+            panic!("Unrecognized currency {}", currency);
         };
-        config
+        config.digits
     }
 }
 
