@@ -1,6 +1,8 @@
-use std::{collections::BTreeMap, env, time::Duration};
+use std::{collections::BTreeMap, env, str::FromStr, time::Duration};
 
 use anyhow::{anyhow, Result};
+use chrono::Utc;
+use cron::Schedule;
 use futures::{future::BoxFuture, FutureExt};
 use num_traits::Inv;
 use reqwest::Client;
@@ -19,6 +21,7 @@ const URL: &str = "https://api.fxratesapi.com/latest";
 pub struct FxRatesApiSource {
     api_key: String,
     client: Client,
+    schedule: Schedule,
     currencies: Vec<String>,
     base: String,
 }
@@ -28,8 +31,10 @@ impl Source for FxRatesApiSource {
         "FXRatesAPI".into()
     }
     fn max_time_without_updates(&self) -> Duration {
-        // one hour
-        Duration::from_secs(60 * 60)
+        let mut runs = self.schedule.upcoming(Utc);
+        let next_run = runs.next().unwrap();
+        let next_next_run = runs.next().unwrap();
+        (next_next_run - next_run).to_std().unwrap()
     }
     fn tokens(&self) -> Vec<String> {
         self.currencies.clone()
@@ -45,17 +50,34 @@ impl FxRatesApiSource {
             return Ok(None);
         };
         let client = Client::builder().build()?;
+        let schedule = Schedule::from_str(&config.fxratesapi.cron)?;
         let currencies = config.fxratesapi.currencies.clone();
         let base = config.fxratesapi.base.clone();
         Ok(Some(Self {
             api_key,
             client,
+            schedule,
             currencies,
             base,
         }))
     }
 
     async fn query_impl(&self, sink: &PriceSink) -> Result<()> {
+        loop {
+            self.read_prices(sink).await?;
+
+            let next_run = self
+                .schedule
+                .upcoming(Utc)
+                .next()
+                .expect("time keeps on ticking");
+            let time_until_next_run = (next_run - Utc::now()).to_std()?;
+
+            sleep(time_until_next_run).await;
+        }
+    }
+
+    async fn read_prices(&self, sink: &PriceSink) -> Result<()> {
         let response = self
             .client
             .get(URL)
@@ -96,8 +118,6 @@ impl FxRatesApiSource {
                 reliability: Decimal::ONE,
             })?;
         }
-
-        sleep(Duration::from_secs(60 * 60)).await;
 
         Ok(())
     }

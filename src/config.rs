@@ -280,6 +280,7 @@ pub struct CoinbaseTokenConfig {
 
 #[derive(Debug, Deserialize)]
 pub struct FxRatesApiConfig {
+    pub cron: String,
     pub currencies: Vec<String>,
     pub base: String,
 }

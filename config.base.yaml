@@ -273,6 +273,7 @@ spectrum:
   max_concurrency: 3
   retries: 3
 fxratesapi:
+  cron: "0 4 * ? * ? *" # Run four minutes past the hour, every hour
   currencies:
     - EUR
     - JPY
