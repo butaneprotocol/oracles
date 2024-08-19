@@ -102,14 +102,14 @@ currencies:
     price: 0.5923
     digits: 6
   - name: EUR
-    price: 1.0931
+    price: 1.102912639903575
     digits: 6
   - name: iUSD
     asset_id: f66d78b4a3cb3d37afa0ec36461e51ecbde00f26c8f0a68f94b69880.69555344
     price: 0.79
     digits: 6
   - name: JPY
-    price: 0.006900120752113162
+    price: 0.0067741365658039
     digits: 6
   - name: LENFI
     asset_id: 8fef2d34078659493ce161a6c7fba4b56afefa8535296a5743f69587.41414441
@@ -272,3 +272,9 @@ spectrum:
       asset_id: f8fd67ee46f66da669f68dc941090eb753687636b47fc6fd7f5e6254.534e454b5f4144415f4e4654
   max_concurrency: 3
   retries: 3
+fxratesapi:
+  cron: "0 4 * ? * ? *" # Run four minutes past the hour, every hour
+  currencies:
+    - EUR
+    - JPY
+  base: USD

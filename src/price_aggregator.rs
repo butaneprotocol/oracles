@@ -17,8 +17,8 @@ use crate::{
     price_feed::{IntervalBound, PriceFeed, PriceFeedEntry, Validity},
     sources::{
         binance::BinanceSource, bybit::ByBitSource, coinbase::CoinbaseSource,
-        maestro::MaestroSource, minswap::MinswapSource, source::PriceInfo,
-        spectrum::SpectrumSource, sundaeswap::SundaeSwapSource,
+        fxratesapi::FxRatesApiSource, maestro::MaestroSource, minswap::MinswapSource,
+        source::PriceInfo, spectrum::SpectrumSource, sundaeswap::SundaeSwapSource,
         sundaeswap_kupo::SundaeSwapKupoSource,
     },
 };
@@ -53,6 +53,11 @@ impl PriceAggregator {
             sources.push(SourceAdapter::new(maestro_source));
         } else {
             warn!("Not querying maestro, because no MAESTRO_API_KEY was provided");
+        }
+        if let Some(fxratesapi_source) = FxRatesApiSource::new(&config)? {
+            sources.push(SourceAdapter::new(fxratesapi_source));
+        } else {
+            warn!("Not querying FXRatesAPI, because no FXRATESAPI_API_KEY was provided");
         }
         if config.sundaeswap.use_api {
             sources.push(SourceAdapter::new(SundaeSwapSource::new(&config)?));

@@ -15,6 +15,7 @@ use crate::{
 
 pub struct SourceAdapter {
     pub name: String,
+    max_time_without_updates: Duration,
     source: Box<dyn Source + Send + Sync>,
     prices: Arc<DashMap<String, PriceInfo>>,
 }
@@ -23,6 +24,7 @@ impl SourceAdapter {
     pub fn new<T: Source + Send + Sync + 'static>(source: T) -> Self {
         Self {
             name: source.name(),
+            max_time_without_updates: source.max_time_without_updates(),
             source: Box::new(source),
             prices: Arc::new(DashMap::new()),
         }
@@ -73,6 +75,7 @@ impl SourceAdapter {
         // Check how long it's been since we updated prices
         // Mark ourself as unhealthy if any prices are too old.
         let name = self.name.clone();
+        let max_time_without_updates = self.max_time_without_updates;
         let track_health_task = async move {
             loop {
                 sleep(Duration::from_secs(30)).await;
@@ -81,7 +84,7 @@ impl SourceAdapter {
                 for update_times in last_updated.iter() {
                     let too_long_without_update = update_times
                         .value()
-                        .map_or(true, |v| now - v >= Duration::from_secs(30));
+                        .map_or(true, |v| now - v >= max_time_without_updates);
                     if too_long_without_update {
                         missing_updates.push(update_times.key().clone());
                     }
