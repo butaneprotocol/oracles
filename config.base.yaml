@@ -136,33 +136,36 @@ currencies:
   - name: USD
     price: 1
     digits: 6
+  - name: USDT
+    price: 1
+    digits: 6
 binance:
   tokens:
     - token: ADA
-      unit: USD
+      unit: USDT
       stream: adausdt@ticker
     - token: BTC
-      unit: USD
+      unit: USDT
       stream: btcusdt@ticker
     - token: MATIC
-      unit: USD
+      unit: USDT
       stream: maticusdt@ticker
     - token: SOL
-      unit: USD
+      unit: USDT
       stream: solusdt@ticker
 bybit:
   tokens:
     - token: ADA
-      unit: USD
+      unit: USDT
       stream: ADAUSDT
     - token: BTC
-      unit: USD
+      unit: USDT
       stream: BTCUSDT
     - token: MATIC
-      unit: USD
+      unit: USDT
       stream: MATICUSDT
     - token: SOL
-      unit: USD
+      unit: USDT
       stream: SOLUSDT
 coinbase:
   tokens:
@@ -277,4 +280,5 @@ fxratesapi:
   currencies:
     - EUR
     - JPY
+    - USDT
   base: USD

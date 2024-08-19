@@ -28,9 +28,8 @@ pub struct TokenPriceSource {
 }
 
 pub struct TokenPriceConverter<'a> {
-    prices: BTreeMap<TokenPair<'a>, TokenPrice>,
+    prices: BTreeMap<&'a str, Vec<TokenPrice>>,
     synthetics: BTreeMap<&'a str, &'a SyntheticConfig>,
-    defaults: BTreeMap<TokenPair<'a>, Decimal>,
 }
 
 impl<'a> TokenPriceConverter<'a> {
@@ -39,12 +38,6 @@ impl<'a> TokenPriceConverter<'a> {
         synthetics: &'a [SyntheticConfig],
         currencies: &'a [CurrencyConfig],
     ) -> Self {
-        // Set our default prices
-        let mut defaults = BTreeMap::new();
-        for curr in currencies {
-            defaults.insert(TokenPair(&curr.name, "USD"), curr.price);
-        }
-
         let synthetics = synthetics.iter().map(|s| (s.name.as_str(), s)).collect();
 
         let mut value_sources = BTreeMap::new();
@@ -74,67 +67,58 @@ impl<'a> TokenPriceConverter<'a> {
                 value: value_sum / reliability_sum,
                 sources,
             };
-            prices.insert(tokens, value);
+            prices.entry(tokens.0).or_insert(vec![]).push(value.clone());
         }
 
-        Self {
-            prices,
-            synthetics,
-            defaults,
+        // set defaults for anything we don't have a price for
+        for curr in currencies {
+            prices.entry(&curr.name).or_insert(vec![TokenPrice {
+                token: curr.name.clone(),
+                unit: "USD".into(),
+                value: curr.price,
+                sources: vec![TokenPriceSource {
+                    name: "Hard-coded default value".into(),
+                    value: curr.price,
+                    reliability: Decimal::ONE,
+                }],
+            }]);
         }
+
+        Self { prices, synthetics }
     }
 
     pub fn value_in_usd(&self, token: &str) -> Decimal {
         if token == "USD" {
             return Decimal::ONE;
         }
-        // If we have a direct price per unit, return that.
-        if let Some(usd_per_token) = self._get(token, "USD") {
-            return usd_per_token;
-        }
-        // Lots of prices are stored in ada, try converting through that
-        if token != "ADA" {
-            if let Some(ada_per_token) = self._get(token, "ADA") {
-                return ada_per_token * self.value_in_usd("ADA");
-            }
-        }
+
         // A synthetic has the same value as its backing currency
         if let Some(synthetic) = self.synthetics.get(token) {
             let value = self.value_in_usd(&synthetic.backing_currency);
             return if synthetic.invert { value.inv() } else { value };
         }
 
-        *self
-            .defaults
-            .get(&TokenPair(token, "USD"))
-            .unwrap_or_else(|| panic!("No price found for {}", token))
-    }
+        let prices = self
+            .prices
+            .get(token)
+            .filter(|ps| !ps.is_empty())
+            .unwrap_or_else(|| panic!("No price found for {}!", token));
 
-    fn _get(&self, token: &str, unit: &str) -> Option<Decimal> {
-        return self.prices.get(&TokenPair(token, unit)).map(|v| v.value);
+        let mut value = Decimal::ZERO;
+        let mut reliability = Decimal::ZERO;
+        for price in prices {
+            let conversion_factor = self.value_in_usd(&price.unit);
+            for source in &price.sources {
+                value += source.value * conversion_factor * source.reliability;
+                reliability += source.reliability;
+            }
+        }
+
+        value / reliability
     }
 
     pub fn token_prices(&self) -> Vec<TokenPrice> {
-        let mut data_by_token = BTreeMap::new();
-        for (TokenPair(token, _), token_value) in &self.prices {
-            data_by_token
-                .entry(token)
-                .or_insert(vec![])
-                .push(token_value.clone());
-        }
-        for (TokenPair(token, unit), default_value) in &self.defaults {
-            data_by_token.entry(token).or_insert(vec![TokenPrice {
-                token: token.to_string(),
-                unit: unit.to_string(),
-                value: *default_value,
-                sources: vec![TokenPriceSource {
-                    name: "Hard-coded default value".into(),
-                    value: *default_value,
-                    reliability: Decimal::ONE,
-                }],
-            }]);
-        }
-        data_by_token.into_values().flatten().collect()
+        self.prices.values().flatten().cloned().collect()
     }
 }
 
@@ -192,6 +176,12 @@ mod tests {
                 price: Decimal::new(379, 2),
                 digits: 6,
             },
+            CurrencyConfig {
+                name: "USDT".into(),
+                asset_id: None,
+                price: Decimal::ONE,
+                digits: 6,
+            },
         ];
         (synthetics, currencies)
     }
@@ -211,7 +201,7 @@ mod tests {
         let source_prices = vec![(
             "Source".into(),
             PriceInfo {
-                token: "BTCb".into(),
+                token: "BTC".into(),
                 unit: "USD".into(),
                 value: Decimal::new(60000, 0),
                 reliability: Decimal::ONE,
@@ -219,7 +209,7 @@ mod tests {
         )];
         let converter = TokenPriceConverter::new(&source_prices, &synthetics, &currencies);
 
-        assert_eq!(converter.value_in_usd("BTCb"), Decimal::new(60000, 0));
+        assert_eq!(converter.value_in_usd("BTC"), Decimal::new(60000, 0));
     }
 
     #[test]
@@ -229,7 +219,7 @@ mod tests {
             (
                 "Word on the street".into(),
                 PriceInfo {
-                    token: "BTCb".into(),
+                    token: "BTC".into(),
                     unit: "USD".into(),
                     value: Decimal::new(70000, 0),
                     reliability: Decimal::ONE,
@@ -238,7 +228,7 @@ mod tests {
             (
                 "My gut".into(),
                 PriceInfo {
-                    token: "BTCb".into(),
+                    token: "BTC".into(),
                     unit: "USD".into(),
                     value: Decimal::new(80000, 0),
                     reliability: Decimal::ONE,
@@ -247,7 +237,7 @@ mod tests {
         ];
         let converter = TokenPriceConverter::new(&source_prices, &synthetics, &currencies);
 
-        assert_eq!(converter.value_in_usd("BTCb"), Decimal::new(75000, 0));
+        assert_eq!(converter.value_in_usd("BTC"), Decimal::new(75000, 0));
     }
 
     #[test]
@@ -257,7 +247,7 @@ mod tests {
             (
                 "Vibes".into(),
                 PriceInfo {
-                    token: "BTCb".into(),
+                    token: "BTC".into(),
                     unit: "USD".into(),
                     value: Decimal::new(100, 0),
                     reliability: Decimal::ONE,
@@ -266,7 +256,7 @@ mod tests {
             (
                 "My uncle".into(),
                 PriceInfo {
-                    token: "BTCb".into(),
+                    token: "BTC".into(),
                     unit: "USD".into(),
                     value: Decimal::new(200, 0),
                     reliability: Decimal::new(3, 0),
@@ -275,7 +265,7 @@ mod tests {
         ];
         let converter = TokenPriceConverter::new(&source_prices, &synthetics, &currencies);
 
-        assert_eq!(converter.value_in_usd("BTCb"), Decimal::new(175, 0));
+        assert_eq!(converter.value_in_usd("BTC"), Decimal::new(175, 0));
     }
 
     #[test]
@@ -321,6 +311,88 @@ mod tests {
         let converter = TokenPriceConverter::new(&source_prices, &synthetics, &currencies);
 
         assert_eq!(converter.value_in_usd("LENFI"), Decimal::new(3000, 0));
+    }
+
+    #[test]
+    fn value_in_usd_should_convert_prices_in_usdt_using_default_usdt_price() {
+        let (synthetics, currencies) = make_config();
+        let source_prices = vec![(
+            "someone".into(),
+            PriceInfo {
+                token: "BTC".into(),
+                unit: "USDT".into(),
+                value: Decimal::new(5000, 0),
+                reliability: Decimal::ONE,
+            },
+        )];
+        let converter = TokenPriceConverter::new(&source_prices, &synthetics, &currencies);
+
+        assert_eq!(converter.value_in_usd("BTC"), Decimal::new(5000, 0));
+    }
+
+    #[test]
+    fn value_in_usd_should_convert_prices_in_usdt_using_usdt_price_from_api() {
+        let (synthetics, currencies) = make_config();
+        let source_prices = vec![
+            (
+                "price for usdt".into(),
+                PriceInfo {
+                    token: "USDT".into(),
+                    unit: "USD".into(),
+                    value: Decimal::new(1005, 3),
+                    reliability: Decimal::ONE,
+                },
+            ),
+            (
+                "price for anything else".into(),
+                PriceInfo {
+                    token: "BTC".into(),
+                    unit: "USDT".into(),
+                    value: Decimal::new(5000, 0),
+                    reliability: Decimal::ONE,
+                },
+            ),
+        ];
+        let converter = TokenPriceConverter::new(&source_prices, &synthetics, &currencies);
+
+        assert_eq!(converter.value_in_usd("BTC"), Decimal::new(5025, 0));
+    }
+
+    #[test]
+    fn value_in_usd_should_average_prices_in_different_currencies() {
+        let (synthetics, currencies) = make_config();
+        let source_prices = vec![
+            (
+                "price for usdt".into(),
+                PriceInfo {
+                    token: "USDT".into(),
+                    unit: "USD".into(),
+                    value: Decimal::new(1005, 3),
+                    reliability: Decimal::ONE,
+                },
+            ),
+            (
+                "price for BTC in USD".into(),
+                PriceInfo {
+                    token: "BTC".into(),
+                    unit: "USD".into(),
+                    value: Decimal::new(5000, 0),
+                    reliability: Decimal::ONE,
+                },
+            ),
+            (
+                "price for BTC in USDT".into(),
+                PriceInfo {
+                    token: "BTC".into(),
+                    unit: "USDT".into(),
+                    value: Decimal::new(5000, 0),
+                    reliability: Decimal::ONE,
+                },
+            ),
+        ];
+        let converter = TokenPriceConverter::new(&source_prices, &synthetics, &currencies);
+
+        assert_eq!(converter.value_in_usd("BTC"), Decimal::new(50125, 1));
     }
 
     #[test]
