@@ -181,6 +181,9 @@ coinbase:
     - token: SOL
       unit: USD
       product_id: SOL-USD
+    - token: USDT
+      unit: USD
+      product_id: USDT-USD
 maestro:
   tokens:
     - token: DJED
@@ -280,5 +283,4 @@ fxratesapi:
   currencies:
     - EUR
     - JPY
-    - USDT
   base: USD
