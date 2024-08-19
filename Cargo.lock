@@ -1696,7 +1696,7 @@ dependencies = [
 
 [[package]]
 name = "oracles"
-version = "0.10.3"
+version = "0.10.4"
 dependencies = [
  "almost-raft",
  "anyhow",
