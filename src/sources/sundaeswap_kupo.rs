@@ -7,7 +7,7 @@ use kupon::{AssetId, MatchOptions};
 use pallas_primitives::conway::{BigInt, PlutusData};
 use rust_decimal::Decimal;
 use tokio::time::sleep;
-use tracing::{warn, Instrument};
+use tracing::{warn, Level};
 
 use crate::{
     config::{HydratedPool, OracleConfig},
@@ -15,7 +15,7 @@ use crate::{
 };
 
 use super::{
-    kupo::{wait_for_sync, MaxConcurrencyFutureSet},
+    kupo::{get_asset_value_minus_tx_fee, wait_for_sync, MaxConcurrencyFutureSet},
     source::{PriceSink, Source},
 };
 
@@ -60,6 +60,14 @@ impl SundaeSwapKupoSource {
     }
 
     async fn query_impl(&self, sink: &PriceSink) -> Result<()> {
+        loop {
+            self.query_sundaeswap(sink).await?;
+            sleep(Duration::from_secs(3)).await;
+        }
+    }
+
+    #[tracing::instrument(err(Debug, level = Level::WARN), skip_all)]
+    async fn query_sundaeswap(&self, sink: &PriceSink) -> Result<()> {
         wait_for_sync(&self.client).await;
 
         let mut set = MaxConcurrencyFutureSet::new(self.max_concurrency);
@@ -72,60 +80,62 @@ impl SundaeSwapKupoSource {
                 .asset_id(&pool.pool.asset_id)
                 .only_unspent();
 
-            set.push(
-                async move {
-                    let mut result = client.matches(&options).await?;
-                    if result.is_empty() {
-                        return Err(anyhow!("pool not found for {}", pool.pool.token));
-                    }
-                    if result.len() > 1 {
-                        return Err(anyhow!("more than one pool found for {}", pool.pool.token));
-                    }
-                    let matc = result.remove(0);
-                    let Some(hash) = matc.datum else {
-                        return Err(anyhow!("no datum attached to result"));
-                    };
-                    let Some(data) = client.datum(&hash.hash).await? else {
-                        return Err(anyhow!("could not get datum for sundae token"));
-                    };
-                    let tx_fee = extract_tx_fee(&data)?;
-
-                    let token_value = match &pool.token_asset_id {
-                        Some(token) => matc.value.assets[token],
-                        None => matc.value.coins - tx_fee,
-                    };
-
-                    let unit_value = match &pool.unit_asset_id {
-                        Some(token) => matc.value.assets[token],
-                        None => matc.value.coins - tx_fee,
-                    };
-                    if unit_value == 0 {
-                        return Err(anyhow!(
-                            "SundaeSwap reported value of {} as zero, ignoring",
-                            pool.pool.token
-                        ));
-                    }
-                    if token_value == 0 {
-                        return Err(anyhow!(
-                            "SundaeSwap reported value of {} as infinite, ignoring",
-                            pool.pool.token
-                        ));
-                    }
-
-                    let value = Decimal::new(unit_value as i64, pool.unit_digits)
-                        / Decimal::new(token_value as i64, pool.token_digits);
-                    let tvl = Decimal::new(token_value as i64 * 2, 0);
-
-                    sink.send(PriceInfo {
-                        token: pool.pool.token.clone(),
-                        unit: pool.pool.unit.clone(),
-                        value,
-                        reliability: tvl,
-                    })?;
-                    Ok(())
+            set.push(async move {
+                let mut result = client.matches(&options).await?;
+                if result.is_empty() {
+                    return Err(anyhow!("pool not found for {}", pool.pool.token));
                 }
-                .in_current_span(),
-            );
+                if result.len() > 1 {
+                    return Err(anyhow!("more than one pool found for {}", pool.pool.token));
+                }
+                let matc = result.remove(0);
+                let Some(hash) = &matc.datum else {
+                    return Err(anyhow!("no datum attached to result"));
+                };
+                let Some(data) = client.datum(&hash.hash).await? else {
+                    return Err(anyhow!("could not get datum for sundae token"));
+                };
+                let tx_fee = extract_tx_fee(&data)?;
+
+                let Some(token_value) =
+                    get_asset_value_minus_tx_fee(&matc, &pool.token_asset_id, tx_fee)
+                else {
+                    return Err(anyhow!(
+                        "no value found for asset {:?}",
+                        pool.token_asset_id
+                    ));
+                };
+                let Some(unit_value) =
+                    get_asset_value_minus_tx_fee(&matc, &pool.unit_asset_id, tx_fee)
+                else {
+                    return Err(anyhow!("no value found for asset {:?}", pool.unit_asset_id));
+                };
+
+                if unit_value == 0 {
+                    return Err(anyhow!(
+                        "SundaeSwap reported value of {} as zero, ignoring",
+                        pool.pool.token
+                    ));
+                }
+                if token_value == 0 {
+                    return Err(anyhow!(
+                        "SundaeSwap reported value of {} as infinite, ignoring",
+                        pool.pool.token
+                    ));
+                }
+
+                let value = Decimal::new(unit_value as i64, pool.unit_digits)
+                    / Decimal::new(token_value as i64, pool.token_digits);
+                let tvl = Decimal::new(token_value as i64 * 2, 0);
+
+                sink.send(PriceInfo {
+                    token: pool.pool.token.clone(),
+                    unit: pool.pool.unit.clone(),
+                    value,
+                    reliability: tvl,
+                })?;
+                Ok(())
+            });
         }
 
         while let Some(res) = set.next().await {
@@ -139,8 +149,6 @@ impl SundaeSwapKupoSource {
                 }
             }
         }
-
-        sleep(Duration::from_secs(3)).await;
 
         Ok(())
     }

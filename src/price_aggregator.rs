@@ -9,7 +9,7 @@ use num_bigint::BigUint;
 use num_integer::Integer;
 use rust_decimal::{prelude::ToPrimitive, Decimal};
 use tokio::{sync::watch::Sender, task::JoinSet, time::sleep};
-use tracing::{debug, warn, Instrument};
+use tracing::{debug, error, warn};
 
 use crate::{
     config::{OracleConfig, SyntheticConfig},
@@ -79,28 +79,20 @@ impl PriceAggregator {
         // Make each source update its price map asynchronously.
         for source in sources {
             let health = health.clone();
-            set.spawn(
-                async move {
-                    source.run(health).await;
-                }
-                .in_current_span(),
-            );
+            set.spawn(source.run(health));
         }
 
         // Every second, we report the latest values from those price maps.
-        set.spawn(
-            async move {
-                loop {
-                    self.report(&price_maps);
-                    sleep(Duration::from_secs(1)).await;
-                }
+        set.spawn(async move {
+            loop {
+                self.report(&price_maps);
+                sleep(Duration::from_secs(1)).await;
             }
-            .in_current_span(),
-        );
+        });
 
         while let Some(res) = set.join_next().await {
             if let Err(error) = res {
-                warn!("{:?}", error);
+                error!("Panicked while querying data from an API! {:?}", error);
             }
         }
     }
