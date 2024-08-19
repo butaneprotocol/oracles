@@ -2,11 +2,11 @@ use std::sync::Arc;
 
 use dashmap::DashMap;
 use tokio::{
+    select,
     sync::mpsc::unbounded_channel,
-    task::JoinSet,
     time::{sleep, Duration, Instant},
 };
-use tracing::{instrument, warn, Instrument};
+use tracing::{info_span, instrument, warn, Instrument};
 
 use crate::{
     health::{HealthSink, HealthStatus, Origin},
@@ -34,8 +34,6 @@ impl SourceAdapter {
 
     #[instrument(skip_all, fields(source = self.name))]
     pub async fn run(self, health: HealthSink) {
-        let mut set = JoinSet::new();
-
         let (tx, mut rx) = unbounded_channel();
 
         // track when each token was updated
@@ -46,71 +44,66 @@ impl SourceAdapter {
 
         let source = self.source;
         let name = self.name.clone();
-        set.spawn(
-            async move {
-                // read values from the source
-                loop {
-                    if let Err(error) = source.query(&tx).await {
+        let run_task = async move {
+            loop {
+                let span = info_span!("source_query", source = name);
+                if let Err(error) = source.query(&tx).instrument(span.clone()).await {
+                    span.in_scope(|| {
                         warn!(
                             "Error occurred while querying {:?}, retrying: {}",
                             name, error
                         );
-                        sleep(Duration::from_secs(1)).await;
-                    }
+                    });
+                    sleep(Duration::from_secs(1)).await;
                 }
             }
-            .in_current_span(),
-        );
+        };
 
         let updated = last_updated.clone();
         let prices = self.prices.clone();
-        set.spawn(
-            async move {
-                // write emitted values into our map
-                while let Some(info) = rx.recv().await {
-                    updated.insert(info.token.clone(), Some(Instant::now()));
-                    prices.insert(info.token.clone(), info);
-                }
+        let update_prices_task = async move {
+            // write emitted values into our map
+            while let Some(info) = rx.recv().await {
+                updated.insert(info.token.clone(), Some(Instant::now()));
+                prices.insert(info.token.clone(), info);
             }
-            .in_current_span(),
-        );
+            "Price receiver has closed"
+        };
 
         // Check how long it's been since we updated prices
         // Mark ourself as unhealthy if any prices are too old.
         let name = self.name.clone();
-        set.spawn(
-            async move {
-                loop {
-                    sleep(Duration::from_secs(30)).await;
-                    let now = Instant::now();
-                    let mut missing_updates = vec![];
-                    for update_times in last_updated.iter() {
-                        let too_long_without_update = update_times
-                            .value()
-                            .map_or(true, |v| now - v >= Duration::from_secs(30));
-                        if too_long_without_update {
-                            missing_updates.push(update_times.key().clone());
-                        }
+        let track_health_task = async move {
+            loop {
+                sleep(Duration::from_secs(30)).await;
+                let now = Instant::now();
+                let mut missing_updates = vec![];
+                for update_times in last_updated.iter() {
+                    let too_long_without_update = update_times
+                        .value()
+                        .map_or(true, |v| now - v >= Duration::from_secs(30));
+                    if too_long_without_update {
+                        missing_updates.push(update_times.key().clone());
                     }
-
-                    let status = if missing_updates.is_empty() {
-                        HealthStatus::Healthy
-                    } else {
-                        HealthStatus::Unhealthy(format!(
-                            "Went more than 30 seconds without updates for {:?}",
-                            missing_updates
-                        ))
-                    };
-                    health.update(Origin::Source(name.clone()), status);
                 }
-            }
-            .in_current_span(),
-        );
 
-        while let Some(res) = set.join_next().await {
-            if let Err(error) = res {
-                warn!("{}", error);
+                let status = if missing_updates.is_empty() {
+                    HealthStatus::Healthy
+                } else {
+                    HealthStatus::Unhealthy(format!(
+                        "Went more than 30 seconds without updates for {:?}",
+                        missing_updates
+                    ))
+                };
+                health.update(Origin::Source(name.clone()), status);
             }
-        }
+        };
+
+        let reason = select! {
+            _ = run_task => "Running failed",
+            msg = update_prices_task => msg,
+            _ = track_health_task => "Health tracking failed",
+        };
+        warn!(reason, "Source has unexpectedly stopped running");
     }
 }
