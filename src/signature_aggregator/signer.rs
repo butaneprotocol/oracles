@@ -133,6 +133,16 @@ impl Display for SignerEvent {
         }
     }
 }
+impl SignerEvent {
+    fn name(&self) -> &str {
+        match self {
+            Self::RoundStarted(_) => "RoundStarted",
+            Self::RoundGracePeriodEnded(_) => "RoundGracePeriodEnded",
+            Self::Message(_, _, _) => "Message",
+            Self::LeaderChanged(_) => "LeaderChanged",
+        }
+    }
+}
 
 enum LeaderState {
     Ready,
@@ -282,10 +292,10 @@ impl Signer {
 
     #[instrument(name = "process_signer", skip_all, fields(round = self.state.round(), state = %self.state))]
     pub async fn process(&mut self, event: SignerEvent) {
-        info!("Started event: {}", event);
+        info!(%event, "Started {} event", event.name());
         match self.do_process(event.clone()).await {
             Ok(()) => {
-                info!("Finished event: {}", event)
+                info!(%event, "Finished event: {}", event.name())
             }
             Err(error) => {
                 warn!(%error, "Error occurred during signing flow");
