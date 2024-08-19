@@ -4,7 +4,7 @@ use reqwest::Client;
 use serde::Deserialize;
 use std::{env, sync::Arc, time::Duration};
 use tokio::{task::JoinSet, time::sleep};
-use tracing::{warn, Instrument};
+use tracing::{warn, Level};
 
 use crate::{
     config::{MaestroTokenConfig, OracleConfig},
@@ -58,22 +58,34 @@ impl MaestroSource {
 
     async fn query_impl(&self, sink: &PriceSink) -> Result<()> {
         loop {
-            let mut set = JoinSet::new();
-            for token in self.tokens.iter().cloned() {
-                let other = self.clone();
-                let sink = sink.clone();
-                set.spawn(async move { other.query_one(token, sink).await }.in_current_span());
-            }
-            while let Some(Ok(result)) = set.join_next().await {
-                if let Err(error) = result {
-                    warn!("Error from maestro: {:?}", error);
-                }
-            }
-
+            self.query_maestro(sink).await?;
             sleep(Duration::from_secs(3)).await;
         }
     }
 
+    #[tracing::instrument(err(Debug, level = Level::WARN), skip_all)]
+    async fn query_maestro(&self, sink: &PriceSink) -> Result<()> {
+        let mut set = JoinSet::new();
+        for token in self.tokens.iter().cloned() {
+            let other = self.clone();
+            let sink = sink.clone();
+            set.spawn(async move { other.query_one(token, sink).await });
+        }
+        while let Some(join_result) = set.join_next().await {
+            match join_result {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => {
+                    warn!("error from maestro: {:?}", error);
+                }
+                Err(join_error) => {
+                    return Err(anyhow!("Panic while querying maestro! {:?}", join_error));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[tracing::instrument(err(Debug, level = Level::WARN), skip_all, fields(token = config.token))]
     async fn query_one(&self, config: MaestroTokenConfig, sink: PriceSink) -> Result<()> {
         let response = self
             .client

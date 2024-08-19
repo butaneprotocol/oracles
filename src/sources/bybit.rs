@@ -10,7 +10,7 @@ use tokio::{
     time::{sleep, Duration},
 };
 use tokio_websockets::{ClientBuilder, Message};
-use tracing::{warn, Instrument};
+use tracing::warn;
 
 use crate::config::OracleConfig;
 
@@ -103,8 +103,7 @@ impl ByBitSource {
                     return Err(anyhow!("Error sending heartbeat: {}", err));
                 }
             }
-        }
-        .in_current_span();
+        };
 
         let consumer = async move {
             while let Some(result) = stream.next().await {
@@ -167,9 +166,8 @@ impl ByBitSource {
                     }
                 };
             }
-            Ok(())
-        }
-        .in_current_span();
+            Err(anyhow!("ByBit stream has closed"))
+        };
 
         select! {
             res = heartbeat => res,

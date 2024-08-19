@@ -6,7 +6,7 @@ use reqwest::Client;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
-use tracing::warn;
+use tracing::{warn, Level};
 
 use crate::config::OracleConfig;
 
@@ -83,6 +83,14 @@ impl SundaeSwapSource {
     }
 
     async fn query_impl(&self, sink: &PriceSink) -> Result<()> {
+        loop {
+            self.query_sundaeswap(sink).await?;
+            sleep(Duration::from_secs(3)).await;
+        }
+    }
+
+    #[tracing::instrument(err(Debug, level = Level::WARN), skip_all)]
+    async fn query_sundaeswap(&self, sink: &PriceSink) -> Result<()> {
         let mut variables = HashMap::new();
         variables.insert("ids", self.pools.iter().map(|p| p.id.as_str()).collect());
         let query = serde_json::to_string(&GraphQLQuery {
@@ -145,7 +153,6 @@ impl SundaeSwapSource {
             })?;
         }
 
-        sleep(Duration::from_secs(3)).await;
         Ok(())
     }
 }
