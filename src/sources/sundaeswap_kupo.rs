@@ -15,7 +15,7 @@ use crate::{
 };
 
 use super::{
-    kupo::{wait_for_sync, MaxConcurrencyFutureSet},
+    kupo::{get_asset_value_minus_tx_fee, wait_for_sync, MaxConcurrencyFutureSet},
     source::{PriceSink, Source},
 };
 
@@ -89,7 +89,7 @@ impl SundaeSwapKupoSource {
                     return Err(anyhow!("more than one pool found for {}", pool.pool.token));
                 }
                 let matc = result.remove(0);
-                let Some(hash) = matc.datum else {
+                let Some(hash) = &matc.datum else {
                     return Err(anyhow!("no datum attached to result"));
                 };
                 let Some(data) = client.datum(&hash.hash).await? else {
@@ -97,15 +97,20 @@ impl SundaeSwapKupoSource {
                 };
                 let tx_fee = extract_tx_fee(&data)?;
 
-                let token_value = match &pool.token_asset_id {
-                    Some(token) => matc.value.assets[token],
-                    None => matc.value.coins - tx_fee,
+                let Some(token_value) =
+                    get_asset_value_minus_tx_fee(&matc, &pool.token_asset_id, tx_fee)
+                else {
+                    return Err(anyhow!(
+                        "no value found for asset {:?}",
+                        pool.token_asset_id
+                    ));
+                };
+                let Some(unit_value) =
+                    get_asset_value_minus_tx_fee(&matc, &pool.unit_asset_id, tx_fee)
+                else {
+                    return Err(anyhow!("no value found for asset {:?}", pool.unit_asset_id));
                 };
 
-                let unit_value = match &pool.unit_asset_id {
-                    Some(token) => matc.value.assets[token],
-                    None => matc.value.coins - tx_fee,
-                };
                 if unit_value == 0 {
                     return Err(anyhow!(
                         "SundaeSwap reported value of {} as zero, ignoring",

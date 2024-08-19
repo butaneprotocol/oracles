@@ -10,7 +10,7 @@ use tracing::{warn, Level};
 use crate::config::{HydratedPool, OracleConfig};
 
 use super::{
-    kupo::{wait_for_sync, MaxConcurrencyFutureSet},
+    kupo::{get_asset_value, wait_for_sync, MaxConcurrencyFutureSet},
     source::{PriceInfo, PriceSink, Source},
 };
 
@@ -83,13 +83,14 @@ impl SpectrumSource {
                     return Err(anyhow!("more than one pool found for {}", pool.pool.token));
                 }
                 let matc = result.remove(0);
-                let token_value = match &pool.token_asset_id {
-                    Some(token) => matc.value.assets[token],
-                    None => matc.value.coins,
+                let Some(token_value) = get_asset_value(&matc, &pool.token_asset_id) else {
+                    return Err(anyhow!(
+                        "no value found for asset {:?}",
+                        pool.token_asset_id
+                    ));
                 };
-                let unit_value = match &pool.unit_asset_id {
-                    Some(token) => matc.value.assets[token],
-                    None => matc.value.coins,
+                let Some(unit_value) = get_asset_value(&matc, &pool.unit_asset_id) else {
+                    return Err(anyhow!("no value found for asset {:?}", pool.unit_asset_id));
                 };
                 if unit_value == 0 {
                     return Err(anyhow!(
