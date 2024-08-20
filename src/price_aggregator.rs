@@ -7,6 +7,7 @@ use anyhow::Result;
 use dashmap::DashMap;
 use num_bigint::BigUint;
 use num_integer::Integer;
+use persistence::TokenPricePersistence;
 use rust_decimal::{prelude::ToPrimitive, Decimal};
 use tokio::{sync::watch::Sender, task::JoinSet, time::sleep};
 use tracing::{debug, error, warn};
@@ -17,8 +18,8 @@ use crate::{
     price_feed::{IntervalBound, PriceFeed, PriceFeedEntry, Validity},
     sources::{
         binance::BinanceSource, bybit::ByBitSource, coinbase::CoinbaseSource,
-        maestro::MaestroSource, minswap::MinswapSource, source::PriceInfo,
-        spectrum::SpectrumSource, sundaeswap::SundaeSwapSource,
+        fxratesapi::FxRatesApiSource, maestro::MaestroSource, minswap::MinswapSource,
+        source::PriceInfo, spectrum::SpectrumSource, sundaeswap::SundaeSwapSource,
         sundaeswap_kupo::SundaeSwapKupoSource,
     },
 };
@@ -27,12 +28,14 @@ pub use self::conversions::{TokenPrice, TokenPriceSource};
 use self::{conversions::TokenPriceConverter, source_adapter::SourceAdapter};
 
 mod conversions;
+mod persistence;
 mod source_adapter;
 
 pub struct PriceAggregator {
     feed_tx: Arc<Sender<Vec<PriceFeedEntry>>>,
     audit_tx: Arc<Sender<Vec<TokenPrice>>>,
     sources: Option<Vec<SourceAdapter>>,
+    persistence: TokenPricePersistence,
     config: Arc<OracleConfig>,
 }
 
@@ -54,6 +57,11 @@ impl PriceAggregator {
         } else {
             warn!("Not querying maestro, because no MAESTRO_API_KEY was provided");
         }
+        if let Some(fxratesapi_source) = FxRatesApiSource::new(&config)? {
+            sources.push(SourceAdapter::new(fxratesapi_source));
+        } else {
+            warn!("Not querying FXRatesAPI, because no FXRATESAPI_API_KEY was provided");
+        }
         if config.sundaeswap.use_api {
             sources.push(SourceAdapter::new(SundaeSwapSource::new(&config)?));
         } else {
@@ -63,6 +71,7 @@ impl PriceAggregator {
             feed_tx: Arc::new(feed_tx),
             audit_tx: Arc::new(audit_tx),
             sources: Some(sources),
+            persistence: TokenPricePersistence::new(&config),
             config,
         })
     }
@@ -85,7 +94,7 @@ impl PriceAggregator {
         // Every second, we report the latest values from those price maps.
         set.spawn(async move {
             loop {
-                self.report(&price_maps);
+                self.report(&price_maps).await;
                 sleep(Duration::from_secs(1)).await;
             }
         });
@@ -97,7 +106,7 @@ impl PriceAggregator {
         }
     }
 
-    fn report(&self, price_maps: &[(String, Arc<DashMap<String, PriceInfo>>)]) {
+    async fn report(&mut self, price_maps: &[(String, Arc<DashMap<String, PriceInfo>>)]) {
         let mut source_prices = vec![];
         for (source, price_map) in price_maps {
             for price in price_map.iter() {
@@ -105,11 +114,9 @@ impl PriceAggregator {
             }
         }
 
-        let converter = TokenPriceConverter::new(
-            &source_prices,
-            &self.config.synthetics,
-            &self.config.currencies,
-        );
+        let default_prices = self.persistence.previous_prices();
+        let converter =
+            TokenPriceConverter::new(&source_prices, &default_prices, &self.config.synthetics);
 
         let price_feeds = self
             .config
@@ -121,6 +128,8 @@ impl PriceAggregator {
 
         let token_values = converter.token_prices();
         self.audit_tx.send_replace(token_values);
+
+        self.persistence.save_prices(&converter).await;
     }
 
     fn compute_payload(

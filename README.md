@@ -52,6 +52,10 @@ The oracle network is currently a set of 4 nodes, requiring agreement among 3 of
 
 This section will explain how to set up and run an oracle node, for the node operators.
 
+### Pick a data directory
+
+The oracle saves some state to disk, to help it start up more gracefully after restarting. It should have access to a writable directory where it can keep that state. By default, this is a `data` directory relative to your PWD, but you can set a `DATA_DIRECTORY` env var to change that.
+
 ### Pick a key directory
 
 The oracle uses several sets of private/public keys. By default, these are stored in a `keys` directory relative to your PWD, but you can set a `KEYS_DIRECTORY` env var to change that.
@@ -105,6 +109,16 @@ Querying prices from Maestro requires an API key. To query Maestro, create a `.e
 MAESTRO_API_KEY=[key goes here]
 ```
 If you don't pass an API key, the oracle will still run, but it won't include maestro pricing data.
+
+### Set up FXRatesAPI
+
+FXRatesAPI needs an API key as well. To get a key for this API, visit https://fxratesapi.com/auth/signup and create an account. The free tier is fine.
+
+The oracle reads the key from the environment variable `FXRATESAPI_API_KEY`. You can add it to your `.env` file:
+```sh
+FXRATESAPI_API_KEY=[key goes here]
+```
+The oracle will run without an FXRatesAPI key, but this API is currently the only source of truth for some fiat currencies, so it is highly recommended to create one.
 
 ## Running
 

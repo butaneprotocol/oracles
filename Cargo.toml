@@ -20,6 +20,8 @@ chacha20poly1305 = "0.10"
 cynic = "3.4"
 clap = { version = "4.5.1", features = ["derive"] }
 config = "0.14"
+chrono = "0.4"
+cron = "0.12"
 dashmap = "6"
 ed25519 = { version = "2.2", features = ["pkcs8", "pem"] }
 ed25519-dalek = { version = "2.1" }
