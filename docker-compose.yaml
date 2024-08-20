@@ -5,8 +5,10 @@ services:
     volumes:
       - ./config.yaml:/app/config.yaml
       - ./keys:/app/keys
+      - ./data:/app/data
     environment:
       KEYS_DIRECTORY: /app/keys
+      DATA_DIRECTORY: /app/data
     env_file:
       - path: .env
         required: false
