@@ -1,0 +1,192 @@
+{
+  "preamble": {
+    "title": "butaneprotocol/oracles",
+    "description": "Butane Oracle Payloads",
+    "version": "0.0.1",
+    "plutusVersion": "v2"
+  },
+  "validators": [
+    {
+      "title": "price_feed.check_feed",
+      "redeemer": {
+        "title": "redeemer",
+        "schema": {
+          "$ref": "#/definitions/List$butane~1types~1Feed$butane~1types~1PriceFeed_ByteArray"
+        }
+      },
+      "parameters": [
+        {
+          "title": "verification_key",
+          "schema": {
+            "$ref": "#/definitions/ByteArray"
+          }
+        }
+      ],
+      "compiledCode": "58ac0100003232323232322322253330053232323300100100322533300c00114a2264a66601464666e54024dd998078009bae300f3010001300c3754601c0042660060060022940c038004c8cc004004008894ccc02c00452613233003003300e0023253330093370e900018051baa00113232323253330103012002149858dd718080009808001180700098059baa00116300c001375800429309b2b1bae0015734aae7555cf2ab9f5742ae881",
+      "hash": "5515320384fafb83c7975726a60e90e89a0c29393c007d7d50b1c7c2"
+    }
+  ],
+  "definitions": {
+    "Bool": {
+      "title": "Bool",
+      "anyOf": [
+        {
+          "title": "False",
+          "dataType": "constructor",
+          "index": 0,
+          "fields": []
+        },
+        {
+          "title": "True",
+          "dataType": "constructor",
+          "index": 1,
+          "fields": []
+        }
+      ]
+    },
+    "ByteArray": {
+      "dataType": "bytes"
+    },
+    "Int": {
+      "dataType": "integer"
+    },
+    "List$Int": {
+      "dataType": "list",
+      "items": {
+        "$ref": "#/definitions/Int"
+      }
+    },
+    "List$butane/types/Feed$butane/types/PriceFeed_ByteArray": {
+      "dataType": "list",
+      "items": {
+        "$ref": "#/definitions/butane~1types~1Feed$butane~1types~1PriceFeed_ByteArray"
+      }
+    },
+    "aiken/interval/Interval$Int": {
+      "title": "Interval",
+      "description": "A type to represent intervals of values. Interval are inhabited by a type\n `a` which is useful for non-infinite intervals that have a finite\n lower-bound and/or upper-bound.\n\n This allows to represent all kind of mathematical intervals:\n\n ```aiken\n // [1; 10]\n let i0: Interval<PosixTime> = Interval\n   { lower_bound:\n       IntervalBound { bound_type: Finite(1), is_inclusive: True }\n   , upper_bound:\n       IntervalBound { bound_type: Finite(10), is_inclusive: True }\n   }\n ```\n\n ```aiken\n // (20; infinity)\n let i1: Interval<PosixTime> = Interval\n   { lower_bound:\n       IntervalBound { bound_type: Finite(20), is_inclusive: False }\n   , upper_bound:\n       IntervalBound { bound_type: PositiveInfinity, is_inclusive: False }\n   }\n ```",
+      "anyOf": [
+        {
+          "title": "Interval",
+          "dataType": "constructor",
+          "index": 0,
+          "fields": [
+            {
+              "title": "lower_bound",
+              "$ref": "#/definitions/aiken~1interval~1IntervalBound$Int"
+            },
+            {
+              "title": "upper_bound",
+              "$ref": "#/definitions/aiken~1interval~1IntervalBound$Int"
+            }
+          ]
+        }
+      ]
+    },
+    "aiken/interval/IntervalBound$Int": {
+      "title": "IntervalBound",
+      "description": "An interval bound, either inclusive or exclusive.",
+      "anyOf": [
+        {
+          "title": "IntervalBound",
+          "dataType": "constructor",
+          "index": 0,
+          "fields": [
+            {
+              "title": "bound_type",
+              "$ref": "#/definitions/aiken~1interval~1IntervalBoundType$Int"
+            },
+            {
+              "title": "is_inclusive",
+              "$ref": "#/definitions/Bool"
+            }
+          ]
+        }
+      ]
+    },
+    "aiken/interval/IntervalBoundType$Int": {
+      "title": "IntervalBoundType",
+      "description": "A type of interval bound. Where finite, a value of type `a` must be\n provided. `a` will typically be an `Int`, representing a number of seconds or\n milliseconds.",
+      "anyOf": [
+        {
+          "title": "NegativeInfinity",
+          "dataType": "constructor",
+          "index": 0,
+          "fields": []
+        },
+        {
+          "title": "Finite",
+          "dataType": "constructor",
+          "index": 1,
+          "fields": [
+            {
+              "$ref": "#/definitions/Int"
+            }
+          ]
+        },
+        {
+          "title": "PositiveInfinity",
+          "dataType": "constructor",
+          "index": 2,
+          "fields": []
+        }
+      ]
+    },
+    "butane/types/Feed$butane/types/PriceFeed_ByteArray": {
+      "title": "Feed",
+      "description": "Generic feed with data and extra information",
+      "anyOf": [
+        {
+          "title": "Feed",
+          "dataType": "constructor",
+          "index": 0,
+          "fields": [
+            {
+              "title": "data",
+              "description": "Arbitrary data",
+              "$ref": "#/definitions/butane~1types~1PriceFeed"
+            },
+            {
+              "title": "extra",
+              "description": "Extra information",
+              "$ref": "#/definitions/ByteArray"
+            }
+          ]
+        }
+      ]
+    },
+    "butane/types/PriceFeed": {
+      "title": "PriceFeed",
+      "description": "A price feed",
+      "anyOf": [
+        {
+          "title": "PriceFeed",
+          "dataType": "constructor",
+          "index": 0,
+          "fields": [
+            {
+              "title": "collateral_prices",
+              "description": "Numerators of prices of collateral tokens in terms of the synthetic",
+              "$ref": "#/definitions/List$Int"
+            },
+            {
+              "title": "synthetic",
+              "description": "The synthetic associated with the price feed",
+              "$ref": "#/definitions/ByteArray"
+            },
+            {
+              "title": "denominator",
+              "description": "The denominator of the prices",
+              "$ref": "#/definitions/Int"
+            },
+            {
+              "title": "validity",
+              "description": "Validity interval of the price feed",
+              "$ref": "#/definitions/aiken~1interval~1Interval$Int"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
