@@ -12,13 +12,12 @@ publish = false
 
 [dependencies]
 almost-raft = "0.3.0"
-anyhow = "1.0.80"
-async-trait = "0.1.77"
+anyhow = "1"
+async-trait = "0.1"
 axum = "0.7"
 bech32 = "0.11"
 chacha20poly1305 = "0.10"
-cynic = "3.4"
-clap = { version = "4.5.1", features = ["derive"] }
+clap = { version = "4.5", features = ["derive"] }
 config = "0.14"
 chrono = "0.4"
 cron = "0.12"
@@ -38,15 +37,15 @@ num-traits = "0.2"
 opentelemetry = "0.24"
 opentelemetry-otlp = { version = "0.17", features = ["gzip-tonic", "tls-webpki-roots"] }
 opentelemetry_sdk = { version = "0.24", features = ["rt-tokio"] }
-pallas-crypto = "0.29"
-pallas-primitives = "0.29"
+pallas-crypto = "0.30"
+pallas-primitives = "0.30"
 rand = "0.8.5"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 rust_decimal = "1.34.3"
 rustls = { version = "0.23", default-features = false, features = ["logging", "ring", "tls12"] }
-serde = "1.0"
-serde_json = "1.0.114"
-tokio = { version = "1.36.0", features = ["full"] }
+serde = "1"
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["full"] }
 tokio-websockets = { version = "0.9", features = ["client", "rustls-webpki-roots", "ring", "rand"] }
 tonic = "0.12"
