@@ -66,6 +66,15 @@ impl SourceAdapter {
         let update_prices_task = async move {
             // write emitted values into our map
             while let Some(info) = rx.recv().await {
+                let span = info_span!("update_price", token = info.token, unit = info.unit);
+                if info.value.is_zero() {
+                    span.in_scope(|| warn!("ignoring reported value of 0"));
+                    continue;
+                }
+                if info.reliability.is_zero() {
+                    span.in_scope(|| warn!("ignoring reported value with reliability 0"));
+                    continue;
+                }
                 updated.insert(info.token.clone(), Some(Instant::now()));
                 prices.insert(info.token.clone(), info);
             }

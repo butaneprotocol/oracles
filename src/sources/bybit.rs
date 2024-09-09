@@ -10,7 +10,6 @@ use tokio::{
     time::{sleep, Duration},
 };
 use tokio_websockets::{ClientBuilder, Message};
-use tracing::warn;
 
 use crate::config::OracleConfig;
 
@@ -126,18 +125,6 @@ impl ByBitSource {
                         let Some(value) = data
                             .mark_price
                             .and_then(|x| Decimal::from_str(&x).ok())
-                            .and_then(|p| {
-                                if p.is_zero() {
-                                    // If a price is reported as zero, assume it's a bug
-                                    warn!(
-                                        "ByBit reported value of {} as zero, ignoring",
-                                        data.symbol
-                                    );
-                                    None
-                                } else {
-                                    Some(p)
-                                }
-                            })
                             .or(info.last_value)
                         else {
                             continue;

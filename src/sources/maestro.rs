@@ -101,13 +101,6 @@ impl MaestroSource {
         let res = (messages[0].coin_a_open + messages[0].coin_a_close) / 2.;
         let volume = messages[0].coin_a_volume;
 
-        if res == 0.0 {
-            return Err(anyhow!(
-                "Maestro reported value of {} as zero, ignoring",
-                config.token
-            ));
-        }
-
         sink.send(PriceInfo {
             token: config.token.to_string(),
             unit: config.unit.to_string(),

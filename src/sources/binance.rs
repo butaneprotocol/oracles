@@ -90,10 +90,6 @@ impl BinanceSource {
         };
         let token = &stream.token;
         let value = Decimal::from_str(&message.data.price)?;
-        if value.is_zero() {
-            warn!("Binance reported value of {} as zero, ignoring", token);
-            return Ok(());
-        }
         let volume = Decimal::from_str(&message.data.volume_base)?;
 
         sink.send(PriceInfo {

@@ -93,12 +93,6 @@ impl CoinbaseSource {
             return Err(anyhow!("Unrecognized price to match: {}", product_id));
         };
         let value = Decimal::from_str(&price)?;
-        if value.is_zero() {
-            return Err(anyhow!(
-                "Coinbase reported value of {} as zero, ignoring",
-                product_id
-            ));
-        }
         let volume = Decimal::from_str(&volume_24h)?;
         Ok(PriceInfo {
             token: product.token.clone(),

@@ -111,6 +111,10 @@ impl FxRatesApiSource {
                 warn!("FXRatesAPI reported value of {currency} as zero, ignoring");
                 continue;
             }
+            if value.is_infinite() {
+                warn!("FXRatesAPI reported value of {currency} as infinity, ignoring");
+                continue;
+            }
             sink.send(PriceInfo {
                 token: currency.clone(),
                 unit: self.base.clone(),
