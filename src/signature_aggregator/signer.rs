@@ -792,6 +792,10 @@ impl Signer {
     }
 
     async fn publish(&mut self, publisher: NodeId, payload: SignedEntries) -> Result<()> {
+        for entry in &payload.entries {
+            self.validate_feed_signature(&entry.data)
+                .context("tried to publish feed with invalid signature")?;
+        }
         self.signed_entries_sink
             .send((publisher, payload))
             .await
@@ -836,6 +840,17 @@ impl Signer {
             identifier: (*self.key.identifier()).into(),
             signatures,
         })
+    }
+
+    fn validate_feed_signature(&self, feed: &SignedPriceFeed) -> Result<()> {
+        let data = {
+            let mut bytes = vec![];
+            minicbor::encode(&feed.data, &mut bytes)?;
+            bytes
+        };
+        let signature = frost_ed25519::Signature::deserialize(&feed.signature)?;
+        self.key.verifying_key().verify(&data, &signature)?;
+        Ok(())
     }
 }
 
