@@ -15,7 +15,7 @@ use consensus_aggregator::ConsensusSignatureAggregator;
 use dashmap::DashMap;
 use minicbor::Encoder;
 use pallas_primitives::conway::PlutusData;
-use serde::Serialize;
+use serde::{Serialize, Serializer};
 pub use single_aggregator::SingleSignatureAggregator;
 use tokio::{
     select,
@@ -27,7 +27,7 @@ use tracing::{debug, info_span, warn};
 use crate::{
     config::OracleConfig,
     network::{Network, NodeId},
-    price_feed::{IntervalBoundType, PriceFeedEntry, SignedEntries, SignedEntry},
+    price_feed::{IntervalBoundType, PriceFeedEntry, SignedEntries, SignedEntry, SignedPriceFeed},
     raft::{RaftClient, RaftLeader},
 };
 
@@ -218,19 +218,11 @@ impl SignatureAggregator {
 
                 let entries = payload
                     .entries
-                    .iter()
-                    .map(|entry| {
-                        let payload = {
-                            let data = PlutusData::Array(vec![(&entry.data).into()]);
-                            let mut encoder = Encoder::new(vec![]);
-                            encoder.encode(data).expect("encoding is infallible");
-                            encoder.into_writer()
-                        };
-                        PayloadEntry {
-                            synthetic: entry.data.data.synthetic.clone(),
-                            price: entry.price,
-                            payload: hex::encode(payload),
-                        }
+                    .into_iter()
+                    .map(|entry| PayloadEntry {
+                        synthetic: entry.data.data.synthetic.clone(),
+                        price: entry.price,
+                        payload: entry.data,
                     })
                     .collect();
                 let payload = Payload {
@@ -265,7 +257,8 @@ fn find_end_of_entry_validity(entry: &SignedEntry) -> SystemTime {
 pub struct PayloadEntry {
     pub synthetic: String,
     pub price: f64,
-    pub payload: String,
+    #[serde(serialize_with = "cbor_encode_feed")]
+    pub payload: SignedPriceFeed,
 }
 
 #[derive(Serialize, Clone)]
@@ -273,4 +266,17 @@ pub struct Payload {
     pub publisher: NodeId,
     pub timestamp: SystemTime,
     pub entries: Vec<PayloadEntry>,
+}
+
+fn cbor_encode_feed<S: Serializer>(
+    feed: &SignedPriceFeed,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    let bytes = {
+        let data = PlutusData::Array(vec![(feed).into()]);
+        let mut encoder = Encoder::new(vec![]);
+        encoder.encode(data).expect("encoding is infallible");
+        encoder.into_writer()
+    };
+    serializer.serialize_str(&hex::encode(bytes))
 }
