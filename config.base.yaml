@@ -59,8 +59,8 @@ synthetics:
       - LENFI
       - MIN
       - SNEK
-  - name: MATICb
-    backing_currency: MATIC
+  - name: POLb
+    backing_currency: POL
     invert: false
     collateral:
       - ADA
@@ -115,9 +115,6 @@ currencies:
     asset_id: 8fef2d34078659493ce161a6c7fba4b56afefa8535296a5743f69587.41414441
     price: 3.79
     digits: 6
-  - name: MATIC
-    price: 0.40
-    digits: 6
   - name: MIN
     asset_id: 29d222ce763455e3d7a09a665ce554f00ac89d2e99a1a83d267170c6.4d494e
     price: 0.03457
@@ -125,6 +122,9 @@ currencies:
   - name: myUSD
     asset_id: 92776616f1f32c65a173392e4410a3d8c39dcf6ef768c73af164779c.4d79555344
     price: 1
+    digits: 6
+  - name: POL
+    price: 0.40
     digits: 6
   - name: SNEK
     asset_id: 279c909f348e533da5808898f87f9a14bb2c3dfbbacccd631d927a3f.534e454b
@@ -147,9 +147,10 @@ binance:
     - token: BTC
       unit: USDT
       stream: btcusdt@ticker
-    - token: MATIC
-      unit: USDT
-      stream: maticusdt@ticker
+    # Binance POL pool won't exist until 2024-09-13
+    #- token: POL
+    #  unit: USDT
+    #  stream: polusdt@ticker
     - token: SOL
       unit: USDT
       stream: solusdt@ticker
@@ -161,9 +162,9 @@ bybit:
     - token: BTC
       unit: USDT
       stream: BTCUSDT
-    - token: MATIC
+    - token: POL
       unit: USDT
-      stream: MATICUSDT
+      stream: POLUSDT
     - token: SOL
       unit: USDT
       stream: SOLUSDT
@@ -175,9 +176,9 @@ coinbase:
     - token: BTC
       unit: USD
       product_id: BTC-USD
-    - token: MATIC
+    - token: POL
       unit: USD
-      product_id: MATIC-USD
+      product_id: POL-USD
     - token: SOL
       unit: USD
       product_id: SOL-USD
