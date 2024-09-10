@@ -53,7 +53,7 @@ impl SignatureAggregator {
     ) -> Result<(Self, watch::Receiver<Payload>)> {
         SignatureAggregator::new(config, raft_client, |signed_entries_sink| {
             let implementation = SingleSignatureAggregator::new(
-                &config.id,
+                config,
                 price_source,
                 leader_source,
                 signed_entries_sink,

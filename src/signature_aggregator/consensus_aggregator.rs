@@ -24,6 +24,7 @@ pub struct ConsensusSignatureAggregator {
     signer: Signer,
     leader_source: watch::Receiver<RaftLeader>,
     message_source: NetworkReceiver<SignerMessage>,
+    round_period: Duration,
 }
 impl ConsensusSignatureAggregator {
     pub fn new(
@@ -48,6 +49,7 @@ impl ConsensusSignatureAggregator {
             signer,
             leader_source,
             message_source,
+            round_period: config.round_period,
         })
     }
 
@@ -59,8 +61,9 @@ impl ConsensusSignatureAggregator {
         let leader = self.leader_source.clone();
         let sink = event_sink.clone();
         let new_round_task = async move {
+            let half_round_period = self.round_period / 2;
             loop {
-                sleep(Duration::from_secs(5)).await;
+                sleep(half_round_period).await;
                 if !matches!(*leader.borrow(), RaftLeader::Myself) {
                     continue;
                 }
@@ -72,7 +75,7 @@ impl ConsensusSignatureAggregator {
                 }
                 drop(span);
 
-                sleep(Duration::from_secs(5)).await;
+                sleep(half_round_period).await;
                 if !matches!(*leader.borrow(), RaftLeader::Myself) {
                     continue;
                 }

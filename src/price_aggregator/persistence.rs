@@ -119,7 +119,7 @@ impl TokenPricePersistence {
         }
     }
 
-    pub fn previous_prices(&self) -> Vec<TokenPrice> {
+    pub fn saved_prices(&self) -> Vec<TokenPrice> {
         self.prices.clone()
     }
 }

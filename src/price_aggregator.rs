@@ -1,22 +1,25 @@
 use std::{
+    collections::BTreeMap,
     sync::Arc,
     time::{Duration, SystemTime},
 };
 
 use anyhow::Result;
 use dashmap::DashMap;
+use gema::GemaCalculator;
 use num_bigint::{BigInt, BigUint};
 use num_integer::Integer as _;
 use num_rational::BigRational;
 use num_traits::{One as _, Signed as _, ToPrimitive as _};
 use persistence::TokenPricePersistence;
-use tokio::{sync::watch::Sender, task::JoinSet, time::sleep};
+use tokio::{sync::watch, task::JoinSet, time::sleep};
 use tracing::{debug, error, warn};
 
 use crate::{
     config::{OracleConfig, SyntheticConfig},
     health::HealthSink,
     price_feed::{IntervalBound, PriceFeed, PriceFeedEntry, Validity},
+    signature_aggregator::Payload,
     sources::{
         binance::BinanceSource, bybit::ByBitSource, coinbase::CoinbaseSource,
         fxratesapi::FxRatesApiSource, maestro::MaestroSource, minswap::MinswapSource,
@@ -29,22 +32,32 @@ pub use self::conversions::{TokenPrice, TokenPriceSource};
 use self::{conversions::TokenPriceConverter, source_adapter::SourceAdapter};
 
 mod conversions;
+mod gema;
 mod persistence;
 mod source_adapter;
 mod utils;
 
+struct PreviousPriceFeed {
+    timestamp: SystemTime,
+    prices: Vec<BigRational>,
+}
+
 pub struct PriceAggregator {
-    feed_tx: Arc<Sender<Vec<PriceFeedEntry>>>,
-    audit_tx: Arc<Sender<Vec<TokenPrice>>>,
-    sources: Option<Vec<SourceAdapter>>,
+    feed_sink: watch::Sender<Vec<PriceFeedEntry>>,
+    audit_sink: watch::Sender<Vec<TokenPrice>>,
+    payload_source: watch::Receiver<Payload>,
+    price_sources: Option<Vec<SourceAdapter>>,
+    previous_prices: BTreeMap<String, PreviousPriceFeed>,
     persistence: TokenPricePersistence,
+    gema: GemaCalculator,
     config: Arc<OracleConfig>,
 }
 
 impl PriceAggregator {
     pub fn new(
-        feed_tx: Sender<Vec<PriceFeedEntry>>,
-        audit_tx: Sender<Vec<TokenPrice>>,
+        feed_sink: watch::Sender<Vec<PriceFeedEntry>>,
+        audit_sink: watch::Sender<Vec<TokenPrice>>,
+        payload_source: watch::Receiver<Payload>,
         config: Arc<OracleConfig>,
     ) -> Result<Self> {
         let mut sources = vec![
@@ -70,10 +83,13 @@ impl PriceAggregator {
             sources.push(SourceAdapter::new(SundaeSwapKupoSource::new(&config)?));
         }
         Ok(Self {
-            feed_tx: Arc::new(feed_tx),
-            audit_tx: Arc::new(audit_tx),
-            sources: Some(sources),
+            feed_sink,
+            audit_sink,
+            payload_source,
+            price_sources: Some(sources),
+            previous_prices: BTreeMap::new(),
             persistence: TokenPricePersistence::new(&config),
+            gema: GemaCalculator::new(config.gema_smoothing, config.round_period),
             config,
         })
     }
@@ -81,7 +97,7 @@ impl PriceAggregator {
     pub async fn run(mut self, health: &HealthSink) {
         let mut set = JoinSet::new();
 
-        let sources = self.sources.take().unwrap();
+        let sources = self.price_sources.take().unwrap();
         let price_maps: Vec<_> = sources
             .iter()
             .map(|s| (s.name.clone(), s.get_prices()))
@@ -96,6 +112,7 @@ impl PriceAggregator {
         // Every second, we report the latest values from those price maps.
         set.spawn(async move {
             loop {
+                self.update_previous_prices();
                 self.report(&price_maps).await;
                 sleep(Duration::from_secs(1)).await;
             }
@@ -108,6 +125,35 @@ impl PriceAggregator {
         }
     }
 
+    fn update_previous_prices(&mut self) {
+        let new_payload = {
+            let borrow = self.payload_source.borrow();
+            if !borrow.has_changed() {
+                return;
+            }
+            borrow.clone()
+        };
+        let timestamp = new_payload.timestamp;
+        for entry in new_payload.entries {
+            if self
+                .previous_prices
+                .get(&entry.synthetic)
+                .is_some_and(|e| e.timestamp > timestamp)
+            {
+                continue;
+            }
+            let data = entry.payload.data;
+            let denom = data.denominator;
+            let prices = data
+                .collateral_prices
+                .into_iter()
+                .map(|p| BigRational::new(p.into(), denom.clone().into()))
+                .collect();
+            self.previous_prices
+                .insert(entry.synthetic, PreviousPriceFeed { timestamp, prices });
+        }
+    }
+
     async fn report(&mut self, price_maps: &[(String, Arc<DashMap<String, PriceInfo>>)]) {
         let mut source_prices = vec![];
         for (source, price_map) in price_maps {
@@ -116,7 +162,7 @@ impl PriceAggregator {
             }
         }
 
-        let default_prices = self.persistence.previous_prices();
+        let default_prices = self.persistence.saved_prices();
         let converter =
             TokenPriceConverter::new(&source_prices, &default_prices, &self.config.synthetics);
 
@@ -126,10 +172,10 @@ impl PriceAggregator {
             .iter()
             .map(|s| self.compute_payload(s, &converter))
             .collect();
-        self.feed_tx.send_replace(price_feeds);
+        self.feed_sink.send_replace(price_feeds);
 
         let token_values = converter.token_prices();
-        self.audit_tx.send_replace(token_values);
+        self.audit_sink.send_replace(token_values);
 
         self.persistence.save_prices(&converter).await;
     }
@@ -142,7 +188,7 @@ impl PriceAggregator {
         let synth_digits = self.get_digits(&synth.name);
         let synth_price = converter.value_in_usd(&synth.name);
 
-        let prices: Vec<_> = synth
+        let prices = synth
             .collateral
             .iter()
             .map(|c| {
@@ -153,6 +199,9 @@ impl PriceAggregator {
                 p_scaled / &synth_price
             })
             .collect();
+
+        // apply GEMA smoothing to the prices we've found this round
+        let prices = self.apply_gema(&synth.name, prices);
 
         // track metrics for the different prices
         for (collateral_name, collateral_price) in synth.collateral.iter().zip(prices.iter()) {
@@ -182,6 +231,19 @@ impl PriceAggregator {
                 },
             },
         }
+    }
+
+    fn apply_gema(&self, synth: &str, prices: Vec<BigRational>) -> Vec<BigRational> {
+        let now = SystemTime::now();
+        let Some(prev_feed) = self.previous_prices.get(synth) else {
+            // We don't have any previous set of prices to reference
+            return prices;
+        };
+        let Ok(time_elapsed) = now.duration_since(prev_feed.timestamp) else {
+            // someone's clock must be extremely messed up
+            return prices;
+        };
+        self.gema.smooth(time_elapsed, &prev_feed.prices, prices)
     }
 
     fn get_digits(&self, currency: &str) -> u32 {

@@ -13,6 +13,7 @@ use tokio::{
 use tracing::warn;
 
 use crate::{
+    config::OracleConfig,
     network::NodeId,
     price_feed::{serialize, PriceFeedEntry, SignedEntries, SignedEntry, SignedPriceFeed},
     raft::RaftLeader,
@@ -24,28 +25,30 @@ pub struct SingleSignatureAggregator {
     key: SecretKey,
     price_source: watch::Receiver<Vec<PriceFeedEntry>>,
     leader_source: watch::Receiver<RaftLeader>,
-    payload_sink: mpsc::Sender<(NodeId, SignedEntries)>,
+    signed_entries_sink: mpsc::Sender<(NodeId, SignedEntries)>,
+    round_period: Duration,
 }
 
 impl SingleSignatureAggregator {
     pub fn new(
-        id: &NodeId,
+        config: &OracleConfig,
         price_source: watch::Receiver<Vec<PriceFeedEntry>>,
         leader_source: watch::Receiver<RaftLeader>,
-        payload_sink: mpsc::Sender<(NodeId, SignedEntries)>,
+        signed_entries_sink: mpsc::Sender<(NodeId, SignedEntries)>,
     ) -> Result<Self> {
         Ok(Self {
-            id: id.clone(),
+            id: config.id.clone(),
             key: decode_key()?,
             price_source,
             leader_source,
-            payload_sink,
+            signed_entries_sink,
+            round_period: config.round_period,
         })
     }
 
     pub async fn run(mut self) {
         loop {
-            sleep(Duration::from_secs(5)).await;
+            sleep(self.round_period).await;
             if !matches!(*self.leader_source.borrow(), RaftLeader::Myself) {
                 continue;
             }
@@ -67,7 +70,11 @@ impl SingleSignatureAggregator {
                 entries: payload_entries,
             };
 
-            if let Err(error) = self.payload_sink.send((self.id.clone(), payload)).await {
+            if let Err(error) = self
+                .signed_entries_sink
+                .send((self.id.clone(), payload))
+                .await
+            {
                 warn!("Could not send signed prices: {}", error);
             }
         }
