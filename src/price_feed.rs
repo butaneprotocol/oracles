@@ -7,8 +7,9 @@ use minicbor::{
     Decode, Decoder, Encode, Encoder,
 };
 use num_bigint::BigUint;
+use num_rational::BigRational;
 use pallas_primitives::conway::{BigInt, Constr, PlutusData};
-use rust_decimal::{prelude::ToPrimitive, Decimal};
+use rust_decimal::prelude::ToPrimitive;
 
 pub fn serialize<T: Into<PlutusData>>(data: T) -> Vec<u8> {
     let plutus: PlutusData = data.into();
@@ -40,7 +41,7 @@ pub struct SignedEntry {
 
 #[derive(Clone, Debug)]
 pub struct PriceFeedEntry {
-    pub price: Decimal,
+    pub price: BigRational,
     pub data: PriceFeed,
 }
 

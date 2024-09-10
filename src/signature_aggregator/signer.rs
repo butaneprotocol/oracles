@@ -890,8 +890,9 @@ mod tests {
     use anyhow::Result;
     use frost_ed25519::keys::{self, IdentifierList, KeyPackage};
     use num_bigint::BigUint;
+    use num_rational::BigRational;
+    use num_traits::FromPrimitive as _;
     use rand::thread_rng;
-    use rust_decimal::{prelude::FromPrimitive, Decimal};
     use tokio::sync::{mpsc, watch};
     use tracing::{Instrument, Span};
 
@@ -1026,7 +1027,7 @@ mod tests {
         denominator: u64,
     ) -> PriceFeedEntry {
         PriceFeedEntry {
-            price: Decimal::from_f64(price).unwrap(),
+            price: BigRational::from_f64(price).unwrap(),
             data: PriceFeed {
                 collateral_names: Some(collateral_names.iter().map(|&s| s.to_string()).collect()),
                 collateral_prices: collateral_prices

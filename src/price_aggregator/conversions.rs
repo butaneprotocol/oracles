@@ -1,10 +1,13 @@
 use std::collections::BTreeMap;
 
-use num_traits::Inv;
-use rust_decimal::Decimal;
+use num_bigint::BigInt;
+use num_rational::BigRational;
+use num_traits::{Inv, One};
 use serde::Serialize;
 
 use crate::{config::SyntheticConfig, sources::source::PriceInfo};
+
+use super::utils;
 
 #[derive(Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 struct TokenPair<'a>(&'a str, &'a str);
@@ -13,15 +16,18 @@ struct TokenPair<'a>(&'a str, &'a str);
 pub struct TokenPrice {
     pub token: String,
     pub unit: String,
-    pub value: Decimal,
+    #[serde(serialize_with = "utils::serialize_rational_as_decimal")]
+    pub value: BigRational,
     pub sources: Vec<TokenPriceSource>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct TokenPriceSource {
     pub name: String,
-    pub value: Decimal,
-    pub reliability: Decimal,
+    #[serde(serialize_with = "utils::serialize_rational_as_decimal")]
+    pub value: BigRational,
+    #[serde(serialize_with = "utils::serialize_rational_as_decimal")]
+    pub reliability: BigRational,
 }
 
 pub struct TokenPriceConverter<'a> {
@@ -41,8 +47,8 @@ impl<'a> TokenPriceConverter<'a> {
         for (source_name, price) in source_prices {
             let source = TokenPriceSource {
                 name: source_name.to_string(),
-                value: price.value,
-                reliability: price.reliability,
+                value: utils::decimal_to_rational(price.value),
+                reliability: utils::decimal_to_rational(price.reliability),
             };
             value_sources
                 .entry(TokenPair(&price.token, &price.unit))
@@ -52,11 +58,11 @@ impl<'a> TokenPriceConverter<'a> {
 
         let mut prices = BTreeMap::new();
         for (tokens, sources) in value_sources {
-            let mut value_sum = Decimal::ZERO;
-            let mut reliability_sum = Decimal::ZERO;
+            let mut value_sum = BigRational::new(BigInt::ZERO, BigInt::one());
+            let mut reliability_sum = BigRational::new(BigInt::ZERO, BigInt::one());
             for source in &sources {
-                value_sum += source.value * source.reliability;
-                reliability_sum += source.reliability;
+                value_sum += &source.value * &source.reliability;
+                reliability_sum += &source.reliability;
             }
             let value = TokenPrice {
                 token: tokens.0.to_string(),
@@ -75,9 +81,9 @@ impl<'a> TokenPriceConverter<'a> {
         Self { prices, synthetics }
     }
 
-    pub fn value_in_usd(&self, token: &str) -> Decimal {
+    pub fn value_in_usd(&self, token: &str) -> BigRational {
         if token == "USD" {
-            return Decimal::ONE;
+            return BigRational::one();
         }
 
         // A synthetic has the same value as its backing currency
@@ -92,13 +98,13 @@ impl<'a> TokenPriceConverter<'a> {
             .filter(|ps| !ps.is_empty())
             .unwrap_or_else(|| panic!("No price found for {}!", token));
 
-        let mut value = Decimal::ZERO;
-        let mut reliability = Decimal::ZERO;
+        let mut value = BigRational::new(BigInt::ZERO, BigInt::one());
+        let mut reliability = BigRational::new(BigInt::ZERO, BigInt::one());
         for price in prices {
             let conversion_factor = self.value_in_usd(&price.unit);
             for source in &price.sources {
-                value += source.value * conversion_factor * source.reliability;
-                reliability += source.reliability;
+                value += &source.value * &conversion_factor * &source.reliability;
+                reliability += &source.reliability;
             }
         }
 
@@ -112,6 +118,9 @@ impl<'a> TokenPriceConverter<'a> {
 
 #[cfg(test)]
 mod tests {
+    use num_bigint::BigInt;
+    use num_rational::BigRational;
+    use num_traits::One as _;
     use rust_decimal::Decimal;
 
     use crate::{
@@ -122,15 +131,21 @@ mod tests {
 
     use super::TokenPriceConverter;
 
-    fn make_default_price(token: &str, value: Decimal) -> TokenPrice {
+    fn decimal_rational(value: u64, scale: u32) -> BigRational {
+        let numer = BigInt::from(value);
+        let denom = BigInt::from(10u64.pow(scale));
+        BigRational::new(numer, denom)
+    }
+
+    fn make_default_price(token: &str, value: BigRational) -> TokenPrice {
         TokenPrice {
             token: token.into(),
             unit: "USD".into(),
-            value,
+            value: value.clone(),
             sources: vec![TokenPriceSource {
                 name: "Hard-coded default value".into(),
                 value,
-                reliability: Decimal::ONE,
+                reliability: BigRational::one(),
             }],
         }
     }
@@ -157,10 +172,10 @@ mod tests {
             },
         ];
         let default_prices = vec![
-            make_default_price("ADA", Decimal::new(6, 1)),
-            make_default_price("BTC", Decimal::new(58262, 0)),
-            make_default_price("LENFI", Decimal::new(379, 2)),
-            make_default_price("USDT", Decimal::ONE),
+            make_default_price("ADA", decimal_rational(6, 1)),
+            make_default_price("BTC", decimal_rational(58262, 0)),
+            make_default_price("LENFI", decimal_rational(379, 2)),
+            make_default_price("USDT", BigRational::one()),
         ];
         (synthetics, default_prices)
     }
@@ -171,7 +186,7 @@ mod tests {
         let source_prices = vec![];
         let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
 
-        assert_eq!(converter.value_in_usd("ADA"), Decimal::new(6, 1));
+        assert_eq!(converter.value_in_usd("ADA"), decimal_rational(6, 1));
     }
 
     #[test]
@@ -188,7 +203,7 @@ mod tests {
         )];
         let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
 
-        assert_eq!(converter.value_in_usd("BTC"), Decimal::new(60000, 0));
+        assert_eq!(converter.value_in_usd("BTC"), decimal_rational(60000, 0));
     }
 
     #[test]
@@ -216,7 +231,7 @@ mod tests {
         ];
         let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
 
-        assert_eq!(converter.value_in_usd("BTC"), Decimal::new(75000, 0));
+        assert_eq!(converter.value_in_usd("BTC"), decimal_rational(75000, 0));
     }
 
     #[test]
@@ -244,7 +259,7 @@ mod tests {
         ];
         let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
 
-        assert_eq!(converter.value_in_usd("BTC"), Decimal::new(175, 0));
+        assert_eq!(converter.value_in_usd("BTC"), decimal_rational(175, 0));
     }
 
     #[test]
@@ -261,7 +276,7 @@ mod tests {
         )];
         let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
 
-        assert_eq!(converter.value_in_usd("LENFI"), Decimal::new(6000, 0));
+        assert_eq!(converter.value_in_usd("LENFI"), decimal_rational(6000, 0));
     }
 
     #[test]
@@ -289,7 +304,7 @@ mod tests {
         ];
         let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
 
-        assert_eq!(converter.value_in_usd("LENFI"), Decimal::new(3000, 0));
+        assert_eq!(converter.value_in_usd("LENFI"), decimal_rational(3000, 0));
     }
 
     #[test]
@@ -306,7 +321,7 @@ mod tests {
         )];
         let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
 
-        assert_eq!(converter.value_in_usd("BTC"), Decimal::new(5000, 0));
+        assert_eq!(converter.value_in_usd("BTC"), decimal_rational(5000, 0));
     }
 
     #[test]
@@ -334,7 +349,7 @@ mod tests {
         ];
         let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
 
-        assert_eq!(converter.value_in_usd("BTC"), Decimal::new(5025, 0));
+        assert_eq!(converter.value_in_usd("BTC"), decimal_rational(5025, 0));
     }
 
     #[test]
@@ -371,7 +386,7 @@ mod tests {
         ];
         let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
 
-        assert_eq!(converter.value_in_usd("BTC"), Decimal::new(50125, 1));
+        assert_eq!(converter.value_in_usd("BTC"), decimal_rational(50125, 1));
     }
 
     #[test]
@@ -388,7 +403,7 @@ mod tests {
         )];
         let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
 
-        assert_eq!(converter.value_in_usd("BTCb"), Decimal::new(9001, 0));
+        assert_eq!(converter.value_in_usd("BTCb"), decimal_rational(9001, 0));
     }
 
     #[test]
@@ -406,7 +421,7 @@ mod tests {
         let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
 
         // SOL is 4, so SOLp is 1/4
-        assert_eq!(converter.value_in_usd("SOLp"), Decimal::new(25, 2));
+        assert_eq!(converter.value_in_usd("SOLp"), decimal_rational(25, 2));
     }
 
     #[test]
@@ -450,17 +465,17 @@ mod tests {
             vec![TokenPrice {
                 token: "LENFI".into(),
                 unit: "ADA".into(),
-                value: Decimal::new(10000, 0),
+                value: decimal_rational(10000, 0),
                 sources: vec![
                     TokenPriceSource {
                         name: "LENFI source 1".into(),
-                        value: Decimal::new(5000, 0),
-                        reliability: Decimal::ONE,
+                        value: decimal_rational(5000, 0),
+                        reliability: BigRational::one(),
                     },
                     TokenPriceSource {
                         name: "LENFI source 2".into(),
-                        value: Decimal::new(15000, 0),
-                        reliability: Decimal::ONE,
+                        value: decimal_rational(15000, 0),
+                        reliability: BigRational::one(),
                     }
                 ]
             }]
@@ -480,11 +495,11 @@ mod tests {
             vec![TokenPrice {
                 token: "LENFI".into(),
                 unit: "USD".into(),
-                value: Decimal::new(379, 2),
+                value: decimal_rational(379, 2),
                 sources: vec![TokenPriceSource {
                     name: "Hard-coded default value".into(),
-                    value: Decimal::new(379, 2),
-                    reliability: Decimal::ONE,
+                    value: decimal_rational(379, 2),
+                    reliability: BigRational::one(),
                 },]
             }]
         );
