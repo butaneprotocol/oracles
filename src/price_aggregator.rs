@@ -165,8 +165,8 @@ impl PriceAggregator {
         }
 
         let (collateral_prices, denominator) = normalize(&prices, synth_price);
-        let valid_from = SystemTime::now();
-        let valid_to = valid_from + Duration::from_secs(300);
+        let valid_from = SystemTime::now() - Duration::from_secs(60);
+        let valid_to = valid_from + Duration::from_secs(360);
 
         PriceFeedEntry {
             price: synth_price,
