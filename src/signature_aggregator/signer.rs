@@ -267,6 +267,7 @@ pub struct Signer {
     signed_entries_sink: mpsc::Sender<(NodeId, SignedEntries)>,
     state: SignerState,
     price_tracker: PriceInstrumentation,
+    latest_payload: Option<SignedEntries>,
 }
 
 impl Signer {
@@ -287,6 +288,7 @@ impl Signer {
             signed_entries_sink,
             state: SignerState::Unknown,
             price_tracker: PriceInstrumentation::default(),
+            latest_payload: None,
         }
     }
 
@@ -755,24 +757,40 @@ impl Signer {
             signatures.insert(synthetic.clone(), signature.serialize()?);
         }
 
-        let payload_entries = price_data
-            .iter()
-            .filter_map(|entry| {
-                // If we don't have a signature in the map, we're not signing this price feed
-                let signature = signatures.remove(&entry.data.synthetic)?;
-                Some(SignedEntry {
+        let now = SystemTime::now();
+        let mut payload_entries = BTreeMap::new();
+        for entry in price_data.iter() {
+            // If we don't have a signature in the map, we're not signing this price feed
+            let Some(signature) = signatures.remove(&entry.data.synthetic) else {
+                continue;
+            };
+            payload_entries.insert(
+                entry.data.synthetic.clone(),
+                SignedEntry {
                     price: entry.price.to_f64().expect("Could not convert decimal"),
                     data: SignedPriceFeed {
                         data: entry.data.clone(),
                         signature,
                     },
-                })
-            })
-            .collect();
+                    timestamp: Some(now),
+                },
+            );
+        }
+
+        // If there's any synthetics which were in a previous round but not this one,
+        // include them in the payload as well.
+        if let Some(old_payload) = self.latest_payload.as_ref() {
+            for entry in &old_payload.entries {
+                let synthetic = &entry.data.data.synthetic;
+                if !payload_entries.contains_key(synthetic) {
+                    payload_entries.insert(synthetic.clone(), entry.clone());
+                }
+            }
+        }
 
         let payload = SignedEntries {
-            timestamp: SystemTime::now(),
-            entries: payload_entries,
+            timestamp: now,
+            entries: payload_entries.into_values().collect(),
         };
 
         self.publish(self.id.clone(), payload.clone()).await?;
@@ -797,9 +815,17 @@ impl Signer {
                 .context("tried to publish feed with invalid signature")?;
         }
         self.signed_entries_sink
-            .send((publisher, payload))
+            .send((publisher, payload.clone()))
             .await
             .context("Could not publish signed result")?;
+
+        if !self
+            .latest_payload
+            .as_ref()
+            .is_some_and(|old| old.timestamp > payload.timestamp)
+        {
+            self.latest_payload = Some(payload);
+        }
 
         Ok(())
     }

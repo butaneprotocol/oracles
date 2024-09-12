@@ -95,7 +95,7 @@ impl SignatureAggregator {
         let (signed_entries_sink, signed_entries_source) = mpsc::channel(10);
         let (payload_sink, mut payload_source) = watch::channel(Payload {
             publisher: config.id.clone(),
-            timestamp: SystemTime::now(),
+            timestamp: SystemTime::UNIX_EPOCH,
             entries: vec![],
         });
         payload_source.mark_unchanged();
@@ -165,6 +165,9 @@ impl SignatureAggregator {
         let raft_client = self.raft_client;
         let mut payload_source = self.signed_entries_source;
         let publish_task = async move {
+            // map of synthetic name to most recent payload produced for that entry
+            let mut latest_entries: BTreeMap<String, TimestampedPayloadEntry> = BTreeMap::new();
+
             // map of synthetic name to number of times it's failed in a row
             let mut synthetic_failures: BTreeMap<String, usize> =
                 synthetics.iter().map(|s| (s.clone(), 0)).collect();
@@ -172,9 +175,26 @@ impl SignatureAggregator {
             while let Some((publisher, payload)) = payload_source.recv().await {
                 let span = info_span!("publish_entries");
                 // update the payload age monitor now that we have a new payload
-                let last_updated = payload.timestamp;
                 for entry in &payload.entries {
                     let synthetic = entry.data.data.synthetic.clone();
+                    let last_updated = entry.timestamp.unwrap_or(payload.timestamp);
+                    if latest_entries
+                        .get(&synthetic)
+                        .is_some_and(|e| e.timestamp > last_updated)
+                    {
+                        continue;
+                    }
+                    latest_entries.insert(
+                        synthetic.clone(),
+                        TimestampedPayloadEntry {
+                            timestamp: last_updated,
+                            entry: PayloadEntry {
+                                synthetic: synthetic.clone(),
+                                price: entry.price,
+                                payload: entry.data.clone(),
+                            },
+                        },
+                    );
                     let valid_until = find_end_of_entry_validity(entry);
                     payload_ages.insert(synthetic, (last_updated, valid_until));
                 }
@@ -216,15 +236,7 @@ impl SignatureAggregator {
                     }
                 }
 
-                let entries = payload
-                    .entries
-                    .into_iter()
-                    .map(|entry| PayloadEntry {
-                        synthetic: entry.data.data.synthetic.clone(),
-                        price: entry.price,
-                        payload: entry.data,
-                    })
-                    .collect();
+                let entries = latest_entries.values().cloned().collect();
                 let payload = Payload {
                     publisher,
                     timestamp: payload.timestamp,
@@ -262,10 +274,17 @@ pub struct PayloadEntry {
 }
 
 #[derive(Serialize, Clone)]
+pub struct TimestampedPayloadEntry {
+    pub timestamp: SystemTime,
+    #[serde(flatten)]
+    pub entry: PayloadEntry,
+}
+
+#[derive(Serialize, Clone)]
 pub struct Payload {
     pub publisher: NodeId,
     pub timestamp: SystemTime,
-    pub entries: Vec<PayloadEntry>,
+    pub entries: Vec<TimestampedPayloadEntry>,
 }
 
 fn cbor_encode_feed<S: Serializer>(

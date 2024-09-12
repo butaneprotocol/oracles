@@ -37,6 +37,8 @@ pub struct SignedEntry {
     pub price: f64,
     #[n(1)]
     pub data: SignedPriceFeed,
+    #[n(2)]
+    pub timestamp: Option<SystemTime>,
 }
 
 #[derive(Clone, Debug)]

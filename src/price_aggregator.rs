@@ -19,7 +19,7 @@ use crate::{
     config::{OracleConfig, SyntheticConfig},
     health::HealthSink,
     price_feed::{IntervalBound, PriceFeed, PriceFeedEntry, Validity},
-    signature_aggregator::Payload,
+    signature_aggregator::{Payload, TimestampedPayloadEntry},
     sources::{
         binance::BinanceSource, bybit::ByBitSource, coinbase::CoinbaseSource,
         fxratesapi::FxRatesApiSource, maestro::MaestroSource, minswap::MinswapSource,
@@ -133,8 +133,7 @@ impl PriceAggregator {
             }
             borrow.clone()
         };
-        let timestamp = new_payload.timestamp;
-        for entry in new_payload.entries {
+        for TimestampedPayloadEntry { timestamp, entry } in new_payload.entries {
             if self
                 .previous_prices
                 .get(&entry.synthetic)

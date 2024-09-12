@@ -61,9 +61,10 @@ impl SingleSignatureAggregator {
                     .collect::<Vec<PriceFeedEntry>>()
             };
 
+            let now = SystemTime::now();
             let payload_entries = prices
                 .into_iter()
-                .map(|p| self.sign_price_feed(p))
+                .map(|p| self.sign_price_feed(p, now))
                 .collect();
             let payload = SignedEntries {
                 timestamp: SystemTime::now(),
@@ -80,7 +81,7 @@ impl SingleSignatureAggregator {
         }
     }
 
-    fn sign_price_feed(&self, data: PriceFeedEntry) -> SignedEntry {
+    fn sign_price_feed(&self, data: PriceFeedEntry, timestamp: SystemTime) -> SignedEntry {
         let price_feed_bytes = serialize(&data.data);
         let signature = self.key.sign(price_feed_bytes);
         SignedEntry {
@@ -89,6 +90,7 @@ impl SingleSignatureAggregator {
                 data: data.data.clone(),
                 signature: signature.as_ref().to_vec(),
             },
+            timestamp: Some(timestamp),
         }
     }
 }
