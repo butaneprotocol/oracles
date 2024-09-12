@@ -101,6 +101,6 @@ mod tests {
         // this duration rounds to 10 seconds (two rounds),
         // so we should assume that we missed a round and not smooth as much
         let prices_8sec = calculator.smooth(Duration::from_secs(8), &prev_prices, curr_prices);
-        assert_eq!(prices_6sec[0], prices_8sec[0]);
+        assert!(prices_6sec[0] < prices_8sec[0]);
     }
 }

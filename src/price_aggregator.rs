@@ -267,24 +267,41 @@ fn normalize(prices: &[BigRational]) -> (Vec<BigUint>, BigUint) {
     let gcd = normalized_numerators
         .iter()
         .fold(denominator.clone(), |acc, n| acc.gcd(n));
-    let numerators = normalized_numerators
+    let mut numerators: Vec<_> = normalized_numerators
         .into_iter()
         .map(|n| (n / &gcd).to_biguint().unwrap())
         .collect();
-    let denominator = (denominator / gcd).to_biguint().unwrap();
+    let mut denominator = (denominator / gcd).to_biguint().unwrap();
+    restrict_output_size(&mut numerators, &mut denominator, 512);
     (numerators, denominator)
+}
+
+fn restrict_output_size(numerators: &mut [BigUint], denominator: &mut BigUint, max_bits: u64) {
+    let bits = numerators
+        .iter()
+        .fold(denominator.bits(), |acc, n| n.bits().max(acc));
+
+    if bits < max_bits {
+        return;
+    }
+
+    let bits_to_clear = bits - max_bits;
+    *denominator >>= bits_to_clear;
+    for numerator in numerators {
+        *numerator >>= bits_to_clear;
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use num_bigint::BigInt;
+    use num_bigint::{BigInt, BigUint};
     use num_rational::BigRational;
 
     use super::normalize;
 
-    fn decimal_rational(value: u64, scale: u32) -> BigRational {
+    fn decimal_rational(value: u128, scale: u32) -> BigRational {
         let numer = BigInt::from(value);
-        let denom = BigInt::from(10u64.pow(scale));
+        let denom = BigInt::from(10u128).pow(scale);
         BigRational::new(numer, denom)
     }
 
@@ -327,6 +344,23 @@ mod tests {
         assert_eq!(
             (vec![2u128.into(), 4u128.into(), 6u128.into()], 1u128.into()),
             (collateral_prices, denominator)
+        );
+    }
+
+    #[test]
+    fn normalize_should_restrict_output_to_at_most_64_bytes() {
+        let prices = [
+            BigRational::new(BigInt::from(2u128), BigInt::from(1u128) << 512),
+            BigRational::new(BigInt::from(3u128), BigInt::from(1u128) << 512),
+            BigRational::new(BigInt::from(4u128), BigInt::from(1u128) << 512),
+        ];
+        let (collateral_prices, denominator) = normalize(&prices);
+        assert_eq!(
+            (
+                vec![1u128.into(), 1u128.into(), 2u128.into()],
+                BigUint::from(1u128) << 511
+            ),
+            (collateral_prices, denominator),
         );
     }
 }
