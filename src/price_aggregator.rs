@@ -89,7 +89,7 @@ impl PriceAggregator {
             price_sources: Some(sources),
             previous_prices: BTreeMap::new(),
             persistence: TokenPricePersistence::new(&config),
-            gema: GemaCalculator::new(config.gema_smoothing, config.round_period),
+            gema: GemaCalculator::new(config.gema_periods, config.round_duration),
             config,
         })
     }

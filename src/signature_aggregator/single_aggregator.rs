@@ -26,7 +26,7 @@ pub struct SingleSignatureAggregator {
     price_source: watch::Receiver<Vec<PriceFeedEntry>>,
     leader_source: watch::Receiver<RaftLeader>,
     signed_entries_sink: mpsc::Sender<(NodeId, SignedEntries)>,
-    round_period: Duration,
+    round_duration: Duration,
 }
 
 impl SingleSignatureAggregator {
@@ -42,13 +42,13 @@ impl SingleSignatureAggregator {
             price_source,
             leader_source,
             signed_entries_sink,
-            round_period: config.round_period,
+            round_duration: config.round_duration,
         })
     }
 
     pub async fn run(mut self) {
         loop {
-            sleep(self.round_period).await;
+            sleep(self.round_duration).await;
             if !matches!(*self.leader_source.borrow(), RaftLeader::Myself) {
                 continue;
             }
