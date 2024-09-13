@@ -245,7 +245,7 @@ impl<'a, C> Decode<'a, C> for CborBigRational {
         d: &mut minicbor::Decoder<'a>,
         _ctx: &mut C,
     ) -> Result<Self, minicbor::decode::Error> {
-        let [n_bytes, d_bytes]: [Vec<u8>; 2] = d.decode()?;
+        let [n_bytes, d_bytes]: [ByteVec; 2] = d.decode()?;
         let numer = BigInt::from_signed_bytes_le(&n_bytes);
         let denom = BigInt::from_signed_bytes_le(&d_bytes);
         Ok(Self(BigRational::new(numer, denom)))
