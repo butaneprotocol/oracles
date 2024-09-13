@@ -142,11 +142,14 @@ impl PriceAggregator {
                 continue;
             }
             let data = entry.payload.data;
-            let denom = data.denominator;
-            let prices = data
-                .collateral_prices
+            let mut numerators = data.collateral_prices;
+            let mut denominator = data.denominator;
+
+            restrict_output_size(&mut numerators, &mut denominator, 512);
+
+            let prices = numerators
                 .into_iter()
-                .map(|p| BigRational::new(p.into(), denom.clone().into()))
+                .map(|n| BigRational::new(n.into(), denominator.clone().into()))
                 .collect();
             self.previous_prices
                 .insert(entry.synthetic, PreviousPriceFeed { timestamp, prices });
@@ -271,7 +274,7 @@ fn normalize(prices: &[BigRational]) -> (Vec<BigUint>, BigUint) {
         .map(|n| (n / &gcd).to_biguint().unwrap())
         .collect();
     let mut denominator = (denominator / gcd).to_biguint().unwrap();
-    restrict_output_size(&mut numerators, &mut denominator, 512);
+    restrict_output_size(&mut numerators, &mut denominator, 1024);
     (numerators, denominator)
 }
 
@@ -283,9 +286,17 @@ fn restrict_output_size(numerators: &mut [BigUint], denominator: &mut BigUint, m
     if bits < max_bits {
         return;
     }
-
     let bits_to_clear = bits - max_bits;
+
+    // when rounding the denominator, bias away from 0
+    let mask_to_clear = (BigUint::one() << bits_to_clear) - BigUint::one();
+    let cleared_any_bits = denominator.clone() & mask_to_clear != BigUint::ZERO;
     *denominator >>= bits_to_clear;
+    if cleared_any_bits {
+        *denominator |= BigUint::one();
+    }
+
+    // when rounding numerators, bias towards 0
     for numerator in numerators {
         *numerator >>= bits_to_clear;
     }
@@ -295,8 +306,9 @@ fn restrict_output_size(numerators: &mut [BigUint], denominator: &mut BigUint, m
 mod tests {
     use num_bigint::{BigInt, BigUint};
     use num_rational::BigRational;
+    use num_traits::One as _;
 
-    use super::normalize;
+    use super::{normalize, restrict_output_size};
 
     fn decimal_rational(value: u128, scale: u32) -> BigRational {
         let numer = BigInt::from(value);
@@ -306,7 +318,7 @@ mod tests {
 
     #[test]
     fn normalize_should_not_panic_on_empty_input() {
-        assert_eq!((vec![], 1u128.into()), normalize(&[]));
+        assert_eq!((vec![], BigUint::one()), normalize(&[]));
     }
 
     #[test]
@@ -347,19 +359,37 @@ mod tests {
     }
 
     #[test]
-    fn normalize_should_restrict_output_to_at_most_64_bytes() {
+    fn normalize_should_restrict_output_to_at_most_128_bytes() {
         let prices = [
-            BigRational::new(BigInt::from(2u128), BigInt::from(1u128) << 512),
-            BigRational::new(BigInt::from(3u128), BigInt::from(1u128) << 512),
-            BigRational::new(BigInt::from(4u128), BigInt::from(1u128) << 512),
+            BigRational::new(BigInt::from(2u128), BigInt::one() << 1024),
+            BigRational::new(BigInt::from(3u128), BigInt::one() << 1024),
+            BigRational::new(BigInt::from(4u128), BigInt::one() << 1024),
         ];
         let (collateral_prices, denominator) = normalize(&prices);
         assert_eq!(
             (
-                vec![1u128.into(), 1u128.into(), 2u128.into()],
-                BigUint::from(1u128) << 511
+                vec![BigUint::one(), BigUint::one(), 2u128.into()],
+                BigUint::one() << 1023,
             ),
             (collateral_prices, denominator),
         );
+    }
+
+    #[test]
+    fn restrict_output_size_should_round_numerator_down_and_denominator_up() {
+        let mut numerators = vec![0b1001u128.into()];
+        let mut denominator = 0b1001u128.into();
+        restrict_output_size(&mut numerators, &mut denominator, 3);
+        assert_eq!(numerators, vec![0b100u128.into()]);
+        assert_eq!(denominator, 0b101u128.into());
+    }
+
+    #[test]
+    fn restrict_output_size_should_not_round_denominator_up_when_only_zeroes_were_truncated() {
+        let mut numerators = vec![0b1001u128.into()];
+        let mut denominator = 0b1000u128.into();
+        restrict_output_size(&mut numerators, &mut denominator, 3);
+        assert_eq!(numerators, vec![0b100u128.into()]);
+        assert_eq!(denominator, 0b100u128.into());
     }
 }
