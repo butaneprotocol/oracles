@@ -34,9 +34,9 @@ num-bigint = "0.4"
 num-integer = "0.1"
 num-rational = "0.4"
 num-traits = "0.2"
-opentelemetry = "0.24"
-opentelemetry-otlp = { version = "0.17", features = ["gzip-tonic", "tls-webpki-roots"] }
-opentelemetry_sdk = { version = "0.24", features = ["rt-tokio"] }
+opentelemetry = "0.25"
+opentelemetry-otlp = { version = "0.25", features = ["gzip-tonic", "tls-webpki-roots"] }
+opentelemetry_sdk = { version = "0.25", features = ["rt-tokio"] }
 pallas-crypto = "0.30"
 pallas-primitives = "0.30"
 rand = "0.8.5"
@@ -50,7 +50,7 @@ tokio-util = { version = "0.7", features = ["full"] }
 tokio-websockets = { version = "0.9", features = ["client", "rustls-webpki-roots", "ring", "rand"] }
 tonic = "0.12"
 tracing = "0.1.40"
-tracing-opentelemetry = "0.25"
+tracing-opentelemetry = "0.26"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 uuid = { version = "1.7.0", features = ["v4"] }
 x25519-dalek = { version = "2" }
