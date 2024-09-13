@@ -6,12 +6,13 @@ use std::{
 
 use anyhow::Context;
 use minicbor::{Decode, Encode};
-use rust_decimal::Decimal;
+use num_rational::BigRational;
+use num_traits::One as _;
 use tracing::{info, warn};
 
-use crate::config::OracleConfig;
+use crate::{cbor::CborBigRational, config::OracleConfig};
 
-use super::{conversions::TokenPriceConverter, TokenPrice, TokenPriceSource};
+use super::{conversions::TokenPriceConverter, utils, TokenPrice, TokenPriceSource};
 
 #[derive(Encode, Decode, Default)]
 struct PersistedData {
@@ -23,9 +24,8 @@ struct PersistedData {
 struct PersistedTokenPrice {
     #[n(0)]
     token: String,
-    /// Serialized Decimal
     #[n(1)]
-    value: [u8; 16],
+    value: CborBigRational,
 }
 
 pub struct TokenPricePersistence {
@@ -57,10 +57,10 @@ impl TokenPricePersistence {
                 PersistedData::default()
             });
 
-        let old_prices: BTreeMap<String, Decimal> = data
+        let old_prices: BTreeMap<String, BigRational> = data
             .prices
             .into_iter()
-            .map(|p| (p.token, Decimal::deserialize(p.value)))
+            .map(|p| (p.token, p.value.into()))
             .collect();
         let prices = config
             .currencies
@@ -68,17 +68,20 @@ impl TokenPricePersistence {
             .map(|curr| {
                 let token = curr.name.clone();
                 let (value, source) = match old_prices.get(&token) {
-                    Some(price) => (*price, "Loaded from disk"),
-                    None => (curr.price, "Hard-coded default value"),
+                    Some(price) => (price.clone(), "Loaded from disk"),
+                    None => (
+                        utils::decimal_to_rational(curr.price),
+                        "Hard-coded default value",
+                    ),
                 };
                 TokenPrice {
                     token,
                     unit: "USD".into(),
-                    value,
+                    value: value.clone(),
                     sources: vec![TokenPriceSource {
                         name: source.into(),
                         value,
-                        reliability: Decimal::ONE,
+                        reliability: BigRational::one(),
                     }],
                 }
             })
@@ -93,7 +96,7 @@ impl TokenPricePersistence {
     pub async fn save_prices(&mut self, converter: &TokenPriceConverter<'_>) {
         for price in self.prices.iter_mut() {
             let value = converter.value_in_usd(&price.token);
-            price.value = value;
+            price.value = value.clone();
             price.sources[0].value = value;
         }
         let data = PersistedData {
@@ -102,7 +105,7 @@ impl TokenPricePersistence {
                 .iter()
                 .map(|p| PersistedTokenPrice {
                     token: p.token.clone(),
-                    value: p.value.serialize(),
+                    value: p.value.clone().into(),
                 })
                 .collect(),
         };
@@ -116,7 +119,7 @@ impl TokenPricePersistence {
         }
     }
 
-    pub fn previous_prices(&self) -> Vec<TokenPrice> {
+    pub fn saved_prices(&self) -> Vec<TokenPrice> {
         self.prices.clone()
     }
 }

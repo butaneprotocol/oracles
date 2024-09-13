@@ -1,21 +1,25 @@
 use std::{
+    collections::BTreeMap,
     sync::Arc,
     time::{Duration, SystemTime},
 };
 
 use anyhow::Result;
 use dashmap::DashMap;
-use num_bigint::BigUint;
-use num_integer::Integer;
+use gema::GemaCalculator;
+use num_bigint::{BigInt, BigUint};
+use num_integer::Integer as _;
+use num_rational::BigRational;
+use num_traits::{One as _, Signed as _, ToPrimitive as _};
 use persistence::TokenPricePersistence;
-use rust_decimal::{prelude::ToPrimitive, Decimal};
-use tokio::{sync::watch::Sender, task::JoinSet, time::sleep};
+use tokio::{sync::watch, task::JoinSet, time::sleep};
 use tracing::{debug, error, warn};
 
 use crate::{
     config::{OracleConfig, SyntheticConfig},
     health::HealthSink,
     price_feed::{IntervalBound, PriceFeed, PriceFeedEntry, Validity},
+    signature_aggregator::{Payload, TimestampedPayloadEntry},
     sources::{
         binance::BinanceSource, bybit::ByBitSource, coinbase::CoinbaseSource,
         fxratesapi::FxRatesApiSource, maestro::MaestroSource, minswap::MinswapSource,
@@ -28,21 +32,32 @@ pub use self::conversions::{TokenPrice, TokenPriceSource};
 use self::{conversions::TokenPriceConverter, source_adapter::SourceAdapter};
 
 mod conversions;
+mod gema;
 mod persistence;
 mod source_adapter;
+mod utils;
+
+struct PreviousPriceFeed {
+    timestamp: SystemTime,
+    prices: Vec<BigRational>,
+}
 
 pub struct PriceAggregator {
-    feed_tx: Arc<Sender<Vec<PriceFeedEntry>>>,
-    audit_tx: Arc<Sender<Vec<TokenPrice>>>,
-    sources: Option<Vec<SourceAdapter>>,
+    feed_sink: watch::Sender<Vec<PriceFeedEntry>>,
+    audit_sink: watch::Sender<Vec<TokenPrice>>,
+    payload_source: watch::Receiver<Payload>,
+    price_sources: Option<Vec<SourceAdapter>>,
+    previous_prices: BTreeMap<String, PreviousPriceFeed>,
     persistence: TokenPricePersistence,
+    gema: GemaCalculator,
     config: Arc<OracleConfig>,
 }
 
 impl PriceAggregator {
     pub fn new(
-        feed_tx: Sender<Vec<PriceFeedEntry>>,
-        audit_tx: Sender<Vec<TokenPrice>>,
+        feed_sink: watch::Sender<Vec<PriceFeedEntry>>,
+        audit_sink: watch::Sender<Vec<TokenPrice>>,
+        payload_source: watch::Receiver<Payload>,
         config: Arc<OracleConfig>,
     ) -> Result<Self> {
         let mut sources = vec![
@@ -68,10 +83,13 @@ impl PriceAggregator {
             sources.push(SourceAdapter::new(SundaeSwapKupoSource::new(&config)?));
         }
         Ok(Self {
-            feed_tx: Arc::new(feed_tx),
-            audit_tx: Arc::new(audit_tx),
-            sources: Some(sources),
+            feed_sink,
+            audit_sink,
+            payload_source,
+            price_sources: Some(sources),
+            previous_prices: BTreeMap::new(),
             persistence: TokenPricePersistence::new(&config),
+            gema: GemaCalculator::new(config.gema_periods, config.round_duration),
             config,
         })
     }
@@ -79,7 +97,7 @@ impl PriceAggregator {
     pub async fn run(mut self, health: &HealthSink) {
         let mut set = JoinSet::new();
 
-        let sources = self.sources.take().unwrap();
+        let sources = self.price_sources.take().unwrap();
         let price_maps: Vec<_> = sources
             .iter()
             .map(|s| (s.name.clone(), s.get_prices()))
@@ -94,6 +112,7 @@ impl PriceAggregator {
         // Every second, we report the latest values from those price maps.
         set.spawn(async move {
             loop {
+                self.update_previous_prices();
                 self.report(&price_maps).await;
                 sleep(Duration::from_secs(1)).await;
             }
@@ -106,6 +125,37 @@ impl PriceAggregator {
         }
     }
 
+    fn update_previous_prices(&mut self) {
+        let new_payload = {
+            let borrow = self.payload_source.borrow();
+            if !borrow.has_changed() {
+                return;
+            }
+            borrow.clone()
+        };
+        for TimestampedPayloadEntry { timestamp, entry } in new_payload.entries {
+            if self
+                .previous_prices
+                .get(&entry.synthetic)
+                .is_some_and(|e| e.timestamp > timestamp)
+            {
+                continue;
+            }
+            let data = entry.payload.data;
+            let mut numerators = data.collateral_prices;
+            let mut denominator = data.denominator;
+
+            restrict_output_size(&mut numerators, &mut denominator, 512);
+
+            let prices = numerators
+                .into_iter()
+                .map(|n| BigRational::new(n.into(), denominator.clone().into()))
+                .collect();
+            self.previous_prices
+                .insert(entry.synthetic, PreviousPriceFeed { timestamp, prices });
+        }
+    }
+
     async fn report(&mut self, price_maps: &[(String, Arc<DashMap<String, PriceInfo>>)]) {
         let mut source_prices = vec![];
         for (source, price_map) in price_maps {
@@ -114,7 +164,7 @@ impl PriceAggregator {
             }
         }
 
-        let default_prices = self.persistence.previous_prices();
+        let default_prices = self.persistence.saved_prices();
         let converter =
             TokenPriceConverter::new(&source_prices, &default_prices, &self.config.synthetics);
 
@@ -124,10 +174,10 @@ impl PriceAggregator {
             .iter()
             .map(|s| self.compute_payload(s, &converter))
             .collect();
-        self.feed_tx.send_replace(price_feeds);
+        self.feed_sink.send_replace(price_feeds);
 
         let token_values = converter.token_prices();
-        self.audit_tx.send_replace(token_values);
+        self.audit_sink.send_replace(token_values);
 
         self.persistence.save_prices(&converter).await;
     }
@@ -138,24 +188,37 @@ impl PriceAggregator {
         converter: &TokenPriceConverter,
     ) -> PriceFeedEntry {
         let synth_digits = self.get_digits(&synth.name);
-        let prices: Vec<_> = synth
+        let synth_price = converter.value_in_usd(&synth.name);
+
+        let prices: Vec<BigRational> = synth
             .collateral
             .iter()
             .map(|c| {
                 let collateral_digits = self.get_digits(c.as_str());
-                let multiplier = Decimal::new(10i64.pow(synth_digits), 0)
-                    / Decimal::new(10i64.pow(collateral_digits), 0);
                 let p = converter.value_in_usd(c.as_str());
-                p * multiplier
+                let p_scaled = p * BigInt::from(10i64.pow(collateral_digits))
+                    / BigInt::from(10i64.pow(synth_digits));
+                p_scaled / &synth_price
             })
             .collect();
-        let synth_price = converter.value_in_usd(&synth.name);
+
+        // track prices before smoothing, to measure the effect of smoothing
+        for (collateral_name, collateral_price) in synth.collateral.iter().zip(prices.iter()) {
+            let price = collateral_price.to_f64().expect("infallible");
+            debug!(
+                collateral_name,
+                synthetic_name = synth.name,
+                histogram.raw_collateral_price = price,
+                "pre-smoothing price metrics",
+            );
+        }
+
+        // apply GEMA smoothing to the prices we've found this round
+        let prices = self.apply_gema(&synth.name, prices);
 
         // track metrics for the different prices
         for (collateral_name, collateral_price) in synth.collateral.iter().zip(prices.iter()) {
-            let price = (collateral_price / synth_price)
-                .to_f64()
-                .expect("infallible");
+            let price = collateral_price.to_f64().expect("infallible");
             debug!(
                 collateral_name,
                 synthetic_name = synth.name,
@@ -164,7 +227,7 @@ impl PriceAggregator {
             );
         }
 
-        let (collateral_prices, denominator) = normalize(&prices, synth_price);
+        let (collateral_prices, denominator) = normalize(&prices);
         let valid_from = SystemTime::now() - Duration::from_secs(60);
         let valid_to = valid_from + Duration::from_secs(360);
 
@@ -183,6 +246,19 @@ impl PriceAggregator {
         }
     }
 
+    fn apply_gema(&self, synth: &str, prices: Vec<BigRational>) -> Vec<BigRational> {
+        let now = SystemTime::now();
+        let Some(prev_feed) = self.previous_prices.get(synth) else {
+            // We don't have any previous set of prices to reference
+            return prices;
+        };
+        let Ok(time_elapsed) = now.duration_since(prev_feed.timestamp) else {
+            // someone's clock must be extremely messed up
+            return prices;
+        };
+        self.gema.smooth(time_elapsed, &prev_feed.prices, prices)
+    }
+
     fn get_digits(&self, currency: &str) -> u32 {
         if let Some(synth_config) = self.config.synthetics.iter().find(|s| s.name == currency) {
             return self.get_digits(&synth_config.backing_currency);
@@ -194,46 +270,72 @@ impl PriceAggregator {
     }
 }
 
-fn normalize(prices: &[Decimal], denominator: Decimal) -> (Vec<BigUint>, BigUint) {
-    let scale = prices
+fn normalize(prices: &[BigRational]) -> (Vec<BigUint>, BigUint) {
+    assert!(prices.iter().all(|p| p.is_positive()));
+    let denominator = prices.iter().fold(BigInt::one(), |acc, p| acc * p.denom());
+    let normalized_numerators: Vec<_> = prices
         .iter()
-        .fold(denominator.scale(), |acc, p| acc.max(p.scale()));
-    let normalized_prices: Vec<BigUint> = prices
-        .iter()
-        .map(|p| {
-            let res = BigUint::from(p.mantissa() as u128);
-            res * BigUint::from(10u128.pow(scale - p.scale()))
-        })
+        .map(|p| p.numer() * &denominator / p.denom())
         .collect();
-    let normalized_denominator = {
-        let res = BigUint::from(denominator.mantissa() as u128);
-        res * BigUint::from(10u128.pow(scale - denominator.scale()))
-    };
-
-    let gcd = normalized_prices
+    let gcd = normalized_numerators
         .iter()
-        .fold(normalized_denominator.clone(), |acc, el| acc.gcd(el));
+        .fold(denominator.clone(), |acc, n| acc.gcd(n));
+    let mut numerators: Vec<_> = normalized_numerators
+        .into_iter()
+        .map(|n| (n / &gcd).to_biguint().unwrap())
+        .collect();
+    let mut denominator = (denominator / gcd).to_biguint().unwrap();
+    restrict_output_size(&mut numerators, &mut denominator, 1024);
+    (numerators, denominator)
+}
 
-    let collateral_prices = normalized_prices.iter().map(|p| p / gcd.clone()).collect();
-    let denominator = normalized_denominator / gcd;
-    (collateral_prices, denominator)
+fn restrict_output_size(numerators: &mut [BigUint], denominator: &mut BigUint, max_bits: u64) {
+    let bits = numerators
+        .iter()
+        .fold(denominator.bits(), |acc, n| n.bits().max(acc));
+
+    if bits < max_bits {
+        return;
+    }
+    let bits_to_clear = bits - max_bits;
+
+    // when rounding the denominator, bias away from 0
+    let mask_to_clear = (BigUint::one() << bits_to_clear) - BigUint::one();
+    let cleared_any_bits = denominator.clone() & mask_to_clear != BigUint::ZERO;
+    *denominator >>= bits_to_clear;
+    if cleared_any_bits {
+        *denominator |= BigUint::one();
+    }
+
+    // when rounding numerators, bias towards 0
+    for numerator in numerators {
+        *numerator >>= bits_to_clear;
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use rust_decimal::Decimal;
+    use num_bigint::{BigInt, BigUint};
+    use num_rational::BigRational;
+    use num_traits::One as _;
 
-    use super::normalize;
+    use super::{normalize, restrict_output_size};
+
+    fn decimal_rational(value: u128, scale: u32) -> BigRational {
+        let numer = BigInt::from(value);
+        let denom = BigInt::from(10u128).pow(scale);
+        BigRational::new(numer, denom)
+    }
 
     #[test]
     fn normalize_should_not_panic_on_empty_input() {
-        assert_eq!((vec![], 1u128.into()), normalize(&[], Decimal::ONE));
+        assert_eq!((vec![], BigUint::one()), normalize(&[]));
     }
 
     #[test]
     fn normalize_should_compute_gcd() {
-        let prices = [Decimal::new(5526312, 7), Decimal::new(1325517, 6)];
-        let (collateral_prices, denominator) = normalize(&prices, Decimal::ONE);
+        let prices = [decimal_rational(5526312, 7), decimal_rational(1325517, 6)];
+        let (collateral_prices, denominator) = normalize(&prices);
         assert_eq!(
             (
                 vec![2763156u128.into(), 6627585u128.into()],
@@ -244,22 +346,9 @@ mod tests {
     }
 
     #[test]
-    fn normalize_should_include_denominator_in_gcd() {
-        let prices = [Decimal::new(2, 1), Decimal::new(4, 1), Decimal::new(6, 1)];
-        let (collateral_prices, denominator) = normalize(&prices, Decimal::new(7, 0));
-        assert_eq!(
-            (
-                vec![1u128.into(), 2u128.into(), 3u128.into()],
-                35u128.into(),
-            ),
-            (collateral_prices, denominator)
-        );
-    }
-
-    #[test]
     fn normalize_should_normalize_numbers_with_same_decimal_count() {
-        let prices = [Decimal::new(1337, 3), Decimal::new(9001, 3)];
-        let (collateral_prices, denominator) = normalize(&prices, Decimal::ONE);
+        let prices = [decimal_rational(1337, 3), decimal_rational(9001, 3)];
+        let (collateral_prices, denominator) = normalize(&prices);
         assert_eq!(
             (vec![1337u128.into(), 9001u128.into()], 1000u128.into()),
             (collateral_prices, denominator)
@@ -269,14 +358,49 @@ mod tests {
     #[test]
     fn normalize_should_handle_decimals_with_different_scales() {
         let prices = [
-            Decimal::new(2_000, 3),
-            Decimal::new(4_000_000, 6),
-            Decimal::new(6_000_000_000, 9),
+            decimal_rational(2_000, 3),
+            decimal_rational(4_000_000, 6),
+            decimal_rational(6_000_000_000, 9),
         ];
-        let (collateral_prices, denominator) = normalize(&prices, Decimal::ONE);
+        let (collateral_prices, denominator) = normalize(&prices);
         assert_eq!(
             (vec![2u128.into(), 4u128.into(), 6u128.into()], 1u128.into()),
             (collateral_prices, denominator)
         );
+    }
+
+    #[test]
+    fn normalize_should_restrict_output_to_at_most_128_bytes() {
+        let prices = [
+            BigRational::new(BigInt::from(2u128), BigInt::one() << 1024),
+            BigRational::new(BigInt::from(3u128), BigInt::one() << 1024),
+            BigRational::new(BigInt::from(4u128), BigInt::one() << 1024),
+        ];
+        let (collateral_prices, denominator) = normalize(&prices);
+        assert_eq!(
+            (
+                vec![BigUint::one(), BigUint::one(), 2u128.into()],
+                BigUint::one() << 1023,
+            ),
+            (collateral_prices, denominator),
+        );
+    }
+
+    #[test]
+    fn restrict_output_size_should_round_numerator_down_and_denominator_up() {
+        let mut numerators = vec![0b1001u128.into()];
+        let mut denominator = 0b1001u128.into();
+        restrict_output_size(&mut numerators, &mut denominator, 3);
+        assert_eq!(numerators, vec![0b100u128.into()]);
+        assert_eq!(denominator, 0b101u128.into());
+    }
+
+    #[test]
+    fn restrict_output_size_should_not_round_denominator_up_when_only_zeroes_were_truncated() {
+        let mut numerators = vec![0b1001u128.into()];
+        let mut denominator = 0b1000u128.into();
+        restrict_output_size(&mut numerators, &mut denominator, 3);
+        assert_eq!(numerators, vec![0b100u128.into()]);
+        assert_eq!(denominator, 0b100u128.into());
     }
 }

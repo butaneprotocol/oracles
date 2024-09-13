@@ -8,6 +8,8 @@ use minicbor::{
     encode::{self, Write},
     Decode, Decoder, Encode, Encoder,
 };
+use num_bigint::BigInt;
+use num_rational::BigRational;
 
 macro_rules! wrapper {
     ($outer:ident, $inner:ty) => {
@@ -210,5 +212,42 @@ impl<'b, C> Decode<'b, C> for CborDkgRound2Package {
         let bytes: ByteVec = d.decode_with(ctx)?;
         let value = dkg::round2::Package::deserialize(&bytes).map_err(decode::Error::custom)?;
         Ok(Self(value))
+    }
+}
+
+pub struct CborBigRational(BigRational);
+impl From<BigRational> for CborBigRational {
+    fn from(value: BigRational) -> Self {
+        Self(value)
+    }
+}
+impl From<CborBigRational> for BigRational {
+    fn from(value: CborBigRational) -> Self {
+        value.0
+    }
+}
+
+impl<C> Encode<C> for CborBigRational {
+    fn encode<W: Write>(
+        &self,
+        e: &mut minicbor::Encoder<W>,
+        _ctx: &mut C,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        e.array(2)?
+            .bytes(&self.0.numer().to_signed_bytes_le())?
+            .bytes(&self.0.denom().to_signed_bytes_le())?;
+        Ok(())
+    }
+}
+
+impl<'a, C> Decode<'a, C> for CborBigRational {
+    fn decode(
+        d: &mut minicbor::Decoder<'a>,
+        _ctx: &mut C,
+    ) -> Result<Self, minicbor::decode::Error> {
+        let [n_bytes, d_bytes]: [ByteVec; 2] = d.decode()?;
+        let numer = BigInt::from_signed_bytes_le(&n_bytes);
+        let denom = BigInt::from_signed_bytes_le(&d_bytes);
+        Ok(Self(BigRational::new(numer, denom)))
     }
 }

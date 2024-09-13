@@ -4,11 +4,12 @@ use minicbor::{
     data::{Tag, Type},
     decode,
     encode::{self, Write},
-    Decode, Decoder, Encode, Encoder,
+    CborLen, Decode, Decoder, Encode, Encoder,
 };
 use num_bigint::BigUint;
+use num_rational::BigRational;
 use pallas_primitives::conway::{BigInt, Constr, PlutusData};
-use rust_decimal::{prelude::ToPrimitive, Decimal};
+use rust_decimal::prelude::ToPrimitive;
 
 pub fn serialize<T: Into<PlutusData>>(data: T) -> Vec<u8> {
     let plutus: PlutusData = data.into();
@@ -36,11 +37,13 @@ pub struct SignedEntry {
     pub price: f64,
     #[n(1)]
     pub data: SignedPriceFeed,
+    #[n(2)]
+    pub timestamp: Option<SystemTime>,
 }
 
 #[derive(Clone, Debug)]
 pub struct PriceFeedEntry {
-    pub price: Decimal,
+    pub price: BigRational,
     pub data: PriceFeed,
 }
 
@@ -78,6 +81,13 @@ impl<'b, C> Decode<'b, C> for SignedPriceFeed {
         decode_struct_end(d)?;
 
         Ok(SignedPriceFeed { data, signature })
+    }
+}
+impl<C> CborLen<C> for SignedPriceFeed {
+    fn cbor_len(&self, ctx: &mut C) -> usize {
+        let mut bytes = vec![];
+        minicbor::encode_with(self, &mut bytes, ctx).expect("infallible");
+        bytes.len()
     }
 }
 

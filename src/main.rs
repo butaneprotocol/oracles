@@ -55,8 +55,6 @@ impl Node {
         let (price_feed_tx, price_feed_rx) = watch::channel(vec![]);
         let (price_audit_tx, price_audit_rx) = watch::channel(vec![]);
 
-        let price_aggregator = PriceAggregator::new(price_feed_tx, price_audit_tx, config.clone())?;
-
         let (signature_aggregator, payload_source) = if config.consensus {
             SignatureAggregator::consensus(
                 &config,
@@ -68,6 +66,13 @@ impl Node {
         } else {
             SignatureAggregator::single(&config, raft_client, price_feed_rx, leader_rx)?
         };
+
+        let price_aggregator = PriceAggregator::new(
+            price_feed_tx,
+            price_audit_tx,
+            payload_source.clone(),
+            config.clone(),
+        )?;
 
         let api_server = APIServer::new(&config, payload_source.clone(), price_audit_rx);
 

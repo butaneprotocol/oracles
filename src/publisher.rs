@@ -32,7 +32,13 @@ impl Publisher {
         while source.changed().await.is_ok() {
             let payload = {
                 let latest = source.borrow_and_update();
-                let payload = serde_json::to_string(&latest.entries).expect("infallible");
+                let new_entries: Vec<_> = latest
+                    .entries
+                    .iter()
+                    .filter(|e| e.timestamp == latest.timestamp)
+                    .map(|e| e.entry.clone())
+                    .collect();
+                let payload = serde_json::to_string(&new_entries).expect("infallible");
                 if latest.publisher != self.id {
                     info!(%latest.publisher, payload, "someone else is publishing a payload");
                     continue;
