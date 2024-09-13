@@ -13,7 +13,7 @@ use std::{
 use anyhow::Result;
 use consensus_aggregator::ConsensusSignatureAggregator;
 use dashmap::DashMap;
-use minicbor::Encoder;
+use minicbor::{CborLen, Encoder};
 use pallas_primitives::conway::PlutusData;
 use serde::{Serialize, Serializer};
 pub use single_aggregator::SingleSignatureAggregator;
@@ -184,6 +184,13 @@ impl SignatureAggregator {
                     {
                         continue;
                     }
+                    let price_feed_size = entry.data.cbor_len(&mut ()) as u64;
+                    span.in_scope(|| {
+                        debug!(
+                            histogram.price_feed_size = price_feed_size,
+                            synthetic, "price feed size metrics"
+                        );
+                    });
                     latest_entries.insert(
                         synthetic.clone(),
                         TimestampedPayloadEntry {

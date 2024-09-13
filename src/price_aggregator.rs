@@ -190,7 +190,7 @@ impl PriceAggregator {
         let synth_digits = self.get_digits(&synth.name);
         let synth_price = converter.value_in_usd(&synth.name);
 
-        let prices = synth
+        let prices: Vec<BigRational> = synth
             .collateral
             .iter()
             .map(|c| {
@@ -201,6 +201,17 @@ impl PriceAggregator {
                 p_scaled / &synth_price
             })
             .collect();
+
+        // track prices before smoothing, to measure the effect of smoothing
+        for (collateral_name, collateral_price) in synth.collateral.iter().zip(prices.iter()) {
+            let price = collateral_price.to_f64().expect("infallible");
+            debug!(
+                collateral_name,
+                synthetic_name = synth.name,
+                histogram.raw_collateral_price = price,
+                "pre-smoothing price metrics",
+            );
+        }
 
         // apply GEMA smoothing to the prices we've found this round
         let prices = self.apply_gema(&synth.name, prices);

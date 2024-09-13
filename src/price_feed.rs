@@ -4,7 +4,7 @@ use minicbor::{
     data::{Tag, Type},
     decode,
     encode::{self, Write},
-    Decode, Decoder, Encode, Encoder,
+    CborLen, Decode, Decoder, Encode, Encoder,
 };
 use num_bigint::BigUint;
 use num_rational::BigRational;
@@ -81,6 +81,13 @@ impl<'b, C> Decode<'b, C> for SignedPriceFeed {
         decode_struct_end(d)?;
 
         Ok(SignedPriceFeed { data, signature })
+    }
+}
+impl<C> CborLen<C> for SignedPriceFeed {
+    fn cbor_len(&self, ctx: &mut C) -> usize {
+        let mut bytes = vec![];
+        minicbor::encode_with(self, &mut bytes, ctx).expect("infallible");
+        bytes.len()
     }
 }
 
