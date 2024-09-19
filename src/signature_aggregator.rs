@@ -174,6 +174,7 @@ impl SignatureAggregator {
 
             while let Some((publisher, payload)) = payload_source.recv().await {
                 let span = info_span!("publish_entries");
+                let mut updated = BTreeSet::new();
                 // update the payload age monitor now that we have a new payload
                 for entry in &payload.entries {
                     let synthetic = entry.data.data.synthetic.clone();
@@ -184,6 +185,7 @@ impl SignatureAggregator {
                     {
                         continue;
                     }
+                    updated.insert(synthetic.clone());
                     let price_feed_size = entry.data.cbor_len(&mut ()) as u64;
                     span.in_scope(|| {
                         debug!(
@@ -208,11 +210,6 @@ impl SignatureAggregator {
 
                 if publisher == id {
                     // count the number of times we failed to publish some synthetic
-                    let updated: BTreeSet<_> = payload
-                        .entries
-                        .iter()
-                        .map(|e| &e.data.data.synthetic)
-                        .collect();
                     let mut something_failed_too_often = false;
                     for (synthetic, failures) in synthetic_failures.iter_mut() {
                         if updated.contains(synthetic) {
