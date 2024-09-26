@@ -227,7 +227,7 @@ impl PriceAggregator {
             );
         }
 
-        let (collateral_prices, denominator) = normalize(&prices);
+        let (collateral_prices, denominator) = normalize(&prices, self.config.price_precision);
         let valid_from = SystemTime::now() - Duration::from_secs(60);
         let valid_to = valid_from + Duration::from_secs(360);
 
@@ -270,7 +270,7 @@ impl PriceAggregator {
     }
 }
 
-fn normalize(prices: &[BigRational]) -> (Vec<BigUint>, BigUint) {
+fn normalize(prices: &[BigRational], max_bits: u64) -> (Vec<BigUint>, BigUint) {
     assert!(prices.iter().all(|p| p.is_positive()));
     let denominator = prices.iter().fold(BigInt::one(), |acc, p| acc * p.denom());
     let normalized_numerators: Vec<_> = prices
@@ -285,7 +285,7 @@ fn normalize(prices: &[BigRational]) -> (Vec<BigUint>, BigUint) {
         .map(|n| (n / &gcd).to_biguint().unwrap())
         .collect();
     let mut denominator = (denominator / gcd).to_biguint().unwrap();
-    restrict_output_size(&mut numerators, &mut denominator, 1024);
+    restrict_output_size(&mut numerators, &mut denominator, max_bits);
     (numerators, denominator)
 }
 
@@ -329,13 +329,13 @@ mod tests {
 
     #[test]
     fn normalize_should_not_panic_on_empty_input() {
-        assert_eq!((vec![], BigUint::one()), normalize(&[]));
+        assert_eq!((vec![], BigUint::one()), normalize(&[], 1024));
     }
 
     #[test]
     fn normalize_should_compute_gcd() {
         let prices = [decimal_rational(5526312, 7), decimal_rational(1325517, 6)];
-        let (collateral_prices, denominator) = normalize(&prices);
+        let (collateral_prices, denominator) = normalize(&prices, 1024);
         assert_eq!(
             (
                 vec![2763156u128.into(), 6627585u128.into()],
@@ -348,7 +348,7 @@ mod tests {
     #[test]
     fn normalize_should_normalize_numbers_with_same_decimal_count() {
         let prices = [decimal_rational(1337, 3), decimal_rational(9001, 3)];
-        let (collateral_prices, denominator) = normalize(&prices);
+        let (collateral_prices, denominator) = normalize(&prices, 1024);
         assert_eq!(
             (vec![1337u128.into(), 9001u128.into()], 1000u128.into()),
             (collateral_prices, denominator)
@@ -362,7 +362,7 @@ mod tests {
             decimal_rational(4_000_000, 6),
             decimal_rational(6_000_000_000, 9),
         ];
-        let (collateral_prices, denominator) = normalize(&prices);
+        let (collateral_prices, denominator) = normalize(&prices, 1024);
         assert_eq!(
             (vec![2u128.into(), 4u128.into(), 6u128.into()], 1u128.into()),
             (collateral_prices, denominator)
@@ -376,7 +376,7 @@ mod tests {
             BigRational::new(BigInt::from(3u128), BigInt::one() << 1024),
             BigRational::new(BigInt::from(4u128), BigInt::one() << 1024),
         ];
-        let (collateral_prices, denominator) = normalize(&prices);
+        let (collateral_prices, denominator) = normalize(&prices, 1024);
         assert_eq!(
             (
                 vec![BigUint::one(), BigUint::one(), 2u128.into()],
