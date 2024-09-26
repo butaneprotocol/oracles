@@ -6,7 +6,7 @@ timeout_ms: 2000          # How long should we wait before picking a new leader
 network_timeout_ms: 30000 # How long to allow TCP requests to run before timing out
 round_duration_ms: 10000  # How long does it take to run a round?
 gema_periods: 10          # Factor to use for GEMA price smoothing
-price_precision: 64       # How many bits of precision are allowed in prices in the final output?
+price_precision: 512      # How many bits of precision are allowed in prices in the final output?
 consensus: true
 logs:
   json: true
