@@ -1,6 +1,6 @@
 [package]
 name = "oracles"
-version = "0.13.3"
+version = "0.13.4"
 edition = "2021"
 default-run = "oracles"
 description = "Oracles"
