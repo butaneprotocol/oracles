@@ -181,8 +181,9 @@ impl SignatureAggregator {
                     let last_updated = entry.timestamp.unwrap_or(payload.timestamp);
                     if latest_entries
                         .get(&synthetic)
-                        .is_some_and(|e| e.timestamp > last_updated)
+                        .is_some_and(|e| e.timestamp >= last_updated)
                     {
+                        // This isn't actually a NEW payload...
                         continue;
                     }
                     updated.insert(synthetic.clone());
