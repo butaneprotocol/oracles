@@ -76,7 +76,7 @@ impl Node {
 
         let api_server = APIServer::new(&config, payload_source.clone(), price_audit_rx);
 
-        let publisher = Publisher::new(&network.id, payload_source)?;
+        let publisher = Publisher::new(&config, payload_source)?;
 
         Ok(Node {
             api_server,

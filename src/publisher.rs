@@ -5,28 +5,26 @@ use reqwest::Client;
 use tokio::sync::watch;
 use tracing::{info, trace, warn};
 
-use crate::{network::NodeId, signature_aggregator::Payload};
-
-const URL: &str = "https://infra-integration.silver-train-1la.pages.dev/api/updatePrices";
+use crate::{config::OracleConfig, network::NodeId, signature_aggregator::Payload};
 
 pub struct Publisher {
     id: NodeId,
+    url: Option<String>,
     source: watch::Receiver<Payload>,
     client: Client,
 }
 
 impl Publisher {
-    pub fn new(id: &NodeId, source: watch::Receiver<Payload>) -> Result<Self> {
+    pub fn new(config: &OracleConfig, source: watch::Receiver<Payload>) -> Result<Self> {
         Ok(Self {
-            id: id.clone(),
+            id: config.id.clone(),
+            url: config.publish_url.clone(),
             source,
             client: Client::builder().build()?,
         })
     }
 
     pub async fn run(self) {
-        const DEBUG: bool = false;
-
         let mut source = self.source;
         let client = self.client;
         while source.changed().await.is_ok() {
@@ -45,21 +43,23 @@ impl Publisher {
                 }
                 payload
             };
-            info!(payload, "publishing payload");
+            if let Some(url) = &self.url {
+                info!(payload, "publishing payload");
 
-            if !DEBUG {
-                match make_request(&client, payload).await {
+                match make_request(url, &client, payload).await {
                     Ok(res) => trace!("Payload published! {}", res),
                     Err(err) => warn!("Could not publish payload: {}", err),
                 }
+            } else {
+                info!(payload, "final payload (not publishing)");
             }
         }
     }
 }
 
-async fn make_request(client: &Client, payload: String) -> Result<String> {
+async fn make_request(url: &str, client: &Client, payload: String) -> Result<String> {
     let response = client
-        .post(URL)
+        .post(url)
         .header("Content-Type", "application/json")
         .body(payload)
         .timeout(Duration::from_secs(5))
