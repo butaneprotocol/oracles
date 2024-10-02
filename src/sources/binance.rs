@@ -1,9 +1,10 @@
-use std::{collections::BTreeMap, str::FromStr};
+use std::{collections::BTreeMap, str::FromStr, time::Duration};
 
 use anyhow::{anyhow, Result};
 use futures::{future::BoxFuture, FutureExt, SinkExt, StreamExt};
 use rust_decimal::Decimal;
 use serde::Deserialize;
+use tokio::time::timeout;
 use tokio_websockets::{ClientBuilder, Message};
 use tracing::{trace, warn};
 
@@ -57,7 +58,8 @@ impl BinanceSource {
         let (mut stream, _) = ClientBuilder::from_uri(uri).connect().await?;
         trace!("Connected to binance!");
 
-        while let Some(res) = stream.next().await {
+        let connection_timeout = Duration::from_secs(60);
+        while let Ok(Some(res)) = timeout(connection_timeout, stream.next()).await {
             let message = match res {
                 Ok(msg) => msg,
                 Err(error) => {

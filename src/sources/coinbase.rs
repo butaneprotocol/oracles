@@ -1,9 +1,10 @@
-use std::{collections::BTreeMap, str::FromStr};
+use std::{collections::BTreeMap, str::FromStr, time::Duration};
 
 use anyhow::{anyhow, Result};
 use futures::{future::BoxFuture, FutureExt, SinkExt, StreamExt};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use tokio::time::timeout;
 use tokio_websockets::{ClientBuilder, Message};
 use tracing::{trace, warn};
 
@@ -60,7 +61,8 @@ impl CoinbaseSource {
             return Err(anyhow!("Did not receive expected first response"));
         };
 
-        while let Some(result) = stream.next().await {
+        let connection_timeout = Duration::from_secs(60);
+        while let Ok(Some(result)) = timeout(connection_timeout, stream.next()).await {
             // on stream error, just try reconnecting
             let message =
                 result.map_err(|e| anyhow!("Websocket error querying coinbase: {}", e))?;
@@ -76,7 +78,7 @@ impl CoinbaseSource {
             sink.send(price_info)?;
         }
 
-        Ok(())
+        Err(anyhow!("Connection to coinbase closed"))
     }
 
     fn parse_message(&self, message: Message) -> Result<PriceInfo> {
