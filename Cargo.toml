@@ -27,16 +27,16 @@ ed25519-dalek = { version = "2.1" }
 frost-ed25519 = { version = "2.0.0-rc.0", features = ["serialization"] }
 futures = "0.3"
 hex = "0.4.3"
-kupon = { git = "https://github.com/SundaeSwap-finance/kupon", rev = "06dfda3" }
+kupon = { git = "https://github.com/SundaeSwap-finance/kupon", rev = "ccc0b37" }
 minicbor = { version = "0.20", features = ["derive", "std"] }
 minicbor-io = { version = "0.15", features = ["async-io"] }
 num-bigint = "0.4"
 num-integer = "0.1"
 num-rational = "0.4"
 num-traits = "0.2"
-opentelemetry = "0.25"
-opentelemetry-otlp = { version = "0.25", features = ["gzip-tonic", "tls-webpki-roots"] }
-opentelemetry_sdk = { version = "0.25", features = ["rt-tokio"] }
+opentelemetry = "0.26"
+opentelemetry-otlp = { version = "0.26", features = ["gzip-tonic", "tls-webpki-roots"] }
+opentelemetry_sdk = { version = "0.26", features = ["rt-tokio"] }
 pallas-crypto = "0.30"
 pallas-primitives = "0.30"
 rand = "0.8.5"
@@ -50,9 +50,9 @@ tokio-util = { version = "0.7", features = ["full"] }
 tokio-websockets = { version = "0.9", features = ["client", "rustls-webpki-roots", "ring", "rand"] }
 tonic = "0.12"
 tracing = "0.1.40"
-tracing-opentelemetry = "0.26"
+tracing-opentelemetry = "0.27"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-uuid = { version = "1.7.0", features = ["v4"] }
+uuid = { version = "1", features = ["v4"] }
 x25519-dalek = { version = "2" }
 
 [package.metadata.dist]

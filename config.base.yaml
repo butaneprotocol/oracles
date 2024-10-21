@@ -7,7 +7,6 @@ network_timeout_ms: 30000 # How long to allow TCP requests to run before timing 
 round_duration_ms: 10000  # How long does it take to run a round?
 gema_periods: 10          # Factor to use for GEMA price smoothing
 price_precision: 1024     # How many bits of precision are allowed in prices in the final output?
-publish_url: https://infra-integration.silver-train-1la.pages.dev/api/updatePrices
 consensus: true
 logs:
   json: true
