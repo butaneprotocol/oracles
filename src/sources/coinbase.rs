@@ -45,23 +45,25 @@ impl CoinbaseSource {
 
     async fn query_impl(&self, sink: &PriceSink) -> Result<()> {
         trace!("Connecting to coinbase");
+        let connection_timeout = Duration::from_secs(60);
         let uri = URL.try_into()?;
-        let (mut stream, _) = ClientBuilder::from_uri(uri).connect().await?;
+
+        let (mut stream, _) =
+            timeout(connection_timeout, ClientBuilder::from_uri(uri).connect()).await??;
 
         let request = CoinbaseRequest::Subscribe {
             product_ids: self.products.keys().cloned().collect(),
             channels: vec!["ticker".into()],
         };
-        stream.send(request.try_into()?).await?;
+        timeout(connection_timeout, stream.send(request.try_into()?)).await??;
 
-        let Some(first_result) = stream.next().await else {
+        let Some(first_result) = timeout(connection_timeout, stream.next()).await? else {
             return Err(anyhow!("Channel closed without sending a response"));
         };
         let CoinbaseResponse::Subscriptions {} = first_result?.try_into()? else {
             return Err(anyhow!("Did not receive expected first response"));
         };
 
-        let connection_timeout = Duration::from_secs(60);
         while let Ok(Some(result)) = timeout(connection_timeout, stream.next()).await {
             // on stream error, just try reconnecting
             let message =

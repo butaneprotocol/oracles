@@ -7,7 +7,7 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use tokio::{
     select,
-    time::{sleep, Duration},
+    time::{sleep, timeout, Duration},
 };
 use tokio_websockets::{ClientBuilder, Message};
 
@@ -74,8 +74,10 @@ impl ByBitSource {
         let uri = URL.try_into()?;
         let (mut stream, _) = ClientBuilder::from_uri(uri).connect().await?;
 
-        stream
-            .send(
+        let subscribe_timeout = Duration::from_secs(60);
+        timeout(
+            subscribe_timeout,
+            stream.send(
                 ByBitRequest {
                     op: "subscribe".into(),
                     args: self
@@ -85,8 +87,9 @@ impl ByBitSource {
                         .collect(),
                 }
                 .try_into()?,
-            )
-            .await?;
+            ),
+        )
+        .await??;
 
         let (mut ws_sink, mut stream) = stream.split();
 
