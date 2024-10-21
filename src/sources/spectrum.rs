@@ -40,6 +40,7 @@ impl SpectrumSource {
         let spectrum_config = &config.spectrum;
         let client = kupon::Builder::with_endpoint(&spectrum_config.kupo_address)
             .with_retries(spectrum_config.retries)
+            .with_timeout(Duration::from_millis(spectrum_config.timeout_ms))
             .build()?;
         Ok(Self {
             client: Arc::new(client),

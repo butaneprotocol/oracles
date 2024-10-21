@@ -46,6 +46,7 @@ impl SundaeSwapKupoSource {
         let sundae_config = &config.sundaeswap;
         let client = kupon::Builder::with_endpoint(&sundae_config.kupo_address)
             .with_retries(sundae_config.retries)
+            .with_timeout(Duration::from_millis(sundae_config.timeout_ms))
             .build()?;
         Ok(Self {
             client: Arc::new(client),

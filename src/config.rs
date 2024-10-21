@@ -318,6 +318,7 @@ pub struct SundaeSwapConfig {
     pub pools: Vec<Pool>,
     pub max_concurrency: usize,
     pub retries: usize,
+    pub timeout_ms: u64,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -327,6 +328,7 @@ pub struct MinswapConfig {
     pub pools: Vec<Pool>,
     pub max_concurrency: usize,
     pub retries: usize,
+    pub timeout_ms: u64,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -336,6 +338,7 @@ pub struct SpectrumConfig {
     pub pools: Vec<Pool>,
     pub max_concurrency: usize,
     pub retries: usize,
+    pub timeout_ms: u64,
 }
 
 #[derive(Debug, Deserialize, Clone)]
