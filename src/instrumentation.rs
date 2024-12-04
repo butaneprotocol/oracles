@@ -1,13 +1,9 @@
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use opentelemetry::{global, trace::TracerProvider, KeyValue};
-use opentelemetry_otlp::{TonicExporterBuilder, WithExportConfig};
-use opentelemetry_sdk::{
-    metrics,
-    trace::{self, Config},
-    Resource,
-};
+use opentelemetry_otlp::{MetricExporter, SpanExporter, WithExportConfig, WithTonicConfig};
+use opentelemetry_sdk::{metrics, trace, Resource};
 use tonic::{metadata::MetadataMap, transport::ClientTlsConfig};
 use tracing::{Dispatch, Level, Subscriber};
 use tracing_subscriber::{
@@ -82,13 +78,6 @@ fn init_providers(
     endpoint: &str,
     uptrace_dsn: Option<&String>,
 ) -> Result<(trace::TracerProvider, metrics::SdkMeterProvider)> {
-    global::set_error_handler(|error| {
-        let span = tracing::info_span!("opentelemetry_error_handler");
-        span.in_scope(|| {
-            tracing::error!("OpenTelemetry error occurred: {:#}", anyhow::anyhow!(error));
-        });
-    })?;
-
     let resource = Resource::default().merge(&Resource::new([
         KeyValue::new("service.name", name.to_string()),
         KeyValue::new("service.namespace", "oracles"),
@@ -108,9 +97,8 @@ fn init_tracer_provider(
     resource: Resource,
     exporter_provider: &ExporterProvider,
 ) -> Result<trace::TracerProvider> {
-    let provider = opentelemetry_otlp::new_pipeline()
-        .tracing()
-        .with_exporter(exporter_provider.get())
+    let exporter = exporter_provider.span()?;
+    let processor = trace::BatchSpanProcessor::builder(exporter, opentelemetry_sdk::runtime::Tokio)
         .with_batch_config(
             opentelemetry_sdk::trace::BatchConfigBuilder::default()
                 .with_max_queue_size(30000)
@@ -118,8 +106,12 @@ fn init_tracer_provider(
                 .with_scheduled_delay(Duration::from_millis(5000))
                 .build(),
         )
-        .with_trace_config(Config::default().with_resource(resource))
-        .install_batch(opentelemetry_sdk::runtime::Tokio)?;
+        .build();
+
+    let provider = trace::TracerProvider::builder()
+        .with_span_processor(processor)
+        .with_resource(resource)
+        .build();
 
     global::set_tracer_provider(provider.clone());
 
@@ -130,11 +122,13 @@ fn init_meter_provider(
     resource: Resource,
     exporter_provider: &ExporterProvider,
 ) -> Result<metrics::SdkMeterProvider> {
-    let provider = opentelemetry_otlp::new_pipeline()
-        .metrics(opentelemetry_sdk::runtime::Tokio)
-        .with_exporter(exporter_provider.get())
+    let exporter = exporter_provider.metric()?;
+    let reader =
+        metrics::PeriodicReader::builder(exporter, opentelemetry_sdk::runtime::Tokio).build();
+    let provider = metrics::SdkMeterProvider::builder()
+        .with_reader(reader)
         .with_resource(resource)
-        .build()?;
+        .build();
 
     global::set_meter_provider(provider.clone());
 
@@ -157,13 +151,27 @@ impl ExporterProvider {
         })
     }
 
-    fn get(&self) -> TonicExporterBuilder {
-        opentelemetry_otlp::new_exporter()
-            .tonic()
+    fn span(&self) -> Result<SpanExporter> {
+        SpanExporter::builder()
+            .with_tonic()
             .with_compression(opentelemetry_otlp::Compression::Gzip)
             .with_endpoint(&self.endpoint)
             .with_timeout(Duration::from_secs(5))
             .with_tls_config(ClientTlsConfig::new().with_webpki_roots())
             .with_metadata(self.metadata.clone())
+            .build()
+            .context("could not build span exporter")
+    }
+
+    fn metric(&self) -> Result<MetricExporter> {
+        MetricExporter::builder()
+            .with_tonic()
+            .with_compression(opentelemetry_otlp::Compression::Gzip)
+            .with_endpoint(&self.endpoint)
+            .with_timeout(Duration::from_secs(5))
+            .with_tls_config(ClientTlsConfig::new().with_webpki_roots())
+            .with_metadata(self.metadata.clone())
+            .build()
+            .context("could not build metric exporter")
     }
 }

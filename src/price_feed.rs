@@ -1,14 +1,17 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use minicbor::{
-    data::{Tag, Type},
+    data::Type,
     decode,
     encode::{self, Write},
     CborLen, Decode, Decoder, Encode, Encoder,
 };
 use num_bigint::BigUint;
 use num_rational::BigRational;
-use pallas_primitives::conway::{BigInt, Constr, PlutusData};
+use pallas_primitives::{
+    conway::{BigInt, Constr, PlutusData},
+    MaybeIndefArray,
+};
 use rust_decimal::prelude::ToPrimitive;
 
 pub fn serialize<T: Into<PlutusData>>(data: T) -> Vec<u8> {
@@ -102,7 +105,9 @@ pub struct PriceFeed {
 impl From<&PriceFeed> for PlutusData {
     fn from(value: &PriceFeed) -> Self {
         encode_struct(vec![
-            PlutusData::Array(value.collateral_prices.iter().map(encode_bigint).collect()),
+            PlutusData::Array(MaybeIndefArray::Indef(
+                value.collateral_prices.iter().map(encode_bigint).collect(),
+            )),
             PlutusData::BoundedBytes(value.synthetic.as_bytes().to_vec().into()),
             encode_bigint(&value.denominator),
             value.validity.into(),
@@ -291,13 +296,14 @@ fn encode_struct(fields: Vec<PlutusData>) -> PlutusData {
     PlutusData::Constr(Constr {
         tag: CBOR_VARIANT_0,
         any_constructor: None,
-        fields,
+        fields: MaybeIndefArray::Indef(fields),
     })
 }
 
 fn decode_struct_begin(d: &mut Decoder) -> Result<(), decode::Error> {
-    let Tag::Unassigned(CBOR_VARIANT_0) = d.tag()? else {
-        return Err(decode::Error::message("Missing plutus struct tag"));
+    let tag = d.tag()?;
+    if tag.as_u64() != CBOR_VARIANT_0 {
+        return Err(decode::Error::message("Invalid plutus struct tag"));
     };
     d.array()?;
     Ok(())
@@ -314,9 +320,9 @@ fn encode_enum(variant: u64, value: Option<PlutusData>) -> PlutusData {
         tag: CBOR_VARIANT_0 + variant,
         any_constructor: None,
         fields: if let Some(val) = value {
-            vec![val]
+            MaybeIndefArray::Indef(vec![val])
         } else {
-            vec![]
+            MaybeIndefArray::Def(vec![])
         },
     })
 }
@@ -325,8 +331,10 @@ fn decode_enum<'b, C, V: Decode<'b, C>>(
     d: &mut Decoder<'b>,
     ctx: &mut C,
 ) -> Result<(u64, Option<V>), decode::Error> {
-    let Tag::Unassigned(variant) = d.tag()? else {
-        return Err(decode::Error::message("Missing plutus struct tag"));
+    let tag = d.tag()?;
+    let variant = tag.as_u64();
+    if variant < CBOR_VARIANT_0 {
+        return Err(decode::Error::message("Invalid plutus struct tag"));
     };
     let datum = match d.array()? {
         Some(0) => None,

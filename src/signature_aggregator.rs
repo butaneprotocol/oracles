@@ -14,7 +14,7 @@ use anyhow::Result;
 use consensus_aggregator::ConsensusSignatureAggregator;
 use dashmap::DashMap;
 use minicbor::{CborLen, Encoder};
-use pallas_primitives::conway::PlutusData;
+use pallas_primitives::{conway::PlutusData, MaybeIndefArray};
 use serde::{Serialize, Serializer};
 pub use single_aggregator::SingleSignatureAggregator;
 use tokio::{
@@ -297,7 +297,7 @@ fn cbor_encode_feed<S: Serializer>(
     serializer: S,
 ) -> Result<S::Ok, S::Error> {
     let bytes = {
-        let data = PlutusData::Array(vec![(feed).into()]);
+        let data = PlutusData::Array(MaybeIndefArray::Indef(vec![(feed).into()]));
         let mut encoder = Encoder::new(vec![]);
         encoder.encode(data).expect("encoding is infallible");
         encoder.into_writer()
