@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use anyhow::{anyhow, Result};
 use dashmap::DashMap;
-use futures::{FutureExt, SinkExt, StreamExt};
+use futures::{future::BoxFuture, FutureExt, SinkExt, StreamExt};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use tokio::{
@@ -51,10 +51,7 @@ impl Source for ByBitSource {
             .collect()
     }
 
-    fn query<'a>(
-        &'a self,
-        sink: &'a PriceSink,
-    ) -> futures::prelude::future::BoxFuture<anyhow::Result<()>> {
+    fn query<'a>(&'a self, sink: &'a PriceSink) -> BoxFuture<'a, Result<()>> {
         self.query_impl(sink).boxed()
     }
 }

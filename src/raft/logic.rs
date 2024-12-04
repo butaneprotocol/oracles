@@ -243,7 +243,7 @@ impl RaftState {
                             leader.clone_from(current_leader);
                         }
                     };
-                    if !old_voted_for.is_some_and(|id| id == from) {
+                    if old_voted_for.is_none_or(|id| id != from) {
                         // If we're newly voting for someone, reset the election timeout
                         self.last_event = timestamp;
                     }
@@ -302,11 +302,10 @@ impl RaftState {
                             );
                             self.set_status(RaftStatus::Leader { abdicating: false });
                             // Immediately send a heartbeat to make leader election stable
-                            return self
-                                .peers
+                            self.peers
                                 .iter()
                                 .map(|peer| (peer.clone(), RaftMessage::Heartbeat { term: *term }))
-                                .collect();
+                                .collect()
                         } else {
                             vec![]
                         }

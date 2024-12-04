@@ -31,7 +31,7 @@ impl Source for SundaeSwapSource {
         self.pools.iter().map(|p| p.token.clone()).collect()
     }
 
-    fn query<'a>(&'a self, sink: &'a PriceSink) -> BoxFuture<anyhow::Result<()>> {
+    fn query<'a>(&'a self, sink: &'a PriceSink) -> BoxFuture<'a, Result<()>> {
         self.query_impl(sink).boxed()
     }
 }

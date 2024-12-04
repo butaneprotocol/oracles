@@ -39,7 +39,7 @@ impl Source for FxRatesApiSource {
     fn tokens(&self) -> Vec<String> {
         self.currencies.clone()
     }
-    fn query<'a>(&'a self, sink: &'a PriceSink) -> BoxFuture<Result<()>> {
+    fn query<'a>(&'a self, sink: &'a PriceSink) -> BoxFuture<'a, Result<()>> {
         self.query_impl(sink).boxed()
     }
 }

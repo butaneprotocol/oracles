@@ -819,10 +819,10 @@ impl Signer {
             .await
             .context("Could not publish signed result")?;
 
-        if !self
+        if self
             .latest_payload
             .as_ref()
-            .is_some_and(|old| old.timestamp > payload.timestamp)
+            .is_none_or(|old| old.timestamp <= payload.timestamp)
         {
             self.latest_payload = Some(payload);
         }

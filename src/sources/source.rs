@@ -21,5 +21,5 @@ pub trait Source {
         Duration::from_secs(30)
     }
     fn tokens(&self) -> Vec<String>;
-    fn query<'a>(&'a self, sink: &'a PriceSink) -> BoxFuture<Result<()>>;
+    fn query<'a>(&'a self, sink: &'a PriceSink) -> BoxFuture<'a, Result<()>>;
 }

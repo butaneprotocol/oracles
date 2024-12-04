@@ -41,7 +41,7 @@ impl PriceInstrumentation {
     }
 
     pub fn track_prices(&mut self, round: &str, prices: &[PriceFeed]) {
-        if !self.round.as_ref().is_some_and(|r| r == round) {
+        if self.round.as_ref().is_none_or(|r| r != round) {
             return;
         }
         for (key, value) in prices.iter().flat_map(extract_prices_from_feed) {

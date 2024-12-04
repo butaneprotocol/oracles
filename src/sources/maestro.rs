@@ -36,7 +36,7 @@ impl Source for MaestroSource {
         self.tokens.iter().map(|t| t.token.to_string()).collect()
     }
 
-    fn query<'a>(&'a self, sink: &'a PriceSink) -> BoxFuture<Result<()>> {
+    fn query<'a>(&'a self, sink: &'a PriceSink) -> BoxFuture<'a, Result<()>> {
         self.query_impl(sink).boxed()
     }
 }
