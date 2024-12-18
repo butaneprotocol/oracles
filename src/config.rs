@@ -21,6 +21,7 @@ struct RawOracleConfig {
     pub api_port: u16,
     pub network_timeout_ms: u64,
     pub consensus: bool,
+    #[serde(default)]
     pub peers: Vec<RawPeerConfig>,
     pub heartbeat_ms: u64,
     pub timeout_ms: u64,
@@ -250,7 +251,7 @@ pub struct SyntheticConfig {
 pub struct CurrencyConfig {
     pub name: String,
     pub asset_id: Option<String>,
-    pub price: Decimal,
+    pub price: Option<Decimal>,
     pub digits: u32,
 }
 
@@ -374,4 +375,17 @@ pub fn load_config(config_files: &[String]) -> Result<OracleConfig> {
 
 pub fn compute_node_id(public_key: &VerifyingKey) -> NodeId {
     NodeId::new(hex::encode(public_key.as_bytes()))
+}
+
+#[cfg(test)]
+mod tests {
+    use anyhow::Result;
+
+    use super::load_config;
+
+    #[test]
+    fn should_load_default_config_without_errors() -> Result<()> {
+        load_config(&[]).unwrap();
+        Ok(())
+    }
 }

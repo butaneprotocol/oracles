@@ -87,60 +87,44 @@ synthetics:
       - SNEK
 currencies:
   - name: ADA
-    price: 0.33
     digits: 6
   - name: BTC
-    price: 58262
     digits: 8
   - name: BTN
     asset_id: 016be5325fd988fea98ad422fcfd53e5352cacfced5c106a932a35a4.42544e
-    price: 1.001
     digits: 6
   - name: DJED
     asset_id: 8db269c3ec630e06ae29f74bc39edd1f87c819f1056206e879a1cd61.446a65644d6963726f555344
-    price: 1
     digits: 6
   - name: ENCS
     asset_id: 9abf0afd2f236a19f2842d502d0450cbcd9c79f123a9708f96fd9b96.454e4353
-    price: 0.5923
     digits: 6
   - name: EUR
-    price: 1.102912639903575
     digits: 6
   - name: iUSD
     asset_id: f66d78b4a3cb3d37afa0ec36461e51ecbde00f26c8f0a68f94b69880.69555344
-    price: 0.79
     digits: 6
   - name: JPY
-    price: 0.0067741365658039
     digits: 6
   - name: LENFI
     asset_id: 8fef2d34078659493ce161a6c7fba4b56afefa8535296a5743f69587.41414441
-    price: 3.79
     digits: 6
   - name: MIN
     asset_id: 29d222ce763455e3d7a09a665ce554f00ac89d2e99a1a83d267170c6.4d494e
-    price: 0.03457
     digits: 6
   - name: myUSD
     asset_id: 92776616f1f32c65a173392e4410a3d8c39dcf6ef768c73af164779c.4d79555344
-    price: 1
     digits: 6
   - name: POL
-    price: 0.40
     digits: 6
   - name: SNEK
     asset_id: 279c909f348e533da5808898f87f9a14bb2c3dfbbacccd631d927a3f.534e454b
-    price: 0.0007288
     digits: 0
   - name: SOL
-    price: 137.93
     digits: 9
   - name: USD
-    price: 1
     digits: 6
   - name: USDT
-    price: 1
     digits: 6
 binance:
   tokens:

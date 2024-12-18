@@ -19,7 +19,7 @@ use tokio::{
     task::{JoinError, JoinSet},
     time::sleep,
 };
-use tracing::{info, info_span};
+use tracing::{info, info_span, warn};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -183,7 +183,12 @@ async fn main() -> Result<()> {
     let config = Arc::new(load_config(&args.config_file)?);
 
     let _guard = instrumentation::init_tracing(&config.logs)?;
-    info_span!("init").in_scope(|| info!("Node starting..."));
+    info_span!("init").in_scope(|| {
+        info!("Node starting...");
+        if config.network.peers.is_empty() {
+            warn!("This node has no peers configured.");
+        }
+    });
 
     if config.keygen.enabled {
         dkg::run(&config).await?;
