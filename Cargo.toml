@@ -18,7 +18,7 @@ axum = "0.7"
 bech32 = "0.11"
 chacha20poly1305 = "0.10"
 clap = { version = "4.5", features = ["derive"] }
-config = "0.14"
+config = "0.15"
 chrono = "0.4"
 cron = "0.13"
 dashmap = "6"
@@ -47,7 +47,7 @@ serde = "1"
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["full"] }
-tokio-websockets = { version = "0.9", features = ["client", "rustls-webpki-roots", "ring", "rand"] }
+tokio-websockets = { version = "0.10", features = ["client", "rustls-webpki-roots", "ring", "rand"] }
 tonic = "0.12"
 tracing = "0.1.40"
 tracing-opentelemetry = "0.28"
