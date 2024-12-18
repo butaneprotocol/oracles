@@ -172,7 +172,7 @@ impl PriceAggregator {
             .config
             .synthetics
             .iter()
-            .map(|s| self.compute_payload(s, &converter))
+            .filter_map(|s| self.compute_payload(s, &converter))
             .collect();
         self.feed_sink.send_replace(price_feeds);
 
@@ -186,21 +186,18 @@ impl PriceAggregator {
         &self,
         synth: &SyntheticConfig,
         converter: &TokenPriceConverter,
-    ) -> PriceFeedEntry {
+    ) -> Option<PriceFeedEntry> {
         let synth_digits = self.get_digits(&synth.name);
-        let synth_price = converter.value_in_usd(&synth.name);
+        let synth_price = converter.value_in_usd(&synth.name)?;
 
-        let prices: Vec<BigRational> = synth
-            .collateral
-            .iter()
-            .map(|c| {
-                let collateral_digits = self.get_digits(c.as_str());
-                let p = converter.value_in_usd(c.as_str());
-                let p_scaled = p * BigInt::from(10i64.pow(collateral_digits))
-                    / BigInt::from(10i64.pow(synth_digits));
-                p_scaled / &synth_price
-            })
-            .collect();
+        let mut prices = vec![];
+        for collateral in &synth.collateral {
+            let collateral_digits = self.get_digits(collateral);
+            let p = converter.value_in_usd(collateral)?;
+            let p_scaled = p * BigInt::from(10i64.pow(collateral_digits))
+                / BigInt::from(10i64.pow(synth_digits));
+            prices.push(p_scaled / &synth_price);
+        }
 
         // track prices before smoothing, to measure the effect of smoothing
         for (collateral_name, collateral_price) in synth.collateral.iter().zip(prices.iter()) {
@@ -231,7 +228,7 @@ impl PriceAggregator {
         let valid_from = SystemTime::now() - Duration::from_secs(60);
         let valid_to = valid_from + Duration::from_secs(360);
 
-        PriceFeedEntry {
+        Some(PriceFeedEntry {
             price: synth_price,
             data: PriceFeed {
                 collateral_names: Some(synth.collateral.clone()),
@@ -243,7 +240,7 @@ impl PriceAggregator {
                     upper_bound: IntervalBound::moment(valid_to, false),
                 },
             },
-        }
+        })
     }
 
     fn apply_gema(&self, synth: &str, prices: Vec<BigRational>) -> Vec<BigRational> {

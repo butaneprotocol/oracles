@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use num_bigint::BigInt;
 use num_rational::BigRational;
-use num_traits::{Inv, One};
+use num_traits::{Inv, One, Zero};
 use serde::Serialize;
 
 use crate::{config::SyntheticConfig, sources::source::PriceInfo};
@@ -81,34 +81,36 @@ impl<'a> TokenPriceConverter<'a> {
         Self { prices, synthetics }
     }
 
-    pub fn value_in_usd(&self, token: &str) -> BigRational {
+    pub fn value_in_usd(&self, token: &str) -> Option<BigRational> {
         if token == "USD" {
-            return BigRational::one();
+            return Some(BigRational::one());
         }
 
         // A synthetic has the same value as its backing currency
         if let Some(synthetic) = self.synthetics.get(token) {
-            let value = self.value_in_usd(&synthetic.backing_currency);
-            return if synthetic.invert { value.inv() } else { value };
+            let value = self.value_in_usd(&synthetic.backing_currency)?;
+            return Some(if synthetic.invert { value.inv() } else { value });
         }
 
-        let prices = self
-            .prices
-            .get(token)
-            .filter(|ps| !ps.is_empty())
-            .unwrap_or_else(|| panic!("No price found for {}!", token));
+        let prices = self.prices.get(token).into_iter().flat_map(|p| p.iter());
 
         let mut value = BigRational::new(BigInt::ZERO, BigInt::one());
         let mut reliability = BigRational::new(BigInt::ZERO, BigInt::one());
         for price in prices {
-            let conversion_factor = self.value_in_usd(&price.unit);
+            let Some(conversion_factor) = self.value_in_usd(&price.unit) else {
+                continue;
+            };
             for source in &price.sources {
                 value += &source.value * &conversion_factor * &source.reliability;
                 reliability += &source.reliability;
             }
         }
 
-        value / reliability
+        if reliability.is_zero() {
+            None
+        } else {
+            Some(value / reliability)
+        }
     }
 
     pub fn token_prices(&self) -> Vec<TokenPrice> {
@@ -186,7 +188,7 @@ mod tests {
         let source_prices = vec![];
         let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
 
-        assert_eq!(converter.value_in_usd("ADA"), decimal_rational(6, 1));
+        assert_eq!(converter.value_in_usd("ADA"), Some(decimal_rational(6, 1)));
     }
 
     #[test]
@@ -203,7 +205,10 @@ mod tests {
         )];
         let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
 
-        assert_eq!(converter.value_in_usd("BTC"), decimal_rational(60000, 0));
+        assert_eq!(
+            converter.value_in_usd("BTC"),
+            Some(decimal_rational(60000, 0))
+        );
     }
 
     #[test]
@@ -231,7 +236,10 @@ mod tests {
         ];
         let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
 
-        assert_eq!(converter.value_in_usd("BTC"), decimal_rational(75000, 0));
+        assert_eq!(
+            converter.value_in_usd("BTC"),
+            Some(decimal_rational(75000, 0))
+        );
     }
 
     #[test]
@@ -259,7 +267,10 @@ mod tests {
         ];
         let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
 
-        assert_eq!(converter.value_in_usd("BTC"), decimal_rational(175, 0));
+        assert_eq!(
+            converter.value_in_usd("BTC"),
+            Some(decimal_rational(175, 0))
+        );
     }
 
     #[test]
@@ -276,7 +287,10 @@ mod tests {
         )];
         let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
 
-        assert_eq!(converter.value_in_usd("LENFI"), decimal_rational(6000, 0));
+        assert_eq!(
+            converter.value_in_usd("LENFI"),
+            Some(decimal_rational(6000, 0))
+        );
     }
 
     #[test]
@@ -304,7 +318,10 @@ mod tests {
         ];
         let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
 
-        assert_eq!(converter.value_in_usd("LENFI"), decimal_rational(3000, 0));
+        assert_eq!(
+            converter.value_in_usd("LENFI"),
+            Some(decimal_rational(3000, 0))
+        );
     }
 
     #[test]
@@ -321,7 +338,10 @@ mod tests {
         )];
         let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
 
-        assert_eq!(converter.value_in_usd("BTC"), decimal_rational(5000, 0));
+        assert_eq!(
+            converter.value_in_usd("BTC"),
+            Some(decimal_rational(5000, 0))
+        );
     }
 
     #[test]
@@ -349,7 +369,10 @@ mod tests {
         ];
         let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
 
-        assert_eq!(converter.value_in_usd("BTC"), decimal_rational(5025, 0));
+        assert_eq!(
+            converter.value_in_usd("BTC"),
+            Some(decimal_rational(5025, 0))
+        );
     }
 
     #[test]
@@ -386,7 +409,10 @@ mod tests {
         ];
         let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
 
-        assert_eq!(converter.value_in_usd("BTC"), decimal_rational(50125, 1));
+        assert_eq!(
+            converter.value_in_usd("BTC"),
+            Some(decimal_rational(50125, 1))
+        );
     }
 
     #[test]
@@ -403,7 +429,10 @@ mod tests {
         )];
         let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
 
-        assert_eq!(converter.value_in_usd("BTCb"), decimal_rational(9001, 0));
+        assert_eq!(
+            converter.value_in_usd("BTCb"),
+            Some(decimal_rational(9001, 0))
+        );
     }
 
     #[test]
@@ -421,7 +450,10 @@ mod tests {
         let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
 
         // SOL is 4, so SOLp is 1/4
-        assert_eq!(converter.value_in_usd("SOLp"), decimal_rational(25, 2));
+        assert_eq!(
+            converter.value_in_usd("SOLp"),
+            Some(decimal_rational(25, 2))
+        );
     }
 
     #[test]
