@@ -150,10 +150,12 @@ binance:
     - token: BTC
       unit: USDT
       stream: btcusdt@ticker
-    # Binance POL pool won't exist until 2024-09-13
-    #- token: POL
-    #  unit: USDT
-    #  stream: polusdt@ticker
+    - token: EUR
+      unit: USDT
+      stream: eurusdt@ticker
+    - token: POL
+      unit: USDT
+      stream: polusdt@ticker
     - token: SOL
       unit: USDT
       stream: solusdt@ticker
@@ -217,12 +219,21 @@ sundaeswap:
     - token: BTN
       unit: ADA
       asset_id: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b.000de1408e76c60dd3cbccdf8af264e560686078f05345d96d90c4af19c6c4f6
+    - token: DJED
+      unit: ADA
+      asset_id: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b.000de140d1796f9ae86bab5cba32798ffc0ff58e88979f69df61ebd575d49659
     - token: ENCS
       unit: ADA
       asset_id: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b.000de1403d59c9a766909da1c3cda90e73a9582025b17d7eb0be44cbd8b2dadd
     - token: iUSD
       unit: ADA
       asset_id: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b.000de140c7ef237f227542a0c8930d37911491c56a341fdef8437e0f21d024f8
+    - token: LENFI
+      unit: ADA
+      asset_id: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b.000de140552692cff4b4e31a240d07a7b2c9968db940a3cd6db18bdcee8a3973
+    - token: MIN
+      unit: ADA
+      asset_id: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b.000de140129627c250a35b7db2e11f6b0e0370515ffa99452b549ef586753907
     - token: SNEK
       unit: ADA
       asset_id: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b.000de140cacb7fd5f5b84bf876d40dc60d4991c72112d78d76132b1fb769e6ad
