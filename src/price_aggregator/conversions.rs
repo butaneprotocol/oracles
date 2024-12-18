@@ -152,8 +152,8 @@ mod tests {
         }
     }
 
-    fn make_config() -> (Vec<SyntheticConfig>, Vec<TokenPrice>) {
-        let synthetics = vec![
+    fn make_synthetics() -> Vec<SyntheticConfig> {
+        vec![
             SyntheticConfig {
                 name: "USDb".into(),
                 backing_currency: "USD".into(),
@@ -172,28 +172,50 @@ mod tests {
                 invert: true,
                 collateral: vec![],
             },
-        ];
-        let default_prices = vec![
+        ]
+    }
+
+    fn make_default_prices() -> Vec<TokenPrice> {
+        vec![
             make_default_price("ADA", decimal_rational(6, 1)),
             make_default_price("BTC", decimal_rational(58262, 0)),
             make_default_price("LENFI", decimal_rational(379, 2)),
             make_default_price("USDT", BigRational::one()),
-        ];
-        (synthetics, default_prices)
+        ]
+    }
+
+    #[test]
+    fn value_in_usd_should_return_1_for_usd() {
+        let source_prices = vec![];
+        let default_prices = vec![];
+        let synthetics = make_synthetics();
+        let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
+
+        assert_eq!(converter.value_in_usd("USD"), Some(BigRational::one()));
     }
 
     #[test]
     fn value_in_usd_should_return_defaults() {
-        let (synthetics, default_prices) = make_config();
         let source_prices = vec![];
+        let default_prices = make_default_prices();
+        let synthetics = make_synthetics();
         let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
 
         assert_eq!(converter.value_in_usd("ADA"), Some(decimal_rational(6, 1)));
     }
 
     #[test]
+    fn value_in_usd_should_return_none_when_values_are_missing() {
+        let source_prices = vec![];
+        let default_prices = vec![];
+        let synthetics = make_synthetics();
+        let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
+
+        assert_eq!(converter.value_in_usd("ADA"), None);
+    }
+
+    #[test]
     fn value_in_usd_should_return_value_from_source() {
-        let (synthetics, default_prices) = make_config();
         let source_prices = vec![(
             "Source".into(),
             PriceInfo {
@@ -203,6 +225,8 @@ mod tests {
                 reliability: Decimal::ONE,
             },
         )];
+        let default_prices = vec![];
+        let synthetics = make_synthetics();
         let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
 
         assert_eq!(
@@ -213,7 +237,6 @@ mod tests {
 
     #[test]
     fn value_in_usd_should_average_prices() {
-        let (synthetics, default_prices) = make_config();
         let source_prices = vec![
             (
                 "Word on the street".into(),
@@ -234,6 +257,8 @@ mod tests {
                 },
             ),
         ];
+        let default_prices = vec![];
+        let synthetics = make_synthetics();
         let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
 
         assert_eq!(
@@ -244,7 +269,6 @@ mod tests {
 
     #[test]
     fn value_in_usd_should_weight_prices() {
-        let (synthetics, default_prices) = make_config();
         let source_prices = vec![
             (
                 "Vibes".into(),
@@ -265,6 +289,8 @@ mod tests {
                 },
             ),
         ];
+        let default_prices = vec![];
+        let synthetics = vec![];
         let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
 
         assert_eq!(
@@ -275,7 +301,6 @@ mod tests {
 
     #[test]
     fn value_in_usd_should_convert_prices_in_ada_using_default_ada_price() {
-        let (synthetics, default_prices) = make_config();
         let source_prices = vec![(
             "someone".into(),
             PriceInfo {
@@ -285,6 +310,8 @@ mod tests {
                 reliability: Decimal::ONE,
             },
         )];
+        let default_prices = make_default_prices();
+        let synthetics = make_synthetics();
         let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
 
         assert_eq!(
@@ -294,8 +321,25 @@ mod tests {
     }
 
     #[test]
+    fn value_in_usd_should_not_convert_prices_in_ada_when_ada_price_not_known() {
+        let source_prices = vec![(
+            "someone".into(),
+            PriceInfo {
+                token: "LENFI".into(),
+                unit: "ADA".into(),
+                value: Decimal::new(10000, 0),
+                reliability: Decimal::ONE,
+            },
+        )];
+        let default_prices = vec![];
+        let synthetics = make_synthetics();
+        let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
+
+        assert_eq!(converter.value_in_usd("LENFI"), None);
+    }
+
+    #[test]
     fn value_in_usd_should_convert_prices_in_ada_using_ada_price_from_api() {
-        let (synthetics, default_prices) = make_config();
         let source_prices = vec![
             (
                 "price for ada".into(),
@@ -316,6 +360,8 @@ mod tests {
                 },
             ),
         ];
+        let default_prices = vec![];
+        let synthetics = make_synthetics();
         let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
 
         assert_eq!(
@@ -326,7 +372,6 @@ mod tests {
 
     #[test]
     fn value_in_usd_should_convert_prices_in_usdt_using_default_usdt_price() {
-        let (synthetics, default_prices) = make_config();
         let source_prices = vec![(
             "someone".into(),
             PriceInfo {
@@ -336,6 +381,8 @@ mod tests {
                 reliability: Decimal::ONE,
             },
         )];
+        let default_prices = make_default_prices();
+        let synthetics = make_synthetics();
         let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
 
         assert_eq!(
@@ -345,8 +392,25 @@ mod tests {
     }
 
     #[test]
+    fn value_in_usd_should_not_convert_prices_in_usdt_when_usdt_price_not_known() {
+        let source_prices = vec![(
+            "someone".into(),
+            PriceInfo {
+                token: "BTC".into(),
+                unit: "USDT".into(),
+                value: Decimal::new(5000, 0),
+                reliability: Decimal::ONE,
+            },
+        )];
+        let default_prices = vec![];
+        let synthetics = make_synthetics();
+        let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
+
+        assert_eq!(converter.value_in_usd("BTC"), None);
+    }
+
+    #[test]
     fn value_in_usd_should_convert_prices_in_usdt_using_usdt_price_from_api() {
-        let (synthetics, default_prices) = make_config();
         let source_prices = vec![
             (
                 "price for usdt".into(),
@@ -367,6 +431,8 @@ mod tests {
                 },
             ),
         ];
+        let default_prices = make_default_prices();
+        let synthetics = make_synthetics();
         let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
 
         assert_eq!(
@@ -377,7 +443,6 @@ mod tests {
 
     #[test]
     fn value_in_usd_should_average_prices_in_different_currencies() {
-        let (synthetics, default_prices) = make_config();
         let source_prices = vec![
             (
                 "price for usdt".into(),
@@ -407,6 +472,8 @@ mod tests {
                 },
             ),
         ];
+        let default_prices = vec![];
+        let synthetics = make_synthetics();
         let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
 
         assert_eq!(
@@ -417,7 +484,6 @@ mod tests {
 
     #[test]
     fn value_in_usd_should_return_value_of_underlying_currency_for_synthetics() {
-        let (synthetics, default_prices) = make_config();
         let source_prices = vec![(
             "price for BTC".into(),
             PriceInfo {
@@ -427,6 +493,8 @@ mod tests {
                 reliability: Decimal::ONE,
             },
         )];
+        let default_prices = vec![];
+        let synthetics = make_synthetics();
         let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
 
         assert_eq!(
@@ -437,7 +505,6 @@ mod tests {
 
     #[test]
     fn value_in_usd_should_invert_value_of_underlying_currency_for_solp() {
-        let (synthetics, default_prices) = make_config();
         let source_prices = vec![(
             "price for SOL".into(),
             PriceInfo {
@@ -447,6 +514,8 @@ mod tests {
                 reliability: Decimal::ONE,
             },
         )];
+        let default_prices = vec![];
+        let synthetics = make_synthetics();
         let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
 
         // SOL is 4, so SOLp is 1/4
@@ -458,7 +527,6 @@ mod tests {
 
     #[test]
     fn token_prices_should_include_all_alphabetized_sources() {
-        let (synthetics, default_prices) = make_config();
         let source_prices = vec![
             (
                 "ADA source".into(),
@@ -488,6 +556,8 @@ mod tests {
                 },
             ),
         ];
+        let default_prices = vec![];
+        let synthetics = make_synthetics();
         let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
 
         let prices = converter.token_prices();
@@ -516,8 +586,9 @@ mod tests {
 
     #[test]
     fn token_prices_should_include_defaults_if_no_explicit_prices_were_found() {
-        let (synthetics, default_prices) = make_config();
         let source_prices = vec![];
+        let default_prices = make_default_prices();
+        let synthetics = make_synthetics();
         let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
 
         let prices = converter.token_prices();
@@ -535,5 +606,17 @@ mod tests {
                 },]
             }]
         );
+    }
+
+    #[test]
+    fn token_prices_should_not_include_synthetics_without_prices() {
+        let source_prices = vec![];
+        let default_prices = vec![];
+        let synthetics = make_synthetics();
+        let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
+
+        let prices = converter.token_prices();
+        let lenfi_prices: Vec<_> = prices.into_iter().filter(|p| p.token == "LENFI").collect();
+        assert_eq!(lenfi_prices, vec![]);
     }
 }
