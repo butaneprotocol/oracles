@@ -14,21 +14,32 @@ pub struct PriceInfo {
 }
 
 #[derive(Clone, Debug)]
-pub struct PriceInfoAsOf {
+pub struct PriceInfoSnapshot {
     pub info: PriceInfo,
+    pub name: Option<String>,
     pub as_of: Instant,
 }
 
 #[derive(Clone)]
-pub struct PriceSink(mpsc::UnboundedSender<PriceInfoAsOf>);
+pub struct PriceSink(mpsc::UnboundedSender<PriceInfoSnapshot>);
 impl PriceSink {
-    pub fn new(inner: mpsc::UnboundedSender<PriceInfoAsOf>) -> Self {
+    pub fn new(inner: mpsc::UnboundedSender<PriceInfoSnapshot>) -> Self {
         Self(inner)
     }
 
     pub fn send(&self, info: PriceInfo) -> Result<()> {
-        let message = PriceInfoAsOf {
+        let message = PriceInfoSnapshot {
             info,
+            name: None,
+            as_of: Instant::now(),
+        };
+        Ok(self.0.send(message)?)
+    }
+
+    pub fn send_named(&self, info: PriceInfo, name: &str) -> Result<()> {
+        let message = PriceInfoSnapshot {
+            info,
+            name: Some(name.into()),
             as_of: Instant::now(),
         };
         Ok(self.0.send(message)?)

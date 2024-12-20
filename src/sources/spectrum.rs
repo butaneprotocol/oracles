@@ -10,7 +10,7 @@ use tracing::{warn, Level};
 use crate::config::{HydratedPool, OracleConfig};
 
 use super::{
-    kupo::{get_asset_value, wait_for_sync, MaxConcurrencyFutureSet, MultiPoolPriceSink},
+    kupo::{get_asset_value, wait_for_sync, MaxConcurrencyFutureSet},
     source::{PriceInfo, PriceSink, Source},
 };
 
@@ -102,18 +102,21 @@ impl SpectrumSource {
                     / Decimal::new(token_value as i64, pool.token_digits);
                 let tvl = Decimal::new(token_value as i64 * 2, 0);
 
-                Ok(PriceInfo {
-                    token: pool.pool.token.clone(),
-                    unit: pool.pool.unit.clone(),
-                    value,
-                    reliability: tvl,
-                })
+                sink.send_named(
+                    PriceInfo {
+                        token: pool.pool.token.clone(),
+                        unit: pool.pool.unit.clone(),
+                        value,
+                        reliability: tvl,
+                    },
+                    &pool.pool.asset_id,
+                )?;
+                Ok(())
             });
         }
 
-        let mut sink = MultiPoolPriceSink::new(sink, self.pools.iter().map(|p| &p.pool));
         while let Some(res) = set.next().await {
-            match res.and_then(|price| sink.send(price)) {
+            match res {
                 Err(error) => {
                     // the task ran, but returned an error
                     warn!("error querying spectrum: {}", error);

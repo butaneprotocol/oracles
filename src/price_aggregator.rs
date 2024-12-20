@@ -27,7 +27,7 @@ use crate::{
         fxratesapi::FxRatesApiSource,
         maestro::MaestroSource,
         minswap::MinswapSource,
-        source::{PriceInfo, PriceInfoAsOf},
+        source::{PriceInfo, PriceInfoSnapshot},
         spectrum::SpectrumSource,
         sundaeswap::SundaeSwapSource,
         sundaeswap_kupo::SundaeSwapKupoSource,
@@ -268,7 +268,7 @@ impl PriceAggregator {
 }
 
 struct SourcePriceReporter {
-    price_maps: Vec<(String, Arc<DashMap<String, PriceInfoAsOf>>)>,
+    price_maps: Vec<(String, Arc<DashMap<String, PriceInfoSnapshot>>)>,
     max_age: Duration,
 }
 
@@ -297,6 +297,7 @@ impl SourcePriceReporter {
                     histogram.source_price_age = price_age_in_millis,
                     source,
                     token = price.info.token,
+                    unit = price.info.unit,
                     "source price age metrics"
                 );
                 if price_age > self.max_age {
@@ -304,11 +305,16 @@ impl SourcePriceReporter {
                         price_age_in_millis,
                         source,
                         token = price.info.token,
+                        unit = price.info.unit,
                         "ignoring price from source because it is too old"
                     );
                     continue;
                 }
-                source_prices.push((source.clone(), price.info.clone()));
+                let source_name = match &price.name {
+                    Some(name) => format!("{} ({})", source, name),
+                    None => source.clone(),
+                };
+                source_prices.push((source_name, price.info.clone()));
             }
         }
         source_prices

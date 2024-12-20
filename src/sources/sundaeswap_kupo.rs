@@ -14,9 +14,7 @@ use crate::{
 };
 
 use super::{
-    kupo::{
-        get_asset_value_minus_tx_fee, wait_for_sync, MaxConcurrencyFutureSet, MultiPoolPriceSink,
-    },
+    kupo::{get_asset_value_minus_tx_fee, wait_for_sync, MaxConcurrencyFutureSet},
     source::{PriceSink, Source},
 };
 
@@ -123,18 +121,21 @@ impl SundaeSwapKupoSource {
                     / Decimal::new(token_value as i64, pool.token_digits);
                 let tvl = Decimal::new(token_value as i64 * 2, 0);
 
-                Ok(PriceInfo {
-                    token: pool.pool.token.clone(),
-                    unit: pool.pool.unit.clone(),
-                    value,
-                    reliability: tvl,
-                })
+                sink.send_named(
+                    PriceInfo {
+                        token: pool.pool.token.clone(),
+                        unit: pool.pool.unit.clone(),
+                        value,
+                        reliability: tvl,
+                    },
+                    &pool.pool.asset_id,
+                )?;
+                Ok(())
             });
         }
 
-        let mut sink = MultiPoolPriceSink::new(sink, self.pools.iter().map(|p| &p.pool));
         while let Some(res) = set.next().await {
-            match res.and_then(|price| sink.send(price)) {
+            match res {
                 Err(error) => {
                     // the task ran, but returned an error
                     warn!("error querying sundaeswap: {}", error);
@@ -144,7 +145,6 @@ impl SundaeSwapKupoSource {
                 }
             }
         }
-        sink.flush()?;
 
         Ok(())
     }
