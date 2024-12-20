@@ -80,10 +80,7 @@ impl<'a> MultiPoolPriceSink<'a> {
     pub fn new<I: IntoIterator<Item = &'a Pool>>(sink: &'a PriceSink, pools: I) -> Self {
         let mut pool_counts = HashMap::new();
         for pool in pools {
-            let pair = TokenPair {
-                token: pool.token.clone(),
-                unit: pool.unit.clone(),
-            };
+            let pair = TokenPair::new(&pool.token, &pool.unit);
             *pool_counts.entry(pair).or_default() += 1;
         }
         Self {
@@ -94,10 +91,7 @@ impl<'a> MultiPoolPriceSink<'a> {
     }
 
     pub fn send(&mut self, price: PriceInfo) -> Result<()> {
-        let pair = TokenPair {
-            token: price.token,
-            unit: price.unit,
-        };
+        let pair = TokenPair::new(price.token, price.unit);
         let Some(expected_count) = self.pool_counts.get(&pair).copied() else {
             bail!("unexpected price reported for token pair {:?}", pair);
         };
@@ -122,16 +116,19 @@ impl<'a> MultiPoolPriceSink<'a> {
     }
 
     fn aggregate_and_send(&self, pair: TokenPair, prices: Vec<TokenPrice>) -> Result<()> {
+        if prices.is_empty() {
+            bail!("We are somehow reporting 0 prices");
+        }
         let mut total_value = Decimal::ZERO;
         let mut total_tvl = Decimal::ZERO;
-        for price in prices {
-            total_value += price.value;
+        for price in &prices {
+            total_value += price.value * price.tvl;
             total_tvl += price.tvl;
         }
         self.sink.send(PriceInfo {
             token: pair.token,
             unit: pair.unit,
-            value: total_value,
+            value: total_value / total_tvl,
             reliability: total_tvl,
         })
     }
@@ -141,6 +138,14 @@ impl<'a> MultiPoolPriceSink<'a> {
 struct TokenPair {
     token: String,
     unit: String,
+}
+impl TokenPair {
+    fn new(token: impl Into<String>, unit: impl Into<String>) -> Self {
+        Self {
+            token: token.into(),
+            unit: unit.into(),
+        }
+    }
 }
 
 struct TokenPrice {
@@ -183,5 +188,99 @@ impl<F: Future> MaxConcurrencyFutureSet<F> {
             }
         }
         next
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use anyhow::Result;
+    use rust_decimal::Decimal;
+    use tokio::sync::mpsc;
+
+    use crate::{config::Pool, sources::source::{PriceInfo, PriceInfoAsOf, PriceSink}};
+
+    use super::MultiPoolPriceSink;
+
+    fn make_pool(token: &str, unit: &str) -> Pool {
+        Pool {
+            token: token.into(),
+            unit: unit.into(),
+            credential: "".into(),
+            asset_id: "".into()
+        }
+    }
+
+    fn assert_next_value(rx: &mut mpsc::UnboundedReceiver<PriceInfoAsOf>, value: Option<PriceInfo>) {
+        let info = rx.try_recv().ok().map(|pi| pi.info);
+        assert_eq!(info, value);
+    }
+
+    #[test]
+    fn multipoolpricesink_should_weight_prices_by_tvl() -> Result<()> {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let inner_sink = PriceSink::new(tx);
+
+        let pools = [
+            make_pool("iUSD", "ADA"),
+            make_pool("iUSD", "ADA"),
+        ];
+
+        let mut sink = MultiPoolPriceSink::new(&inner_sink, &pools);
+        sink.send(PriceInfo {
+            token: "iUSD".into(),
+            unit: "ADA".into(),
+            value: Decimal::new(4, 0),
+            reliability: Decimal::new(1, 0),
+        })?;
+        sink.send(PriceInfo {
+            token: "iUSD".into(),
+            unit: "ADA".into(),
+            value: Decimal::new(8, 0),
+            reliability: Decimal::new(3, 0),
+        })?;
+
+        assert_next_value(&mut rx, Some(PriceInfo {
+            token: "iUSD".into(),
+            unit: "ADA".into(),
+            value: Decimal::new(7, 0),
+            reliability: Decimal::new(4, 0),
+        }));
+
+        assert_next_value(&mut rx, None);
+        sink.flush()?;
+        assert_next_value(&mut rx, None);
+
+        Ok(())
+    }
+
+    #[test]
+    fn multipoolpricesink_should_report_prices_when_one_pool_is_missing() -> Result<()> {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let inner_sink = PriceSink::new(tx);
+
+        let pools = [
+            make_pool("iUSD", "ADA"),
+            make_pool("iUSD", "ADA"),
+        ];
+
+        let mut sink = MultiPoolPriceSink::new(&inner_sink, &pools);
+        sink.send(PriceInfo {
+            token: "iUSD".into(),
+            unit: "ADA".into(),
+            value: Decimal::new(4, 0),
+            reliability: Decimal::new(1, 0),
+        })?;
+
+        assert_next_value(&mut rx, None);
+        sink.flush()?;
+        assert_next_value(&mut rx, Some(PriceInfo {
+            token: "iUSD".into(),
+            unit: "ADA".into(),
+            value: Decimal::new(4, 0),
+            reliability: Decimal::new(1, 0),
+        }));
+        assert_next_value(&mut rx, None);
+
+        Ok(())
     }
 }

@@ -5,7 +5,7 @@ use futures::future::BoxFuture;
 use rust_decimal::Decimal;
 use tokio::sync::mpsc;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PriceInfo {
     pub token: String,
     pub unit: String,
