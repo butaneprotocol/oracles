@@ -1,7 +1,7 @@
 use std::{
     collections::BTreeMap,
     sync::Arc,
-    time::{Duration, SystemTime},
+    time::{Duration, Instant, SystemTime},
 };
 
 use anyhow::Result;
@@ -21,9 +21,15 @@ use crate::{
     price_feed::{IntervalBound, PriceFeed, PriceFeedEntry, Validity},
     signature_aggregator::{Payload, TimestampedPayloadEntry},
     sources::{
-        binance::BinanceSource, bybit::ByBitSource, coinbase::CoinbaseSource,
-        fxratesapi::FxRatesApiSource, maestro::MaestroSource, minswap::MinswapSource,
-        source::PriceInfo, spectrum::SpectrumSource, sundaeswap::SundaeSwapSource,
+        binance::BinanceSource,
+        bybit::ByBitSource,
+        coinbase::CoinbaseSource,
+        fxratesapi::FxRatesApiSource,
+        maestro::MaestroSource,
+        minswap::MinswapSource,
+        source::{PriceInfo, PriceInfoAsOf},
+        spectrum::SpectrumSource,
+        sundaeswap::SundaeSwapSource,
         sundaeswap_kupo::SundaeSwapKupoSource,
     },
 };
@@ -98,10 +104,7 @@ impl PriceAggregator {
         let mut set = JoinSet::new();
 
         let sources = self.price_sources.take().unwrap();
-        let price_maps: Vec<_> = sources
-            .iter()
-            .map(|s| (s.name.clone(), s.get_prices()))
-            .collect();
+        let reporter = SourcePriceReporter::new(&self.config, &sources);
 
         // Make each source update its price map asynchronously.
         for source in sources {
@@ -113,7 +116,7 @@ impl PriceAggregator {
         set.spawn(async move {
             loop {
                 self.update_previous_prices();
-                self.report(&price_maps).await;
+                self.report(&reporter.latest_source_prices()).await;
                 sleep(Duration::from_secs(1)).await;
             }
         });
@@ -156,17 +159,10 @@ impl PriceAggregator {
         }
     }
 
-    async fn report(&mut self, price_maps: &[(String, Arc<DashMap<String, PriceInfo>>)]) {
-        let mut source_prices = vec![];
-        for (source, price_map) in price_maps {
-            for price in price_map.iter() {
-                source_prices.push((source.clone(), price.value().clone()));
-            }
-        }
-
+    async fn report(&mut self, source_prices: &[(String, PriceInfo)]) {
         let default_prices = self.persistence.saved_prices();
         let converter =
-            TokenPriceConverter::new(&source_prices, &default_prices, &self.config.synthetics);
+            TokenPriceConverter::new(source_prices, &default_prices, &self.config.synthetics);
 
         let price_feeds = self
             .config
@@ -264,6 +260,38 @@ impl PriceAggregator {
             panic!("Unrecognized currency {}", currency);
         };
         config.digits
+    }
+}
+
+struct SourcePriceReporter {
+    price_maps: Vec<(String, Arc<DashMap<String, PriceInfoAsOf>>)>,
+    max_age: Duration,
+}
+
+impl SourcePriceReporter {
+    fn new(config: &OracleConfig, sources: &[SourceAdapter]) -> Self {
+        let price_maps = sources
+            .iter()
+            .map(|s| (s.name.clone(), s.get_prices()))
+            .collect();
+        let max_age = config.max_source_price_age;
+        Self {
+            price_maps,
+            max_age,
+        }
+    }
+    fn latest_source_prices(&self) -> Vec<(String, PriceInfo)> {
+        let now = Instant::now();
+        let mut source_prices = vec![];
+        for (source, price_map) in &self.price_maps {
+            for price in price_map.iter() {
+                if price.as_of + self.max_age < now {
+                    continue;
+                }
+                source_prices.push((source.clone(), price.info.clone()));
+            }
+        }
+        source_prices
     }
 }
 

@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use futures::future::BoxFuture;
@@ -13,7 +13,27 @@ pub struct PriceInfo {
     pub reliability: Decimal,
 }
 
-pub type PriceSink = mpsc::UnboundedSender<PriceInfo>;
+#[derive(Clone, Debug)]
+pub struct PriceInfoAsOf {
+    pub info: PriceInfo,
+    pub as_of: Instant,
+}
+
+#[derive(Clone)]
+pub struct PriceSink(mpsc::UnboundedSender<PriceInfoAsOf>);
+impl PriceSink {
+    pub fn new(inner: mpsc::UnboundedSender<PriceInfoAsOf>) -> Self {
+        Self(inner)
+    }
+
+    pub fn send(&self, info: PriceInfo) -> Result<()> {
+        let message = PriceInfoAsOf {
+            info,
+            as_of: Instant::now(),
+        };
+        Ok(self.0.send(message)?)
+    }
+}
 
 pub trait Source {
     fn name(&self) -> String;
