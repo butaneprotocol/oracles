@@ -160,7 +160,11 @@ impl PriceAggregator {
     }
 
     async fn report(&mut self, source_prices: &[(String, PriceInfo)]) {
-        let default_prices = self.persistence.saved_prices();
+        let default_prices = if self.config.use_persisted_prices {
+            self.persistence.saved_prices()
+        } else {
+            vec![]
+        };
         let converter =
             TokenPriceConverter::new(source_prices, &default_prices, &self.config.synthetics);
 

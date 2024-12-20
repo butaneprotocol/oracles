@@ -8,6 +8,7 @@ round_duration_ms: 10000        # How long does it take to run a round?
 gema_periods: 10                # Factor to use for GEMA price smoothing
 price_precision: 1024           # How many bits of precision are allowed in prices in the final output?
 max_source_price_age_ms: 120000 # How long should we trust the price reported by a source, before treating it as stale?
+use_persisted_prices: false     # If true, use price data from older rounds when newer data is unavailable.
 consensus: true
 logs:
   json: true
