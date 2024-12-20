@@ -391,7 +391,10 @@ mod tests {
 
     #[test]
     fn should_load_default_config_without_errors() -> Result<()> {
-        load_config(&[]).unwrap();
+        let test_keys_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/test_data/keys");
+        temp_env::with_var("KEYS_DIRECTORY", Some(test_keys_dir), || {
+            load_config(&[]).unwrap();
+        });
         Ok(())
     }
 }
