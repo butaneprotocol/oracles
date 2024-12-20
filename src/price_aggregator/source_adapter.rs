@@ -10,14 +10,14 @@ use tracing::{info_span, instrument, warn, Instrument};
 
 use crate::{
     health::{HealthSink, HealthStatus, Origin},
-    sources::source::{PriceInfoAsOf, PriceSink, Source},
+    sources::source::{PriceInfoSnapshot, PriceSink, Source},
 };
 
 pub struct SourceAdapter {
     pub name: String,
     max_time_without_updates: Duration,
     source: Box<dyn Source + Send + Sync>,
-    prices: Arc<DashMap<String, PriceInfoAsOf>>,
+    prices: Arc<DashMap<String, PriceInfoSnapshot>>,
 }
 
 impl SourceAdapter {
@@ -30,7 +30,7 @@ impl SourceAdapter {
         }
     }
 
-    pub fn get_prices(&self) -> Arc<DashMap<String, PriceInfoAsOf>> {
+    pub fn get_prices(&self) -> Arc<DashMap<String, PriceInfoSnapshot>> {
         self.prices.clone()
     }
 
@@ -66,10 +66,11 @@ impl SourceAdapter {
         let prices = self.prices.clone();
         let update_prices_task = async move {
             // write emitted values into our map
-            while let Some(info_as_of) = rx.recv().await {
-                let info = &info_as_of.info;
-                let as_of = info_as_of.as_of;
-                let span = info_span!("update_price", token = info.token, unit = info.unit);
+            while let Some(snapshot) = rx.recv().await {
+                let info = &snapshot.info;
+                let as_of = snapshot.as_of;
+                let name = snapshot.name.as_ref();
+                let span = info_span!("update_price", token = info.token, unit = info.unit, name);
                 if info.value.is_zero() {
                     span.in_scope(|| warn!("ignoring reported value of 0"));
                     continue;
@@ -79,7 +80,11 @@ impl SourceAdapter {
                     continue;
                 }
                 updated.insert(info.token.clone(), Some(as_of));
-                prices.insert(info.token.clone(), info_as_of);
+                let discriminator = match name {
+                    Some(name) => format!("{}-{}-{}", info.token, info.unit, name),
+                    None => format!("{}-{}", info.token, info.unit),
+                };
+                prices.insert(discriminator, snapshot);
             }
             "Price receiver has closed"
         };

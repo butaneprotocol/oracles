@@ -16,9 +16,8 @@ use super::{
 
 pub struct MinswapSource {
     client: Arc<kupon::Client>,
-    credential: String,
     max_concurrency: usize,
-    pools: Vec<Arc<HydratedPool>>,
+    pools: Vec<HydratedPool>,
 }
 
 impl Source for MinswapSource {
@@ -44,13 +43,8 @@ impl MinswapSource {
             .build()?;
         Ok(Self {
             client: Arc::new(client),
-            credential: minswap_config.credential.clone(),
             max_concurrency: minswap_config.max_concurrency,
-            pools: config
-                .hydrate_pools(&minswap_config.pools)
-                .into_iter()
-                .map(Arc::new)
-                .collect(),
+            pools: config.hydrate_pools(&minswap_config.pools),
         })
     }
 
@@ -68,10 +62,9 @@ impl MinswapSource {
         let mut set = MaxConcurrencyFutureSet::new(self.max_concurrency);
         for pool in &self.pools {
             let client = self.client.clone();
-            let sink = sink.clone();
             let pool = pool.clone();
             let options = MatchOptions::default()
-                .credential(&self.credential)
+                .credential(&pool.pool.credential)
                 .asset_id(&pool.pool.asset_id)
                 .only_unspent();
 
@@ -109,12 +102,15 @@ impl MinswapSource {
                     / Decimal::new(token_value as i64, pool.token_digits);
                 let tvl = Decimal::new(token_value as i64 * 2, 0);
 
-                sink.send(PriceInfo {
-                    token: pool.pool.token.clone(),
-                    unit: pool.pool.unit.clone(),
-                    value,
-                    reliability: tvl,
-                })?;
+                sink.send_named(
+                    PriceInfo {
+                        token: pool.pool.token.clone(),
+                        unit: pool.pool.unit.clone(),
+                        value,
+                        reliability: tvl,
+                    },
+                    &pool.pool.asset_id,
+                )?;
                 Ok(())
             });
         }

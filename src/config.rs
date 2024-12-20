@@ -320,7 +320,6 @@ pub struct MaestroTokenConfig {
 pub struct SundaeSwapConfig {
     pub use_api: bool,
     pub kupo_address: String,
-    pub credential: String,
     pub policy_id: String,
     pub pools: Vec<Pool>,
     pub max_concurrency: usize,
@@ -331,7 +330,6 @@ pub struct SundaeSwapConfig {
 #[derive(Debug, Deserialize, Clone)]
 pub struct MinswapConfig {
     pub kupo_address: String,
-    pub credential: String,
     pub pools: Vec<Pool>,
     pub max_concurrency: usize,
     pub retries: usize,
@@ -341,7 +339,6 @@ pub struct MinswapConfig {
 #[derive(Debug, Deserialize, Clone)]
 pub struct SpectrumConfig {
     pub kupo_address: String,
-    pub credential: String,
     pub pools: Vec<Pool>,
     pub max_concurrency: usize,
     pub retries: usize,
@@ -352,6 +349,7 @@ pub struct SpectrumConfig {
 pub struct Pool {
     pub token: String,
     pub unit: String,
+    pub credential: String,
     pub asset_id: String,
 }
 
