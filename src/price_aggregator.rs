@@ -284,12 +284,28 @@ impl SourcePriceReporter {
             max_age,
         }
     }
+
+    #[tracing::instrument(skip_all)]
     fn latest_source_prices(&self) -> Vec<(String, PriceInfo)> {
         let now = Instant::now();
         let mut source_prices = vec![];
         for (source, price_map) in &self.price_maps {
             for price in price_map.iter() {
-                if price.as_of + self.max_age < now {
+                let price_age = now - price.as_of;
+                let price_age_in_millis = u64::try_from(price_age.as_millis()).unwrap();
+                debug!(
+                    histogram.source_price_age = price_age_in_millis,
+                    source,
+                    token = price.info.token,
+                    "source price age metrics"
+                );
+                if price_age > self.max_age {
+                    warn!(
+                        price_age_in_millis,
+                        source,
+                        token = price.info.token,
+                        "ignoring price from source because it is too old"
+                    );
                     continue;
                 }
                 source_prices.push((source.clone(), price.info.clone()));
