@@ -1,7 +1,7 @@
 use std::{
     collections::BTreeMap,
     sync::Arc,
-    time::{Duration, SystemTime},
+    time::{Duration, Instant, SystemTime},
 };
 
 use anyhow::Result;
@@ -21,9 +21,15 @@ use crate::{
     price_feed::{IntervalBound, PriceFeed, PriceFeedEntry, Validity},
     signature_aggregator::{Payload, TimestampedPayloadEntry},
     sources::{
-        binance::BinanceSource, bybit::ByBitSource, coinbase::CoinbaseSource,
-        fxratesapi::FxRatesApiSource, maestro::MaestroSource, minswap::MinswapSource,
-        source::PriceInfo, spectrum::SpectrumSource, sundaeswap::SundaeSwapSource,
+        binance::BinanceSource,
+        bybit::ByBitSource,
+        coinbase::CoinbaseSource,
+        fxratesapi::FxRatesApiSource,
+        maestro::MaestroSource,
+        minswap::MinswapSource,
+        source::{PriceInfo, PriceInfoAsOf},
+        spectrum::SpectrumSource,
+        sundaeswap::SundaeSwapSource,
         sundaeswap_kupo::SundaeSwapKupoSource,
     },
 };
@@ -98,10 +104,7 @@ impl PriceAggregator {
         let mut set = JoinSet::new();
 
         let sources = self.price_sources.take().unwrap();
-        let price_maps: Vec<_> = sources
-            .iter()
-            .map(|s| (s.name.clone(), s.get_prices()))
-            .collect();
+        let reporter = SourcePriceReporter::new(&self.config, &sources);
 
         // Make each source update its price map asynchronously.
         for source in sources {
@@ -113,7 +116,7 @@ impl PriceAggregator {
         set.spawn(async move {
             loop {
                 self.update_previous_prices();
-                self.report(&price_maps).await;
+                self.report(&reporter.latest_source_prices()).await;
                 sleep(Duration::from_secs(1)).await;
             }
         });
@@ -156,23 +159,20 @@ impl PriceAggregator {
         }
     }
 
-    async fn report(&mut self, price_maps: &[(String, Arc<DashMap<String, PriceInfo>>)]) {
-        let mut source_prices = vec![];
-        for (source, price_map) in price_maps {
-            for price in price_map.iter() {
-                source_prices.push((source.clone(), price.value().clone()));
-            }
-        }
-
-        let default_prices = self.persistence.saved_prices();
+    async fn report(&mut self, source_prices: &[(String, PriceInfo)]) {
+        let default_prices = if self.config.use_persisted_prices {
+            self.persistence.saved_prices()
+        } else {
+            vec![]
+        };
         let converter =
-            TokenPriceConverter::new(&source_prices, &default_prices, &self.config.synthetics);
+            TokenPriceConverter::new(source_prices, &default_prices, &self.config.synthetics);
 
         let price_feeds = self
             .config
             .synthetics
             .iter()
-            .map(|s| self.compute_payload(s, &converter))
+            .filter_map(|s| self.compute_payload(s, &converter))
             .collect();
         self.feed_sink.send_replace(price_feeds);
 
@@ -186,21 +186,18 @@ impl PriceAggregator {
         &self,
         synth: &SyntheticConfig,
         converter: &TokenPriceConverter,
-    ) -> PriceFeedEntry {
+    ) -> Option<PriceFeedEntry> {
         let synth_digits = self.get_digits(&synth.name);
-        let synth_price = converter.value_in_usd(&synth.name);
+        let synth_price = converter.value_in_usd(&synth.name)?;
 
-        let prices: Vec<BigRational> = synth
-            .collateral
-            .iter()
-            .map(|c| {
-                let collateral_digits = self.get_digits(c.as_str());
-                let p = converter.value_in_usd(c.as_str());
-                let p_scaled = p * BigInt::from(10i64.pow(collateral_digits))
-                    / BigInt::from(10i64.pow(synth_digits));
-                p_scaled / &synth_price
-            })
-            .collect();
+        let mut prices = vec![];
+        for collateral in &synth.collateral {
+            let collateral_digits = self.get_digits(collateral);
+            let p = converter.value_in_usd(collateral)?;
+            let p_scaled = p * BigInt::from(10i64.pow(collateral_digits))
+                / BigInt::from(10i64.pow(synth_digits));
+            prices.push(p_scaled / &synth_price);
+        }
 
         // track prices before smoothing, to measure the effect of smoothing
         for (collateral_name, collateral_price) in synth.collateral.iter().zip(prices.iter()) {
@@ -231,7 +228,7 @@ impl PriceAggregator {
         let valid_from = SystemTime::now() - Duration::from_secs(60);
         let valid_to = valid_from + Duration::from_secs(360);
 
-        PriceFeedEntry {
+        Some(PriceFeedEntry {
             price: synth_price,
             data: PriceFeed {
                 collateral_names: Some(synth.collateral.clone()),
@@ -243,7 +240,7 @@ impl PriceAggregator {
                     upper_bound: IntervalBound::moment(valid_to, false),
                 },
             },
-        }
+        })
     }
 
     fn apply_gema(&self, synth: &str, prices: Vec<BigRational>) -> Vec<BigRational> {
@@ -267,6 +264,54 @@ impl PriceAggregator {
             panic!("Unrecognized currency {}", currency);
         };
         config.digits
+    }
+}
+
+struct SourcePriceReporter {
+    price_maps: Vec<(String, Arc<DashMap<String, PriceInfoAsOf>>)>,
+    max_age: Duration,
+}
+
+impl SourcePriceReporter {
+    fn new(config: &OracleConfig, sources: &[SourceAdapter]) -> Self {
+        let price_maps = sources
+            .iter()
+            .map(|s| (s.name.clone(), s.get_prices()))
+            .collect();
+        let max_age = config.max_source_price_age;
+        Self {
+            price_maps,
+            max_age,
+        }
+    }
+
+    #[tracing::instrument(skip_all)]
+    fn latest_source_prices(&self) -> Vec<(String, PriceInfo)> {
+        let now = Instant::now();
+        let mut source_prices = vec![];
+        for (source, price_map) in &self.price_maps {
+            for price in price_map.iter() {
+                let price_age = now - price.as_of;
+                let price_age_in_millis = u64::try_from(price_age.as_millis()).unwrap();
+                debug!(
+                    histogram.source_price_age = price_age_in_millis,
+                    source,
+                    token = price.info.token,
+                    "source price age metrics"
+                );
+                if price_age > self.max_age {
+                    warn!(
+                        price_age_in_millis,
+                        source,
+                        token = price.info.token,
+                        "ignoring price from source because it is too old"
+                    );
+                    continue;
+                }
+                source_prices.push((source.clone(), price.info.clone()));
+            }
+        }
+        source_prices
     }
 }
 

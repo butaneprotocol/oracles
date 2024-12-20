@@ -21,12 +21,15 @@ struct RawOracleConfig {
     pub api_port: u16,
     pub network_timeout_ms: u64,
     pub consensus: bool,
+    #[serde(default)]
     pub peers: Vec<RawPeerConfig>,
     pub heartbeat_ms: u64,
     pub timeout_ms: u64,
     pub round_duration_ms: u64,
     pub gema_periods: usize,
     pub price_precision: u64,
+    pub max_source_price_age_ms: u64,
+    pub use_persisted_prices: bool,
     pub publish_url: Option<String>,
     pub logs: RawLogConfig,
     pub frost_address: Option<String>,
@@ -55,6 +58,8 @@ pub struct OracleConfig {
     pub round_duration: Duration,
     pub gema_periods: usize,
     pub price_precision: u64,
+    pub max_source_price_age: Duration,
+    pub use_persisted_prices: bool,
     pub publish_url: Option<String>,
     pub logs: LogConfig,
     pub frost_address: Option<String>,
@@ -156,6 +161,8 @@ impl TryFrom<RawOracleConfig> for OracleConfig {
             round_duration: Duration::from_millis(raw.round_duration_ms),
             gema_periods: raw.gema_periods,
             price_precision: raw.price_precision,
+            max_source_price_age: Duration::from_millis(raw.max_source_price_age_ms),
+            use_persisted_prices: raw.use_persisted_prices,
             publish_url: raw.publish_url,
             logs,
             frost_address: raw.frost_address,
@@ -250,7 +257,7 @@ pub struct SyntheticConfig {
 pub struct CurrencyConfig {
     pub name: String,
     pub asset_id: Option<String>,
-    pub price: Decimal,
+    pub price: Option<Decimal>,
     pub digits: u32,
 }
 
@@ -374,4 +381,20 @@ pub fn load_config(config_files: &[String]) -> Result<OracleConfig> {
 
 pub fn compute_node_id(public_key: &VerifyingKey) -> NodeId {
     NodeId::new(hex::encode(public_key.as_bytes()))
+}
+
+#[cfg(test)]
+mod tests {
+    use anyhow::Result;
+
+    use super::load_config;
+
+    #[test]
+    fn should_load_default_config_without_errors() -> Result<()> {
+        let test_keys_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/test_data/keys");
+        temp_env::with_var("KEYS_DIRECTORY", Some(test_keys_dir), || {
+            load_config(&[]).unwrap();
+        });
+        Ok(())
+    }
 }

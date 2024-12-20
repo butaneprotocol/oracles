@@ -1,23 +1,23 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 
 use dashmap::DashMap;
 use tokio::{
     select,
     sync::mpsc::unbounded_channel,
-    time::{sleep, Duration, Instant},
+    time::{sleep, Duration},
 };
 use tracing::{info_span, instrument, warn, Instrument};
 
 use crate::{
     health::{HealthSink, HealthStatus, Origin},
-    sources::source::{PriceInfo, Source},
+    sources::source::{PriceInfoAsOf, PriceSink, Source},
 };
 
 pub struct SourceAdapter {
     pub name: String,
     max_time_without_updates: Duration,
     source: Box<dyn Source + Send + Sync>,
-    prices: Arc<DashMap<String, PriceInfo>>,
+    prices: Arc<DashMap<String, PriceInfoAsOf>>,
 }
 
 impl SourceAdapter {
@@ -30,7 +30,7 @@ impl SourceAdapter {
         }
     }
 
-    pub fn get_prices(&self) -> Arc<DashMap<String, PriceInfo>> {
+    pub fn get_prices(&self) -> Arc<DashMap<String, PriceInfoAsOf>> {
         self.prices.clone()
     }
 
@@ -47,9 +47,10 @@ impl SourceAdapter {
         let source = self.source;
         let name = self.name.clone();
         let run_task = async move {
+            let sink = PriceSink::new(tx);
             loop {
                 let span = info_span!("source_query", source = name);
-                if let Err(error) = source.query(&tx).instrument(span.clone()).await {
+                if let Err(error) = source.query(&sink).instrument(span.clone()).await {
                     span.in_scope(|| {
                         warn!(
                             "Error occurred while querying {:?}, retrying: {}",
@@ -65,7 +66,9 @@ impl SourceAdapter {
         let prices = self.prices.clone();
         let update_prices_task = async move {
             // write emitted values into our map
-            while let Some(info) = rx.recv().await {
+            while let Some(info_as_of) = rx.recv().await {
+                let info = &info_as_of.info;
+                let as_of = info_as_of.as_of;
                 let span = info_span!("update_price", token = info.token, unit = info.unit);
                 if info.value.is_zero() {
                     span.in_scope(|| warn!("ignoring reported value of 0"));
@@ -75,8 +78,8 @@ impl SourceAdapter {
                     span.in_scope(|| warn!("ignoring reported value with reliability 0"));
                     continue;
                 }
-                updated.insert(info.token.clone(), Some(Instant::now()));
-                prices.insert(info.token.clone(), info);
+                updated.insert(info.token.clone(), Some(as_of));
+                prices.insert(info.token.clone(), info_as_of);
             }
             "Price receiver has closed"
         };
