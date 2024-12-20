@@ -1,9 +1,8 @@
 use std::{sync::Arc, time::Duration};
 
 use anyhow::{anyhow, Result};
-use dashmap::DashMap;
 use futures::{future::BoxFuture, FutureExt};
-use kupon::{AssetId, MatchOptions};
+use kupon::MatchOptions;
 use pallas_primitives::conway::{BigInt, PlutusData};
 use rust_decimal::Decimal;
 use tokio::time::sleep;
@@ -15,16 +14,17 @@ use crate::{
 };
 
 use super::{
-    kupo::{get_asset_value_minus_tx_fee, wait_for_sync, MaxConcurrencyFutureSet},
+    kupo::{
+        get_asset_value_minus_tx_fee, wait_for_sync, MaxConcurrencyFutureSet, MultiPoolPriceSink,
+    },
     source::{PriceSink, Source},
 };
 
 #[derive(Clone)]
 pub struct SundaeSwapKupoSource {
     client: Arc<kupon::Client>,
-    credential: String,
     max_concurrency: usize,
-    pools: DashMap<AssetId, HydratedPool>,
+    pools: Vec<HydratedPool>,
 }
 
 impl Source for SundaeSwapKupoSource {
@@ -50,13 +50,8 @@ impl SundaeSwapKupoSource {
             .build()?;
         Ok(Self {
             client: Arc::new(client),
-            credential: sundae_config.credential.clone(),
             max_concurrency: sundae_config.max_concurrency,
-            pools: config
-                .hydrate_pools(&sundae_config.pools)
-                .into_iter()
-                .map(|t| (AssetId::from_hex(&t.pool.asset_id), t))
-                .collect(),
+            pools: config.hydrate_pools(&sundae_config.pools),
         })
     }
 
@@ -74,10 +69,9 @@ impl SundaeSwapKupoSource {
         let mut set = MaxConcurrencyFutureSet::new(self.max_concurrency);
         for pool in &self.pools {
             let client = self.client.clone();
-            let sink = sink.clone();
             let pool = pool.clone();
             let options = MatchOptions::default()
-                .credential(&self.credential)
+                .credential(&pool.pool.credential)
                 .asset_id(&pool.pool.asset_id)
                 .only_unspent();
 
@@ -129,18 +123,18 @@ impl SundaeSwapKupoSource {
                     / Decimal::new(token_value as i64, pool.token_digits);
                 let tvl = Decimal::new(token_value as i64 * 2, 0);
 
-                sink.send(PriceInfo {
+                Ok(PriceInfo {
                     token: pool.pool.token.clone(),
                     unit: pool.pool.unit.clone(),
                     value,
                     reliability: tvl,
-                })?;
-                Ok(())
+                })
             });
         }
 
+        let mut sink = MultiPoolPriceSink::new(sink, self.pools.iter().map(|p| &p.pool));
         while let Some(res) = set.next().await {
-            match res {
+            match res.and_then(|price| sink.send(price)) {
                 Err(error) => {
                     // the task ran, but returned an error
                     warn!("error querying sundaeswap: {}", error);
@@ -150,6 +144,7 @@ impl SundaeSwapKupoSource {
                 }
             }
         }
+        sink.flush()?;
 
         Ok(())
     }

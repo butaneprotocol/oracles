@@ -1,9 +1,15 @@
-use std::time::Duration;
+use std::{collections::HashMap, time::Duration};
 
+use anyhow::{bail, Result};
 use futures::{stream::FuturesUnordered, Future, StreamExt};
 use kupon::{AssetId, Client, HealthStatus, Match};
+use rust_decimal::Decimal;
 use tokio::time::sleep;
 use tracing::{debug, warn};
+
+use crate::config::Pool;
+
+use super::source::{PriceInfo, PriceSink};
 
 pub async fn wait_for_sync(client: &Client) {
     let mut last_status = None;
@@ -61,6 +67,85 @@ pub fn get_asset_value_minus_tx_fee(
         Some(token) => matc.value.assets.get(token).copied(),
         None => matc.value.coins.checked_sub(tx_fee),
     }
+}
+
+// a wrapper for PriceSink which aggregates the prices reported by different pools
+pub struct MultiPoolPriceSink<'a> {
+    sink: &'a PriceSink,
+    prices: HashMap<TokenPair, Vec<TokenPrice>>,
+    pool_counts: HashMap<TokenPair, usize>,
+}
+
+impl<'a> MultiPoolPriceSink<'a> {
+    pub fn new<I: IntoIterator<Item = &'a Pool>>(sink: &'a PriceSink, pools: I) -> Self {
+        let mut pool_counts = HashMap::new();
+        for pool in pools {
+            let pair = TokenPair {
+                token: pool.token.clone(),
+                unit: pool.unit.clone(),
+            };
+            *pool_counts.entry(pair).or_default() += 1;
+        }
+        Self {
+            sink,
+            prices: HashMap::new(),
+            pool_counts,
+        }
+    }
+
+    pub fn send(&mut self, price: PriceInfo) -> Result<()> {
+        let pair = TokenPair {
+            token: price.token,
+            unit: price.unit,
+        };
+        let Some(expected_count) = self.pool_counts.get(&pair).copied() else {
+            bail!("unexpected price reported for token pair {:?}", pair);
+        };
+        let prices = self.prices.entry(pair.clone()).or_default();
+        prices.push(TokenPrice {
+            value: price.value,
+            tvl: price.reliability,
+        });
+        if prices.len() == expected_count {
+            self.pool_counts.remove(&pair);
+            let (pair, prices) = self.prices.remove_entry(&pair).unwrap();
+            self.aggregate_and_send(pair, prices)?;
+        }
+        Ok(())
+    }
+
+    pub fn flush(mut self) -> Result<()> {
+        for (pair, prices) in std::mem::take(&mut self.prices) {
+            self.aggregate_and_send(pair, prices)?;
+        }
+        Ok(())
+    }
+
+    fn aggregate_and_send(&self, pair: TokenPair, prices: Vec<TokenPrice>) -> Result<()> {
+        let mut total_value = Decimal::ZERO;
+        let mut total_tvl = Decimal::ZERO;
+        for price in prices {
+            total_value += price.value;
+            total_tvl += price.tvl;
+        }
+        self.sink.send(PriceInfo {
+            token: pair.token,
+            unit: pair.unit,
+            value: total_value,
+            reliability: total_tvl,
+        })
+    }
+}
+
+#[derive(Eq, PartialEq, Hash, Clone, Debug)]
+struct TokenPair {
+    token: String,
+    unit: String,
+}
+
+struct TokenPrice {
+    value: Decimal,
+    tvl: Decimal,
 }
 
 /**
