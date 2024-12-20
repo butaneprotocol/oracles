@@ -235,6 +235,7 @@ sundaeswap:
 minswap:
   kupo_address: http://kupo:1442
   pools:
+    # V1 pools
     - token: BTN
       unit: ADA
       credential: e1317b152faac13426e6a83e06ff88a4d62cce3c1634ab0a5ec13309/*
@@ -267,6 +268,39 @@ minswap:
       unit: ADA
       credential: e1317b152faac13426e6a83e06ff88a4d62cce3c1634ab0a5ec13309/*
       asset_id: 0be55d262b29f564998ff81efe21bdc0022621c12f15af08d0f2ddb1.63f2cbfa5bf8b68828839a2575c8c70f14a32f50ebbfa7c654043269793be896
+    # V2 pools
+    - token: BTN
+      unit: ADA
+      credential: ea07b733d932129c378af627436e7cbc2ef0bf96e0036bb51b3bde6b/*
+      asset_id: f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.1261cced24aaad64f07975f3099c3277b2b7bbb93bd7ca6cce8f289409b58490
+    - token: DJED
+      unit: ADA
+      credential: ea07b733d932129c378af627436e7cbc2ef0bf96e0036bb51b3bde6b/*
+      asset_id: f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.a939812d08cfb6066e17d2914a7272c6b8c0197acdf68157d02c73649cc3efc0
+    - token: ENCS
+      unit: ADA
+      credential: ea07b733d932129c378af627436e7cbc2ef0bf96e0036bb51b3bde6b/*
+      asset_id: f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.3344a7c3b63f032a5706307fa3692109d2ea7dbc6d96b560053eb934c0cf28df
+    - token: iUSD
+      unit: ADA
+      credential: ea07b733d932129c378af627436e7cbc2ef0bf96e0036bb51b3bde6b/*
+      asset_id: f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.452089abb5bf8cc59b678a2cd7b9ee952346c6c0aa1cf27df324310a70d02fc3
+    - token: LENFI
+      unit: ADA
+      credential: ea07b733d932129c378af627436e7cbc2ef0bf96e0036bb51b3bde6b/*
+      asset_id: f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.d5759e269df87a794b58360ad3be9b375498c28792711294a5e86f2e355d20b7
+    - token: MIN
+      unit: ADA
+      credential: ea07b733d932129c378af627436e7cbc2ef0bf96e0036bb51b3bde6b/*
+      asset_id: f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.82e2b1fd27a7712a1a9cf750dfbea1a5778611b20e06dd6a611df7a643f8cb75
+    - token: myUSD
+      unit: ADA
+      credential: ea07b733d932129c378af627436e7cbc2ef0bf96e0036bb51b3bde6b/*
+      asset_id: f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.ec557838bea7c6df770debfc8c7c45bdeeaeefc1757d3586045d59c962b632c5
+    - token: SNEK
+      unit: ADA
+      credential: ea07b733d932129c378af627436e7cbc2ef0bf96e0036bb51b3bde6b/*
+      asset_id: f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.2ffadbb87144e875749122e0bbb9f535eeaa7f5660c6c4a91bcc4121e477f08d
   max_concurrency: 3
   retries: 3
   timeout_ms: 5000
