@@ -9,6 +9,7 @@ use tokio::{
 use tracing::{info_span, instrument, warn, Instrument};
 
 use crate::{
+    config::OracleConfig,
     health::{HealthSink, HealthStatus, Origin},
     sources::source::{PriceInfoSnapshot, PriceSink, Source},
 };
@@ -21,10 +22,10 @@ pub struct SourceAdapter {
 }
 
 impl SourceAdapter {
-    pub fn new<T: Source + Send + Sync + 'static>(source: T) -> Self {
+    pub fn new<T: Source + Send + Sync + 'static>(source: T, config: &OracleConfig) -> Self {
         Self {
             name: source.name(),
-            max_time_without_updates: source.max_time_without_updates(),
+            max_time_without_updates: source.max_time_without_updates(config),
             source: Box::new(source),
             prices: Arc::new(DashMap::new()),
         }

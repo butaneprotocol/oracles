@@ -30,7 +30,7 @@ impl Source for FxRatesApiSource {
     fn name(&self) -> String {
         "FXRatesAPI".into()
     }
-    fn max_time_without_updates(&self) -> Duration {
+    fn max_time_without_updates(&self, _config: &OracleConfig) -> Duration {
         let mut runs = self.schedule.upcoming(Utc);
         let next_run = runs.next().unwrap();
         let next_next_run = runs.next().unwrap();

@@ -5,6 +5,8 @@ use futures::future::BoxFuture;
 use rust_decimal::Decimal;
 use tokio::sync::mpsc;
 
+use crate::config::OracleConfig;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PriceInfo {
     pub token: String,
@@ -48,8 +50,8 @@ impl PriceSink {
 
 pub trait Source {
     fn name(&self) -> String;
-    fn max_time_without_updates(&self) -> Duration {
-        Duration::from_secs(30)
+    fn max_time_without_updates(&self, config: &OracleConfig) -> Duration {
+        config.max_source_price_age
     }
     fn tokens(&self) -> Vec<String>;
     fn query<'a>(&'a self, sink: &'a PriceSink) -> BoxFuture<'a, Result<()>>;

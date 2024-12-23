@@ -67,26 +67,29 @@ impl PriceAggregator {
         config: Arc<OracleConfig>,
     ) -> Result<Self> {
         let mut sources = vec![
-            SourceAdapter::new(BinanceSource::new(&config)),
-            SourceAdapter::new(ByBitSource::new(&config)),
-            SourceAdapter::new(CoinbaseSource::new(&config)),
-            SourceAdapter::new(MinswapSource::new(&config)?),
-            SourceAdapter::new(SpectrumSource::new(&config)?),
+            SourceAdapter::new(BinanceSource::new(&config), &config),
+            SourceAdapter::new(ByBitSource::new(&config), &config),
+            SourceAdapter::new(CoinbaseSource::new(&config), &config),
+            SourceAdapter::new(MinswapSource::new(&config)?, &config),
+            SourceAdapter::new(SpectrumSource::new(&config)?, &config),
         ];
         if let Some(maestro_source) = MaestroSource::new(&config)? {
-            sources.push(SourceAdapter::new(maestro_source));
+            sources.push(SourceAdapter::new(maestro_source, &config));
         } else {
             warn!("Not querying maestro, because no MAESTRO_API_KEY was provided");
         }
         if let Some(fxratesapi_source) = FxRatesApiSource::new(&config)? {
-            sources.push(SourceAdapter::new(fxratesapi_source));
+            sources.push(SourceAdapter::new(fxratesapi_source, &config));
         } else {
             warn!("Not querying FXRatesAPI, because no FXRATESAPI_API_KEY was provided");
         }
         if config.sundaeswap.use_api {
-            sources.push(SourceAdapter::new(SundaeSwapSource::new(&config)?));
+            sources.push(SourceAdapter::new(SundaeSwapSource::new(&config)?, &config));
         } else {
-            sources.push(SourceAdapter::new(SundaeSwapKupoSource::new(&config)?));
+            sources.push(SourceAdapter::new(
+                SundaeSwapKupoSource::new(&config)?,
+                &config,
+            ));
         }
         Ok(Self {
             feed_sink,
