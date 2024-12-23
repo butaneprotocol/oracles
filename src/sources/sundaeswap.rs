@@ -42,6 +42,7 @@ const GQL_QUERY: &str = "\
 query ButaneOracleQuery($ids: [ID!]!) {
     pools {
         byIds(ids: $ids) {
+            id
             assetA {
                 ticker
                 decimals
@@ -120,6 +121,9 @@ impl SundaeSwapSource {
             let Some(token) = pool.asset_b.ticker else {
                 continue;
             };
+            let Some(unit) = pool.asset_a.ticker else {
+                continue;
+            };
 
             let Stats {
                 quantity_a,
@@ -145,12 +149,15 @@ impl SundaeSwapSource {
                 / Decimal::new(token_value, pool.asset_b.decimals);
             let tvl = Decimal::new(token_value * 2, 0);
 
-            sink.send(PriceInfo {
-                token,
-                unit: "ADA".into(),
-                value,
-                reliability: tvl,
-            })?;
+            sink.send_named(
+                PriceInfo {
+                    token,
+                    unit,
+                    value,
+                    reliability: tvl,
+                },
+                &pool.id,
+            )?;
         }
 
         Ok(())
@@ -190,6 +197,7 @@ struct PoolsQuery {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Pool {
+    pub id: String,
     pub asset_a: Asset,
     pub asset_b: Asset,
     pub current: Stats,
