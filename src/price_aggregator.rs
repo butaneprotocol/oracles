@@ -107,7 +107,7 @@ impl PriceAggregator {
         let mut set = JoinSet::new();
 
         let sources = self.price_sources.take().unwrap();
-        let reporter = SourcePriceReporter::new(&self.config, &sources);
+        let reporter = SourcePriceReporter::new(&sources);
 
         // Make each source update its price map asynchronously.
         for source in sources {
@@ -270,29 +270,38 @@ impl PriceAggregator {
     }
 }
 
-struct SourcePriceReporter {
-    price_maps: Vec<(String, Arc<DashMap<String, PriceInfoSnapshot>>)>,
+struct SourcePrices {
+    source: String,
     max_age: Duration,
+    price_map: Arc<DashMap<String, PriceInfoSnapshot>>,
+}
+struct SourcePriceReporter {
+    price_maps: Vec<SourcePrices>,
 }
 
 impl SourcePriceReporter {
-    fn new(config: &OracleConfig, sources: &[SourceAdapter]) -> Self {
+    fn new(sources: &[SourceAdapter]) -> Self {
         let price_maps = sources
             .iter()
-            .map(|s| (s.name.clone(), s.get_prices()))
+            .map(|s| SourcePrices {
+                source: s.name.clone(),
+                max_age: s.max_time_without_updates,
+                price_map: s.get_prices(),
+            })
             .collect();
-        let max_age = config.max_source_price_age;
-        Self {
-            price_maps,
-            max_age,
-        }
+        Self { price_maps }
     }
 
     #[tracing::instrument(skip_all)]
     fn latest_source_prices(&self) -> Vec<(String, PriceInfo)> {
         let now = Instant::now();
         let mut source_prices = vec![];
-        for (source, price_map) in &self.price_maps {
+        for SourcePrices {
+            source,
+            max_age,
+            price_map,
+        } in &self.price_maps
+        {
             for price in price_map.iter() {
                 let price_age = now - price.as_of;
                 let price_age_in_millis = u64::try_from(price_age.as_millis()).unwrap();
@@ -303,9 +312,11 @@ impl SourcePriceReporter {
                     unit = price.info.unit,
                     "source price age metrics"
                 );
-                if price_age > self.max_age {
+                if price_age > *max_age {
+                    let max_age_in_millis = u64::try_from(max_age.as_millis()).unwrap();
                     warn!(
                         price_age_in_millis,
+                        max_age_in_millis,
                         source,
                         token = price.info.token,
                         unit = price.info.unit,

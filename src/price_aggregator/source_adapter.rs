@@ -16,7 +16,7 @@ use crate::{
 
 pub struct SourceAdapter {
     pub name: String,
-    max_time_without_updates: Duration,
+    pub max_time_without_updates: Duration,
     source: Box<dyn Source + Send + Sync>,
     prices: Arc<DashMap<String, PriceInfoSnapshot>>,
 }
