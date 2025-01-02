@@ -170,8 +170,12 @@ impl PriceAggregator {
         } else {
             vec![]
         };
-        let converter =
-            TokenPriceConverter::new(source_prices, &default_prices, &self.config.synthetics);
+        let converter = TokenPriceConverter::new(
+            source_prices,
+            &default_prices,
+            &self.config.synthetics,
+            utils::decimal_to_rational(self.config.max_synthetic_divergence),
+        );
 
         let price_feeds = self
             .config

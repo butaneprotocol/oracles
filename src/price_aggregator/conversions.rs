@@ -41,6 +41,7 @@ impl<'a> TokenPriceConverter<'a> {
         source_prices: &'a [(String, PriceInfo)],
         default_prices: &'a [TokenPrice],
         synthetics: &'a [SyntheticConfig],
+        max_synthetic_divergence: BigRational,
     ) -> Self {
         let synthetics = synthetics.iter().map(|s| (s.name.as_str(), s)).collect();
 
@@ -79,11 +80,10 @@ impl<'a> TokenPriceConverter<'a> {
             prices.entry(&price.token).or_insert(vec![price.clone()]);
         }
 
-        let threshold = BigRational::one() / BigInt::from(10u64);
         Self {
             prices,
             synthetics,
-            threshold,
+            threshold: max_synthetic_divergence,
         }
     }
 
@@ -197,6 +197,10 @@ mod tests {
         BigRational::new(BigInt::from(numer), BigInt::from(denom))
     }
 
+    fn default_threshold() -> BigRational {
+        simple_rational(1, 10)
+    }
+
     fn make_default_price(token: &str, value: BigRational) -> TokenPrice {
         TokenPrice {
             token: token.into(),
@@ -261,7 +265,12 @@ mod tests {
         let source_prices = vec![];
         let default_prices = vec![];
         let synthetics = make_synthetics();
-        let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
+        let converter = TokenPriceConverter::new(
+            &source_prices,
+            &default_prices,
+            &synthetics,
+            default_threshold(),
+        );
 
         assert_eq!(converter.value_in_usd("USD"), Some(BigRational::one()));
     }
@@ -271,7 +280,12 @@ mod tests {
         let source_prices = vec![];
         let default_prices = make_default_prices();
         let synthetics = make_synthetics();
-        let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
+        let converter = TokenPriceConverter::new(
+            &source_prices,
+            &default_prices,
+            &synthetics,
+            default_threshold(),
+        );
 
         assert_eq!(converter.value_in_usd("ADA"), Some(decimal_rational(6, 1)));
     }
@@ -281,7 +295,12 @@ mod tests {
         let source_prices = vec![];
         let default_prices = vec![];
         let synthetics = make_synthetics();
-        let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
+        let converter = TokenPriceConverter::new(
+            &source_prices,
+            &default_prices,
+            &synthetics,
+            default_threshold(),
+        );
 
         assert_eq!(converter.value_in_usd("ADA"), None);
     }
@@ -299,7 +318,12 @@ mod tests {
         )];
         let default_prices = vec![];
         let synthetics = make_synthetics();
-        let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
+        let converter = TokenPriceConverter::new(
+            &source_prices,
+            &default_prices,
+            &synthetics,
+            default_threshold(),
+        );
 
         assert_eq!(
             converter.value_in_usd("BTC"),
@@ -331,7 +355,12 @@ mod tests {
         ];
         let default_prices = vec![];
         let synthetics = make_synthetics();
-        let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
+        let converter = TokenPriceConverter::new(
+            &source_prices,
+            &default_prices,
+            &synthetics,
+            default_threshold(),
+        );
 
         assert_eq!(
             converter.value_in_usd("BTC"),
@@ -363,7 +392,12 @@ mod tests {
         ];
         let default_prices = vec![];
         let synthetics = vec![];
-        let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
+        let converter = TokenPriceConverter::new(
+            &source_prices,
+            &default_prices,
+            &synthetics,
+            default_threshold(),
+        );
 
         assert_eq!(
             converter.value_in_usd("BTC"),
@@ -384,7 +418,12 @@ mod tests {
         )];
         let default_prices = make_default_prices();
         let synthetics = make_synthetics();
-        let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
+        let converter = TokenPriceConverter::new(
+            &source_prices,
+            &default_prices,
+            &synthetics,
+            default_threshold(),
+        );
 
         assert_eq!(
             converter.value_in_usd("LENFI"),
@@ -405,7 +444,12 @@ mod tests {
         )];
         let default_prices = vec![];
         let synthetics = make_synthetics();
-        let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
+        let converter = TokenPriceConverter::new(
+            &source_prices,
+            &default_prices,
+            &synthetics,
+            default_threshold(),
+        );
 
         assert_eq!(converter.value_in_usd("LENFI"), None);
     }
@@ -434,7 +478,12 @@ mod tests {
         ];
         let default_prices = vec![];
         let synthetics = make_synthetics();
-        let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
+        let converter = TokenPriceConverter::new(
+            &source_prices,
+            &default_prices,
+            &synthetics,
+            default_threshold(),
+        );
 
         assert_eq!(
             converter.value_in_usd("LENFI"),
@@ -455,7 +504,12 @@ mod tests {
         )];
         let default_prices = make_default_prices();
         let synthetics = make_synthetics();
-        let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
+        let converter = TokenPriceConverter::new(
+            &source_prices,
+            &default_prices,
+            &synthetics,
+            default_threshold(),
+        );
 
         assert_eq!(
             converter.value_in_usd("BTC"),
@@ -476,7 +530,12 @@ mod tests {
         )];
         let default_prices = vec![];
         let synthetics = make_synthetics();
-        let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
+        let converter = TokenPriceConverter::new(
+            &source_prices,
+            &default_prices,
+            &synthetics,
+            default_threshold(),
+        );
 
         assert_eq!(converter.value_in_usd("BTC"), None);
     }
@@ -505,7 +564,12 @@ mod tests {
         ];
         let default_prices = make_default_prices();
         let synthetics = make_synthetics();
-        let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
+        let converter = TokenPriceConverter::new(
+            &source_prices,
+            &default_prices,
+            &synthetics,
+            default_threshold(),
+        );
 
         assert_eq!(
             converter.value_in_usd("BTC"),
@@ -546,7 +610,12 @@ mod tests {
         ];
         let default_prices = vec![];
         let synthetics = make_synthetics();
-        let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
+        let converter = TokenPriceConverter::new(
+            &source_prices,
+            &default_prices,
+            &synthetics,
+            default_threshold(),
+        );
 
         assert_eq!(
             converter.value_in_usd("BTC"),
@@ -567,7 +636,12 @@ mod tests {
         )];
         let default_prices = vec![];
         let synthetics = make_synthetics();
-        let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
+        let converter = TokenPriceConverter::new(
+            &source_prices,
+            &default_prices,
+            &synthetics,
+            default_threshold(),
+        );
 
         assert_eq!(
             converter.value_in_usd("BTCb"),
@@ -588,7 +662,12 @@ mod tests {
         )];
         let default_prices = vec![];
         let synthetics = make_synthetics();
-        let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
+        let converter = TokenPriceConverter::new(
+            &source_prices,
+            &default_prices,
+            &synthetics,
+            default_threshold(),
+        );
 
         // SOL is 4, so SOLp is 1/4
         assert_eq!(
@@ -618,7 +697,12 @@ mod tests {
         assert!(source_prices.len() <= MULTIFEED_BACKING_CURRENCIES);
         let default_prices = vec![];
         let synthetics = make_synthetics();
-        let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
+        let converter = TokenPriceConverter::new(
+            &source_prices,
+            &default_prices,
+            &synthetics,
+            default_threshold(),
+        );
         assert_eq!(converter.value_in_usd("MULTI"), result);
     }
 
@@ -690,7 +774,12 @@ mod tests {
         ];
         let default_prices = vec![];
         let synthetics = make_synthetics();
-        let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
+        let converter = TokenPriceConverter::new(
+            &source_prices,
+            &default_prices,
+            &synthetics,
+            default_threshold(),
+        );
 
         let prices = converter.token_prices();
         let lenfi_prices: Vec<_> = prices.into_iter().filter(|p| p.token == "LENFI").collect();
@@ -721,7 +810,12 @@ mod tests {
         let source_prices = vec![];
         let default_prices = make_default_prices();
         let synthetics = make_synthetics();
-        let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
+        let converter = TokenPriceConverter::new(
+            &source_prices,
+            &default_prices,
+            &synthetics,
+            default_threshold(),
+        );
 
         let prices = converter.token_prices();
         let lenfi_prices: Vec<_> = prices.into_iter().filter(|p| p.token == "LENFI").collect();
@@ -745,7 +839,12 @@ mod tests {
         let source_prices = vec![];
         let default_prices = vec![];
         let synthetics = make_synthetics();
-        let converter = TokenPriceConverter::new(&source_prices, &default_prices, &synthetics);
+        let converter = TokenPriceConverter::new(
+            &source_prices,
+            &default_prices,
+            &synthetics,
+            default_threshold(),
+        );
 
         let prices = converter.token_prices();
         let lenfi_prices: Vec<_> = prices.into_iter().filter(|p| p.token == "LENFI").collect();
