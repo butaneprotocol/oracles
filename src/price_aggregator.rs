@@ -27,6 +27,7 @@ use crate::{
         fxratesapi::FxRatesApiSource,
         maestro::MaestroSource,
         minswap::MinswapSource,
+        okx::OkxSource,
         source::{PriceInfo, PriceInfoSnapshot},
         spectrum::SpectrumSource,
         sundaeswap::SundaeSwapSource,
@@ -71,6 +72,7 @@ impl PriceAggregator {
             SourceAdapter::new(ByBitSource::new(&config), &config),
             SourceAdapter::new(CoinbaseSource::new(&config), &config),
             SourceAdapter::new(MinswapSource::new(&config)?, &config),
+            SourceAdapter::new(OkxSource::new(&config)?, &config),
             SourceAdapter::new(SpectrumSource::new(&config)?, &config),
         ];
         if let Some(maestro_source) = MaestroSource::new(&config)? {

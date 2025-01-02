@@ -117,6 +117,8 @@ currencies:
   - name: myUSD
     asset_id: 92776616f1f32c65a173392e4410a3d8c39dcf6ef768c73af164779c.4d79555344
     digits: 6
+  - name: PAXG
+    digits: 4
   - name: POL
     digits: 6
   - name: SNEK
@@ -128,6 +130,8 @@ currencies:
     digits: 6
   - name: USDT
     digits: 6
+  - name: XAUt
+    digits: 3
 binance:
   tokens:
     - token: ADA
@@ -139,6 +143,9 @@ binance:
     - token: EUR
       unit: USDT
       stream: eurusdt@ticker
+    - token: PAXG
+      unit: USDT
+      stream: paxgusdt@ticker
     - token: POL
       unit: USDT
       stream: polusdt@ticker
@@ -153,6 +160,9 @@ bybit:
     - token: BTC
       unit: USDT
       stream: BTCUSDT
+    - token: PAXG
+      unit: USDT
+      stream: PAXGUSDT
     - token: POL
       unit: USDT
       stream: POLUSDT
@@ -196,6 +206,11 @@ maestro:
     - token: SNEK
       unit: ADA
       dex: minswap
+okx:
+  tokens:
+    - token: XAUt
+      unit: USDT
+      index: XAUT-USDT
 sundaeswap:
   use_api: false
   kupo_address: http://kupo:1442
