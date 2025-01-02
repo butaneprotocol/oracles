@@ -96,6 +96,17 @@ synthetics:
       - LENFI
       - MIN
       - SNEK
+  - name: MIDAS # TODO: is this the right name? MIDASb?
+    digits: 6   # TODO: confirm this
+    backing_currencies:
+      - PAXG
+      - XAUt
+    collateral:
+      # TODO: need list of real collateral
+      - ADA
+      - USDb
+      - USDs
+      - BTN
 currencies:
   - name: ADA
     digits: 6
