@@ -17,8 +17,9 @@ keygen:
   enabled: false
 synthetics:
   - name: USDb
-    backing_currency: USD
-    invert: false
+    digits: 6
+    backing_currencies:
+      - USD
     collateral:
       - ADA
       - BTN
@@ -27,8 +28,9 @@ synthetics:
       - MIN
       - SNEK
   - name: USDs
-    backing_currency: USD
-    invert: false
+    digits: 6
+    backing_currencies:
+      - USD
     collateral:
       - ADA
       - BTN
@@ -37,24 +39,27 @@ synthetics:
       - iUSD
       - myUSD
   - name: EURb
-    backing_currency: EUR
-    invert: false
+    digits: 6
+    backing_currencies:
+      - EUR
     collateral:
       - ADA
       - USDb
       - USDs
       - BTN
   - name: JPYb
-    backing_currency: JPY
-    invert: false
+    digits: 6
+    backing_currencies:
+      - JPY
     collateral:
       - ADA
       - USDb
       - USDs
       - BTN
   - name: BTCb
-    backing_currency: BTC
-    invert: false
+    digits: 8
+    backing_currencies:
+      - BTC
     collateral:
       - ADA
       - USDb
@@ -65,8 +70,9 @@ synthetics:
       - MIN
       - SNEK
   - name: POLb
-    backing_currency: POL
-    invert: false
+    digits: 6
+    backing_currencies:
+      - POL
     collateral:
       - ADA
       - BTCb
@@ -76,7 +82,9 @@ synthetics:
       - MIN
       - SNEK
   - name: SOLp
-    backing_currency: SOL
+    digits: 9
+    backing_currencies:
+      - SOL
     invert: true
     collateral:
       - ADA
@@ -131,7 +139,7 @@ currencies:
   - name: USDT
     digits: 6
   - name: XAUt
-    digits: 3
+    digits: 6
 binance:
   tokens:
     - token: ADA

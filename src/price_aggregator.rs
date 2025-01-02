@@ -263,7 +263,7 @@ impl PriceAggregator {
 
     fn get_digits(&self, currency: &str) -> u32 {
         if let Some(synth_config) = self.config.synthetics.iter().find(|s| s.name == currency) {
-            return self.get_digits(&synth_config.backing_currency);
+            return synth_config.digits;
         }
         let Some(config) = self.config.currencies.iter().find(|c| c.name == currency) else {
             panic!("Unrecognized currency {}", currency);

@@ -251,8 +251,10 @@ impl TryFrom<RawPeerConfig> for Peer {
 #[derive(Debug, Deserialize)]
 pub struct SyntheticConfig {
     pub name: String,
-    pub backing_currency: String,
+    pub backing_currencies: Vec<String>,
+    #[serde(default)]
     pub invert: bool,
+    pub digits: u32,
     pub collateral: Vec<String>,
 }
 
