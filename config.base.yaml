@@ -96,17 +96,23 @@ synthetics:
       - LENFI
       - MIN
       - SNEK
-  - name: MIDAS # TODO: is this the right name? MIDASb?
-    digits: 6   # TODO: confirm this
+  - name: MIDAS
+    digits: 9
     backing_currencies:
       - PAXG
       - XAUt
     collateral:
-      # TODO: need list of real collateral
       - ADA
-      - USDb
-      - USDs
       - BTN
+      - IAG
+      - SUNDAE
+      - MIN
+      - LQ
+      - SNEK
+      - LENFI
+      - iETH
+      - ENCS
+      - SHEN
 currencies:
   - name: ADA
     digits: 6
@@ -123,6 +129,12 @@ currencies:
     digits: 6
   - name: EUR
     digits: 6
+  - name: IAG
+    asset_id: 5d16cc1a177b5d9ba9cfa9793b07e60f1fb70fea1f8aef064415d114.494147
+    digits: 6
+  - name: iETH
+    asset_id: f66d78b4a3cb3d37afa0ec36461e51ecbde00f26c8f0a68f94b69880.69455448
+    digits: 6
   - name: iUSD
     asset_id: f66d78b4a3cb3d37afa0ec36461e51ecbde00f26c8f0a68f94b69880.69555344
     digits: 6
@@ -130,6 +142,9 @@ currencies:
     digits: 6
   - name: LENFI
     asset_id: 8fef2d34078659493ce161a6c7fba4b56afefa8535296a5743f69587.41414441
+    digits: 6
+  - name: LQ
+    asset_id: da8c30857834c6ae7203935b89278c532b3995245295456f993e1d24.4c51
     digits: 6
   - name: MIN
     asset_id: 29d222ce763455e3d7a09a665ce554f00ac89d2e99a1a83d267170c6.4d494e
@@ -141,11 +156,17 @@ currencies:
     digits: 4
   - name: POL
     digits: 6
+  - name: SHEN
+    asset_id: 8db269c3ec630e06ae29f74bc39edd1f87c819f1056206e879a1cd61.5368656e4d6963726f555344
+    digits: 6
   - name: SNEK
     asset_id: 279c909f348e533da5808898f87f9a14bb2c3dfbbacccd631d927a3f.534e454b
     digits: 0
   - name: SOL
     digits: 9
+  - name: SUNDAE
+    asset_id: 9a9693a9a37912a5097918f97918d15240c92ab729a0b7c4aa144d77.53554e444145
+    digits: 6
   - name: USD
     digits: 6
   - name: USDT
@@ -248,6 +269,14 @@ sundaeswap:
       unit: ADA
       credential: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b/*
       asset_id: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b.000de1403d59c9a766909da1c3cda90e73a9582025b17d7eb0be44cbd8b2dadd
+    - token: IAG
+      unit: ADA
+      credential: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b/*
+      asset_id: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b.000de1406f79e3e55eef82b9d03cf62cc3d4a6d0d03b00bf7b1b43330f829779
+    - token: iETH
+      unit: iUSD
+      credential: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b/*
+      asset_id: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b.000de140608e982a790dc94f980c9828446dff0b0d0330eba21e4b16458b8cd8
     - token: iUSD
       unit: ADA
       credential: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b/*
@@ -256,14 +285,26 @@ sundaeswap:
       unit: ADA
       credential: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b/*
       asset_id: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b.000de140552692cff4b4e31a240d07a7b2c9968db940a3cd6db18bdcee8a3973
+    - token: LQ
+      unit: ADA
+      credential: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b/*
+      asset_id: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b.000de14019cd76d01ecb039aea8915a97e9186b0c2ce9ce56d041aece9862086
     - token: MIN
       unit: ADA
       credential: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b/*
       asset_id: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b.000de140129627c250a35b7db2e11f6b0e0370515ffa99452b549ef586753907
+    - token: SHEN
+      unit: ADA
+      credential: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b/*
+      asset_id: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b.000de140eaab8141f57724a0ebce5525d0836fa574d385b0aa76c9102ab4fb0e
     - token: SNEK
       unit: ADA
       credential: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b/*
       asset_id: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b.000de140cacb7fd5f5b84bf876d40dc60d4991c72112d78d76132b1fb769e6ad
+    - token: SUNDAE
+      unit: ADA
+      credential: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b/*
+      asset_id: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b.000de1402f36866691fa75a9aab66dec99f7cc2d297ca09e34d9ce68cde04773
   max_concurrency: 3
   retries: 3
   timeout_ms: 5000
@@ -283,6 +324,14 @@ minswap:
       unit: ADA
       credential: e1317b152faac13426e6a83e06ff88a4d62cce3c1634ab0a5ec13309/*
       asset_id: 0be55d262b29f564998ff81efe21bdc0022621c12f15af08d0f2ddb1.2324756b8e7e74da8feb879e2f053789363d045e554eaa17d365d1b52f4a9f8c
+    - token: IAG
+      unit: ADA
+      credential: e1317b152faac13426e6a83e06ff88a4d62cce3c1634ab0a5ec13309/*
+      asset_id: 0be55d262b29f564998ff81efe21bdc0022621c12f15af08d0f2ddb1.bdfd144032f09ad980b8d205fef0737c2232b4e90a5d34cc814d0ef687052400
+    - token: iETH
+      unit: ADA
+      credential: e1317b152faac13426e6a83e06ff88a4d62cce3c1634ab0a5ec13309/*
+      asset_id: 0be55d262b29f564998ff81efe21bdc0022621c12f15af08d0f2ddb1.c42ff277661b6475ae0bcf82e61efde8cea1eccec0c451648e39798e77630e66
     - token: iUSD
       unit: ADA
       credential: e1317b152faac13426e6a83e06ff88a4d62cce3c1634ab0a5ec13309/*
@@ -291,6 +340,10 @@ minswap:
       unit: ADA
       credential: e1317b152faac13426e6a83e06ff88a4d62cce3c1634ab0a5ec13309/*
       asset_id: 0be55d262b29f564998ff81efe21bdc0022621c12f15af08d0f2ddb1.39b9b709ac8605fc82116a2efc308181ba297c11950f0f350001e28f0e50868b
+    - token: LQ
+      unit: ADA
+      credential: e1317b152faac13426e6a83e06ff88a4d62cce3c1634ab0a5ec13309/*
+      asset_id: 0be55d262b29f564998ff81efe21bdc0022621c12f15af08d0f2ddb1.1b7f4abbf3eb04f8a7e5fbbc2042c524210dd960b6703a02fe52f70a7701e284
     - token: MIN
       unit: ADA
       credential: e1317b152faac13426e6a83e06ff88a4d62cce3c1634ab0a5ec13309/*
@@ -299,10 +352,18 @@ minswap:
       unit: ADA
       credential: e1317b152faac13426e6a83e06ff88a4d62cce3c1634ab0a5ec13309/*
       asset_id: 0be55d262b29f564998ff81efe21bdc0022621c12f15af08d0f2ddb1.1aa8961f4c11d8cebb43c8306a1ecdbebf0103ae2d30bf31b3676445a954ae05
+    - token: SHEN
+      unit: ADA
+      credential: e1317b152faac13426e6a83e06ff88a4d62cce3c1634ab0a5ec13309/*
+      asset_id: 0be55d262b29f564998ff81efe21bdc0022621c12f15af08d0f2ddb1.53225313968e796f2c1e0b57540a13c3b81e06e2ed2637ac1ea9b9f4e27e3dc4
     - token: SNEK
       unit: ADA
       credential: e1317b152faac13426e6a83e06ff88a4d62cce3c1634ab0a5ec13309/*
       asset_id: 0be55d262b29f564998ff81efe21bdc0022621c12f15af08d0f2ddb1.63f2cbfa5bf8b68828839a2575c8c70f14a32f50ebbfa7c654043269793be896
+    - token: SUNDAE
+      unit: ADA
+      credential: e1317b152faac13426e6a83e06ff88a4d62cce3c1634ab0a5ec13309/*
+      asset_id: 0be55d262b29f564998ff81efe21bdc0022621c12f15af08d0f2ddb1.9725d4168d06e85cc6bec7ab0e9bdd2b0120d880bb148ab21336774706eecdc8
     # V2 pools
     - token: BTN
       unit: ADA
@@ -316,6 +377,18 @@ minswap:
       unit: ADA
       credential: ea07b733d932129c378af627436e7cbc2ef0bf96e0036bb51b3bde6b/*
       asset_id: f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.3344a7c3b63f032a5706307fa3692109d2ea7dbc6d96b560053eb934c0cf28df
+    - token: IAG
+      unit: ADA
+      credential: ea07b733d932129c378af627436e7cbc2ef0bf96e0036bb51b3bde6b/*
+      asset_id: f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.7b12f25ce8d6f424e1edbc8b61f0742fb13252605f31dc40373d6a245e8ec1d1
+    - token: iETH
+      unit: ADA
+      credential: ea07b733d932129c378af627436e7cbc2ef0bf96e0036bb51b3bde6b/*
+      asset_id: f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.562b9ff903fe8d9e1c980120a233051e7b1518cfc75eb9b4227f7710b670b6e9
+    - token: iETH
+      unit: iUSD
+      credential: ea07b733d932129c378af627436e7cbc2ef0bf96e0036bb51b3bde6b/*
+      asset_id: f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.04f7f1319a643fad51aeb94d5118a37fbf4f704e17f034f15b9abae8518c93d8
     - token: iUSD
       unit: ADA
       credential: ea07b733d932129c378af627436e7cbc2ef0bf96e0036bb51b3bde6b/*
@@ -324,6 +397,10 @@ minswap:
       unit: ADA
       credential: ea07b733d932129c378af627436e7cbc2ef0bf96e0036bb51b3bde6b/*
       asset_id: f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.d5759e269df87a794b58360ad3be9b375498c28792711294a5e86f2e355d20b7
+    - token: LQ
+      unit: ADA
+      credential: ea07b733d932129c378af627436e7cbc2ef0bf96e0036bb51b3bde6b/*
+      asset_id: f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.6263e0101384dace4d7a8dadf0e6d45c8d43c8872604118ee82e3f2212934917
     - token: MIN
       unit: ADA
       credential: ea07b733d932129c378af627436e7cbc2ef0bf96e0036bb51b3bde6b/*
@@ -332,10 +409,18 @@ minswap:
       unit: ADA
       credential: ea07b733d932129c378af627436e7cbc2ef0bf96e0036bb51b3bde6b/*
       asset_id: f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.ec557838bea7c6df770debfc8c7c45bdeeaeefc1757d3586045d59c962b632c5
+    - token: SHEN
+      unit: ADA
+      credential: ea07b733d932129c378af627436e7cbc2ef0bf96e0036bb51b3bde6b/*
+      asset_id: f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.a0f1280da1c9c066652a79f6797b566d8369e059ef0266c33a45d9845cec8580
     - token: SNEK
       unit: ADA
       credential: ea07b733d932129c378af627436e7cbc2ef0bf96e0036bb51b3bde6b/*
       asset_id: f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.2ffadbb87144e875749122e0bbb9f535eeaa7f5660c6c4a91bcc4121e477f08d
+    - token: SUNDAE
+      unit: ADA
+      credential: ea07b733d932129c378af627436e7cbc2ef0bf96e0036bb51b3bde6b/*
+      asset_id: f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.f734af78799c4e857bfd37e8f919678020c0bb3f2aae9328bdb7c557a939a926
   max_concurrency: 3
   retries: 3
   timeout_ms: 5000
