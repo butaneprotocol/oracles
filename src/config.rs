@@ -30,6 +30,7 @@ struct RawOracleConfig {
     pub price_precision: u64,
     pub max_source_price_age_ms: u64,
     pub use_persisted_prices: bool,
+    pub max_synthetic_divergence: Decimal,
     pub publish_url: Option<String>,
     pub logs: RawLogConfig,
     pub frost_address: Option<String>,
@@ -41,6 +42,7 @@ struct RawOracleConfig {
     pub coinbase: CoinbaseConfig,
     pub fxratesapi: FxRatesApiConfig,
     pub maestro: MaestroConfig,
+    pub okx: OkxConfig,
     pub sundaeswap: SundaeSwapConfig,
     pub minswap: MinswapConfig,
     pub spectrum: SpectrumConfig,
@@ -60,6 +62,7 @@ pub struct OracleConfig {
     pub price_precision: u64,
     pub max_source_price_age: Duration,
     pub use_persisted_prices: bool,
+    pub max_synthetic_divergence: Decimal,
     pub publish_url: Option<String>,
     pub logs: LogConfig,
     pub frost_address: Option<String>,
@@ -71,6 +74,7 @@ pub struct OracleConfig {
     pub coinbase: CoinbaseConfig,
     pub fxratesapi: FxRatesApiConfig,
     pub maestro: MaestroConfig,
+    pub okx: OkxConfig,
     pub sundaeswap: SundaeSwapConfig,
     pub minswap: MinswapConfig,
     pub spectrum: SpectrumConfig,
@@ -163,6 +167,7 @@ impl TryFrom<RawOracleConfig> for OracleConfig {
             price_precision: raw.price_precision,
             max_source_price_age: Duration::from_millis(raw.max_source_price_age_ms),
             use_persisted_prices: raw.use_persisted_prices,
+            max_synthetic_divergence: raw.max_synthetic_divergence,
             publish_url: raw.publish_url,
             logs,
             frost_address: raw.frost_address,
@@ -174,6 +179,7 @@ impl TryFrom<RawOracleConfig> for OracleConfig {
             coinbase: raw.coinbase,
             fxratesapi: raw.fxratesapi,
             maestro: raw.maestro,
+            okx: raw.okx,
             sundaeswap: raw.sundaeswap,
             minswap: raw.minswap,
             spectrum: raw.spectrum,
@@ -248,8 +254,10 @@ impl TryFrom<RawPeerConfig> for Peer {
 #[derive(Debug, Deserialize)]
 pub struct SyntheticConfig {
     pub name: String,
-    pub backing_currency: String,
+    pub backing_currencies: Vec<String>,
+    #[serde(default)]
     pub invert: bool,
+    pub digits: u32,
     pub collateral: Vec<String>,
 }
 
@@ -314,6 +322,18 @@ pub struct MaestroTokenConfig {
     pub token: String,
     pub unit: String,
     pub dex: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct OkxConfig {
+    pub tokens: Vec<OkxTokenConfig>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct OkxTokenConfig {
+    pub token: String,
+    pub unit: String,
+    pub index: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]

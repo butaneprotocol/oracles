@@ -5,6 +5,7 @@ pub mod fxratesapi;
 pub mod kupo;
 pub mod maestro;
 pub mod minswap;
+pub mod okx;
 pub mod source;
 pub mod spectrum;
 pub mod sundaeswap;

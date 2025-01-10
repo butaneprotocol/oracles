@@ -27,6 +27,7 @@ use crate::{
         fxratesapi::FxRatesApiSource,
         maestro::MaestroSource,
         minswap::MinswapSource,
+        okx::OkxSource,
         source::{PriceInfo, PriceInfoSnapshot},
         spectrum::SpectrumSource,
         sundaeswap::SundaeSwapSource,
@@ -71,6 +72,7 @@ impl PriceAggregator {
             SourceAdapter::new(ByBitSource::new(&config), &config),
             SourceAdapter::new(CoinbaseSource::new(&config), &config),
             SourceAdapter::new(MinswapSource::new(&config)?, &config),
+            SourceAdapter::new(OkxSource::new(&config)?, &config),
             SourceAdapter::new(SpectrumSource::new(&config)?, &config),
         ];
         if let Some(maestro_source) = MaestroSource::new(&config)? {
@@ -168,8 +170,12 @@ impl PriceAggregator {
         } else {
             vec![]
         };
-        let converter =
-            TokenPriceConverter::new(source_prices, &default_prices, &self.config.synthetics);
+        let converter = TokenPriceConverter::new(
+            source_prices,
+            &default_prices,
+            &self.config.synthetics,
+            utils::decimal_to_rational(self.config.max_synthetic_divergence),
+        );
 
         let price_feeds = self
             .config
@@ -261,7 +267,7 @@ impl PriceAggregator {
 
     fn get_digits(&self, currency: &str) -> u32 {
         if let Some(synth_config) = self.config.synthetics.iter().find(|s| s.name == currency) {
-            return self.get_digits(&synth_config.backing_currency);
+            return synth_config.digits;
         }
         let Some(config) = self.config.currencies.iter().find(|c| c.name == currency) else {
             panic!("Unrecognized currency {}", currency);
