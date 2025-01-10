@@ -58,7 +58,7 @@ impl APIServer {
 
         let app = Router::new()
             .route("/payload", get(report_all_payloads))
-            .route("/payload/:synthetic", get(report_payload))
+            .route("/payload/{synthetic}", get(report_payload))
             .route("/prices", get(report_all_prices))
             .with_state(self.state);
         set.spawn(async move {
