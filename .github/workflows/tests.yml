@@ -23,4 +23,6 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
       - name: Audit
-        run: cargo audit
+        run: |
+          cargo install cargo-audit
+          cargo audit
