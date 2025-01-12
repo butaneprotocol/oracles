@@ -24,21 +24,21 @@ synthetics:
     collateral:
       - ADA
       - BTN
-      - ENCS
-      - LENFI
-      - MIN
       - SNEK
+      - MIN
+      - LENFI
+      - ENCS
   - name: USDs
     digits: 6
     backing_currencies:
       - USD
     collateral:
       - ADA
+      - USDb
       - BTN
       - DJED
-      - USDb
-      - iUSD
       - myUSD
+      - iUSD
   - name: EURb
     digits: 6
     backing_currencies:
@@ -66,10 +66,10 @@ synthetics:
       - USDb
       - USDs
       - BTN
-      - ENCS
-      - LENFI
-      - MIN
       - SNEK
+      - MIN
+      - LENFI
+      - ENCS
   - name: POLb
     digits: 6
     backing_currencies:
@@ -78,10 +78,10 @@ synthetics:
       - ADA
       - BTCb
       - BTN
-      - ENCS
-      - LENFI
-      - MIN
       - SNEK
+      - MIN
+      - LENFI
+      - ENCS
   - name: SOLp
     digits: 9
     backing_currencies:
@@ -92,10 +92,10 @@ synthetics:
       - USDb
       - USDs
       - BTN
-      - ENCS
-      - LENFI
-      - MIN
       - SNEK
+      - MIN
+      - LENFI
+      - ENCS
   - name: MIDAS
     digits: 9
     backing_currencies:
@@ -104,16 +104,16 @@ synthetics:
     collateral:
       - ADA
       - BTN
-      - IAG
-      - SUNDAE
+      - SNEK
       - MIN
       - FLDT
-      - LQ
-      - SNEK
-      - LENFI
-      - iETH
-      - ENCS
+      - IAG
       - SHEN
+      - LENFI
+      - SUNDAE
+      - ENCS
+      - LQ
+      - iETH
 currencies:
   - name: ADA
     digits: 6

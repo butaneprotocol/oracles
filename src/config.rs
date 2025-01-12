@@ -393,7 +393,18 @@ pub fn load_config(config_files: &[String]) -> Result<OracleConfig> {
     let config = builder
         .add_source(Environment::with_prefix("ORACLE_"))
         .build()?;
-    let raw: RawOracleConfig = config.try_deserialize()?;
+    let mut raw: RawOracleConfig = config.try_deserialize()?;
+
+    // the collateral for synthetics must always be ordered by asset_id
+    let asset_ids: HashMap<_, _> = raw
+        .currencies
+        .iter()
+        .filter_map(|c| Some((&c.name, c.asset_id.as_ref()?)))
+        .collect();
+    for synth in raw.synthetics.iter_mut() {
+        synth.collateral.sort_by_cached_key(|c| asset_ids.get(c));
+    }
+
     raw.try_into()
 }
 
