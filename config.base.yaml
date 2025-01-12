@@ -107,6 +107,7 @@ synthetics:
       - IAG
       - SUNDAE
       - MIN
+      - FLDT
       - LQ
       - SNEK
       - LENFI
@@ -128,6 +129,9 @@ currencies:
     asset_id: 9abf0afd2f236a19f2842d502d0450cbcd9c79f123a9708f96fd9b96.454e4353
     digits: 6
   - name: EUR
+    digits: 6
+  - name: FLDT
+    asset_id: 577f0b1342f8f8f4aed3388b80a8535812950c7a892495c0ecdf0f1e.0014df10464c4454
     digits: 6
   - name: IAG
     asset_id: 5d16cc1a177b5d9ba9cfa9793b07e60f1fb70fea1f8aef064415d114.494147
@@ -269,6 +273,10 @@ sundaeswap:
       unit: ADA
       credential: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b/*
       asset_id: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b.000de1403d59c9a766909da1c3cda90e73a9582025b17d7eb0be44cbd8b2dadd
+    - token: FLDT
+      unit: ADA
+      credential: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b/*
+      asset_id: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b.000de1401a1136d9c9b4ebe90445939d02301c940fc04c1f8b8eedef2e29e102
     - token: IAG
       unit: ADA
       credential: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b/*
@@ -324,6 +332,10 @@ minswap:
       unit: ADA
       credential: e1317b152faac13426e6a83e06ff88a4d62cce3c1634ab0a5ec13309/*
       asset_id: 0be55d262b29f564998ff81efe21bdc0022621c12f15af08d0f2ddb1.2324756b8e7e74da8feb879e2f053789363d045e554eaa17d365d1b52f4a9f8c
+    - token: FLDT
+      unit: ADA
+      credential: e1317b152faac13426e6a83e06ff88a4d62cce3c1634ab0a5ec13309/*
+      asset_id: 0be55d262b29f564998ff81efe21bdc0022621c12f15af08d0f2ddb1.bbfe2d3033ea40ed27733fc1ec30b8994d59cf28eed9268746ab41619960cae6
     - token: IAG
       unit: ADA
       credential: e1317b152faac13426e6a83e06ff88a4d62cce3c1634ab0a5ec13309/*
@@ -377,6 +389,10 @@ minswap:
       unit: ADA
       credential: ea07b733d932129c378af627436e7cbc2ef0bf96e0036bb51b3bde6b/*
       asset_id: f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.3344a7c3b63f032a5706307fa3692109d2ea7dbc6d96b560053eb934c0cf28df
+    - token: FLDT
+      unit: ADA
+      credential: ea07b733d932129c378af627436e7cbc2ef0bf96e0036bb51b3bde6b/*
+      asset_id: f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.bc53f5c2a8cf3ef64081d2ec8c74333d567fc7ef271c1b97d21fdd53a2c5c889
     - token: IAG
       unit: ADA
       credential: ea07b733d932129c378af627436e7cbc2ef0bf96e0036bb51b3bde6b/*
