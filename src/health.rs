@@ -12,6 +12,7 @@ use tracing::{info, warn};
 
 use crate::{
     config::{NetworkConfig, Peer},
+    keys,
     network::NodeId,
     raft::RaftLeader,
 };
@@ -42,6 +43,7 @@ type HealthSource = mpsc::UnboundedReceiver<HealthMessage>;
 #[derive(Clone)]
 struct HealthState {
     id: NodeId,
+    frost: Option<FrostStatus>,
     peers: Vec<Peer>,
     leader_source: Arc<watch::Receiver<RaftLeader>>,
     peer_versions: Arc<DashMap<NodeId, String>>,
@@ -93,9 +95,18 @@ pub struct HealthServer {
 }
 impl HealthServer {
     pub fn new(
+        frost_address: Option<&String>,
         network_config: &NetworkConfig,
         leader_source: watch::Receiver<RaftLeader>,
     ) -> (Self, HealthSink) {
+        let frost = frost_address.and_then(|hash| {
+            let keys_dir = keys::get_keys_directory().ok()?;
+            let (_, public_key) = keys::read_frost_keys(&keys_dir, hash).ok()?;
+            Some(FrostStatus {
+                hash: hash.clone(),
+                key: hex::encode(public_key.verifying_key().serialize().ok()?),
+            })
+        });
         let (sink, source) = mpsc::unbounded_channel();
         let statuses = Arc::new(DashMap::new());
         let mut peers = network_config.peers.clone();
@@ -112,6 +123,7 @@ impl HealthServer {
                 source,
                 state: HealthState {
                     id: network_config.id.clone(),
+                    frost,
                     leader_source: Arc::new(leader_source),
                     peers,
                     peer_versions: Arc::new(DashMap::new()),
@@ -182,11 +194,18 @@ struct PeerStatus {
     pub connection: PeerConnectionStatus,
 }
 
+#[derive(Clone, Serialize)]
+struct FrostStatus {
+    key: String,
+    hash: String,
+}
+
 #[derive(Serialize)]
 struct ServerHealth {
     pub id: NodeId,
     pub healthy: bool,
     pub raft_leader: Option<String>,
+    pub frost: Option<FrostStatus>,
     pub peers: Vec<PeerStatus>,
     pub errors: HashMap<String, String>,
 }
@@ -240,6 +259,7 @@ async fn report_health(State(state): State<HealthState>) -> impl IntoResponse {
         id: state.id.clone(),
         healthy: errors.is_empty(),
         raft_leader,
+        frost: state.frost.clone(),
         peers,
         errors,
     };

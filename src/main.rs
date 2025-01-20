@@ -45,7 +45,11 @@ struct Node {
 impl Node {
     pub fn new(config: Arc<OracleConfig>) -> Result<Self> {
         let (leader_tx, leader_rx) = watch::channel(RaftLeader::Unknown);
-        let (health_server, health_sink) = HealthServer::new(&config.network, leader_rx.clone());
+        let (health_server, health_sink) = HealthServer::new(
+            config.frost_address.as_ref(),
+            &config.network,
+            leader_rx.clone(),
+        );
 
         // Construct a peer-to-peer network that can connect to peers, and dispatch messages to the correct state machine
         let mut network = Network::new(&config.network, health_sink.clone());
