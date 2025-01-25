@@ -23,6 +23,8 @@ pub enum RaftCommand {
     /// If we are currently leader, step down.
     /// Stop sending heartbeats, so that another node triggers election and wins.
     Abdicate,
+    /// Trigger a new election for the given term.
+    ForceElection(usize),
 }
 
 pub struct Raft {
@@ -37,7 +39,8 @@ impl Raft {
         config: &OracleConfig,
         network: &mut Network,
         leader_sink: watch::Sender<RaftLeader>,
-    ) -> (Self, RaftClient) {
+        command_source: mpsc::Receiver<RaftCommand>,
+    ) -> Self {
         // quorum is set to a majority of expected nodes (which includes ourself!)
         let quorum = ((config.network.peers.len() + 1) / 2) + 1;
         let heartbeat_freq = config.heartbeat;
@@ -59,17 +62,12 @@ impl Raft {
             timeout_freq,
             leader_sink,
         );
-        let (command_sink, command_source) = mpsc::channel(10);
-        let client = RaftClient::new(command_sink);
-        (
-            Self {
-                id,
-                command_source,
-                channel,
-                state,
-            },
-            client,
-        )
+        Self {
+            id,
+            command_source,
+            channel,
+            state,
+        }
     }
 
     pub async fn handle_messages(self) {
@@ -90,7 +88,8 @@ impl Raft {
                     let span = info_span!("raft_command");
                     span.in_scope(|| {
                         match command {
-                            RaftCommand::Abdicate => state.abdicate()
+                            RaftCommand::Abdicate => state.abdicate(),
+                            RaftCommand::ForceElection(term) => state.run_election(term, Instant::now()),
                         }
                     })
                 }

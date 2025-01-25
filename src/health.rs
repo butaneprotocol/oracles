@@ -1,8 +1,14 @@
 use std::{collections::HashMap, sync::Arc};
 
-use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::get, Json, Router};
+use axum::{
+    extract::State,
+    http::StatusCode,
+    response::IntoResponse,
+    routing::{get, post},
+    Json, Router,
+};
 use dashmap::DashMap;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::{
     net::TcpListener,
     sync::{mpsc, watch},
@@ -14,7 +20,7 @@ use crate::{
     config::{NetworkConfig, Peer},
     keys,
     network::NodeId,
-    raft::RaftLeader,
+    raft::{RaftClient, RaftLeader},
 };
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -48,6 +54,7 @@ struct HealthState {
     leader_source: Arc<watch::Receiver<RaftLeader>>,
     peer_versions: Arc<DashMap<NodeId, String>>,
     statuses: Arc<DashMap<Origin, HealthStatus>>,
+    raft_client: Arc<RaftClient>,
 }
 impl HealthState {
     fn peer(&self, id: &NodeId) -> &Peer {
@@ -98,6 +105,7 @@ impl HealthServer {
         frost_address: Option<&String>,
         network_config: &NetworkConfig,
         leader_source: watch::Receiver<RaftLeader>,
+        raft_client: RaftClient,
     ) -> (Self, HealthSink) {
         let frost = frost_address.and_then(|hash| {
             let keys_dir = keys::get_keys_directory().ok()?;
@@ -128,6 +136,7 @@ impl HealthServer {
                     peers,
                     peer_versions: Arc::new(DashMap::new()),
                     statuses,
+                    raft_client: Arc::new(raft_client),
                 },
             },
             sink,
@@ -155,6 +164,7 @@ impl HealthServer {
 
         let app = Router::new()
             .route("/health", get(report_health))
+            .route("/force-election", post(force_election))
             .with_state(self.state);
         set.spawn(async move {
             info!("Health server starting on port {}", port);
@@ -269,4 +279,17 @@ async fn report_health(State(state): State<HealthState>) -> impl IntoResponse {
         StatusCode::SERVICE_UNAVAILABLE
     };
     (status, Json(health))
+}
+
+#[derive(Deserialize)]
+struct RunElectionRequest {
+    pub term: usize,
+}
+
+async fn force_election(
+    State(state): State<HealthState>,
+    Json(req): Json<RunElectionRequest>,
+) -> impl IntoResponse {
+    state.raft_client.assume_leadership(req.term);
+    StatusCode::ACCEPTED
 }

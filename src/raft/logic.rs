@@ -358,17 +358,7 @@ impl RaftState {
             self.jitter = Duration::from_millis((rand::random::<u8>() % 50 + 50) as u64);
 
             // Start an election
-            let mut votes = BTreeSet::new();
-            votes.insert(self.id.clone());
-            self.set_status(RaftStatus::Candidate { votes });
-            self.term += 1;
-            self.last_event = timestamp;
-
-            return self
-                .peers
-                .iter()
-                .map(|peer| (peer.clone(), RaftMessage::RequestVote { term: self.term }))
-                .collect();
+            self.run_election(self.term + 1, timestamp)
         } else if is_leader && heartbeat_timeout && !abdicating {
             self.emit_has_leader(true, true);
             if !self.peers.is_empty() {
@@ -385,6 +375,28 @@ impl RaftState {
         } else {
             vec![]
         }
+    }
+
+    pub fn run_election(&mut self, term: usize, timestamp: Instant) -> Vec<(NodeId, RaftMessage)> {
+        if self.term >= term {
+            warn!(
+                requested_term = term,
+                term = self.term,
+                "cannot force an election for a past term"
+            );
+            return vec![];
+        }
+
+        let mut votes = BTreeSet::new();
+        votes.insert(self.id.clone());
+        self.set_status(RaftStatus::Candidate { votes });
+        self.term = term;
+        self.last_event = timestamp;
+
+        self.peers
+            .iter()
+            .map(|peer| (peer.clone(), RaftMessage::RequestVote { term: self.term }))
+            .collect()
     }
 
     fn clear_status(&mut self) {
