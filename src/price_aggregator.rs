@@ -203,8 +203,8 @@ impl PriceAggregator {
         for collateral in &synth.collateral {
             let collateral_digits = self.get_digits(collateral);
             let p = converter.value_in_usd(collateral)?;
-            let p_scaled = p * BigInt::from(10i64.pow(collateral_digits))
-                / BigInt::from(10i64.pow(synth_digits));
+            let p_scaled = p * BigInt::from(10i64.pow(synth_digits))
+                / BigInt::from(10i64.pow(collateral_digits));
             prices.push(p_scaled / &synth_price);
         }
 
