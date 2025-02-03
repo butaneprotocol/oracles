@@ -248,6 +248,23 @@ crypto_com:
     - token: USDT
       unit: USD
       stream: ticker.USDT_USD
+kucoin:
+  tokens:
+    - token: ADA
+      unit: USDT
+      symbol: ADA-USDT
+    - token: BTC
+      unit: USDT
+      symbol: BTC-USDT
+    - token: PAXG
+      unit: USDT
+      symbol: PAXG-USDT
+    - token: POL
+      unit: USDT
+      symbol: POL-USDT
+    - token: SOL
+      unit: USDT
+      symbol: SOL-USDT
 maestro:
   tokens:
     - token: DJED
