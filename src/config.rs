@@ -40,6 +40,7 @@ struct RawOracleConfig {
     pub binance: BinanceConfig,
     pub bybit: ByBitConfig,
     pub coinbase: CoinbaseConfig,
+    pub crypto_com: CryptoComConfig,
     pub fxratesapi: FxRatesApiConfig,
     pub maestro: MaestroConfig,
     pub okx: OkxConfig,
@@ -72,6 +73,7 @@ pub struct OracleConfig {
     pub bybit: ByBitConfig,
     pub binance: BinanceConfig,
     pub coinbase: CoinbaseConfig,
+    pub crypto_com: CryptoComConfig,
     pub fxratesapi: FxRatesApiConfig,
     pub maestro: MaestroConfig,
     pub okx: OkxConfig,
@@ -177,6 +179,7 @@ impl TryFrom<RawOracleConfig> for OracleConfig {
             binance: raw.binance,
             bybit: raw.bybit,
             coinbase: raw.coinbase,
+            crypto_com: raw.crypto_com,
             fxratesapi: raw.fxratesapi,
             maestro: raw.maestro,
             okx: raw.okx,
@@ -303,6 +306,18 @@ pub struct CoinbaseTokenConfig {
     pub token: String,
     pub unit: String,
     pub product_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CryptoComConfig {
+    pub tokens: Vec<CryptoComTokenConfig>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct CryptoComTokenConfig {
+    pub token: String,
+    pub unit: String,
+    pub stream: String,
 }
 
 #[derive(Debug, Deserialize)]

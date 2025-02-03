@@ -1,6 +1,7 @@
 pub mod binance;
 pub mod bybit;
 pub mod coinbase;
+pub mod crypto_com;
 pub mod fxratesapi;
 pub mod kupo;
 pub mod maestro;
