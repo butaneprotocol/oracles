@@ -1,11 +1,11 @@
 use std::{collections::BTreeMap, str::FromStr, time::Duration};
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use futures::{future::BoxFuture, FutureExt, SinkExt, StreamExt};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use tokio::time::timeout;
-use tokio_websockets::{ClientBuilder, Message};
+use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{trace, warn};
 
 use crate::config::{CoinbaseTokenConfig, OracleConfig};
@@ -46,10 +46,8 @@ impl CoinbaseSource {
     async fn query_impl(&self, sink: &PriceSink) -> Result<()> {
         trace!("Connecting to coinbase");
         let connection_timeout = Duration::from_secs(60);
-        let uri = URL.try_into()?;
 
-        let (mut stream, _) =
-            timeout(connection_timeout, ClientBuilder::from_uri(uri).connect()).await??;
+        let (mut stream, _) = timeout(connection_timeout, connect_async(URL)).await??;
 
         let request = CoinbaseRequest::Subscribe {
             product_ids: self.products.keys().cloned().collect(),
@@ -143,9 +141,7 @@ impl TryFrom<Message> for CoinbaseResponse {
     type Error = anyhow::Error;
 
     fn try_from(value: Message) -> Result<Self> {
-        match value.as_text() {
-            Some(msg) => Ok(serde_json::from_str(msg)?),
-            None => Err(anyhow::anyhow!("Unexpected response: {:?}", value)),
-        }
+        let text = value.into_text().context("unexpected response")?;
+        Ok(serde_json::from_str(&text)?)
     }
 }

@@ -24,7 +24,7 @@ cron = "0.15"
 dashmap = "6"
 ed25519 = { version = "2.2", features = ["pkcs8", "pem"] }
 ed25519-dalek = { version = "2.1" }
-frost-ed25519 = { version = "2.0.0-rc.0", features = ["serialization"] }
+frost-ed25519 = { version = "2.1", features = ["serialization"] }
 futures = "0.3"
 hex = "0.4.3"
 kupon = { git = "https://github.com/SundaeSwap-finance/kupon", rev = "ccc0b37" }
@@ -47,8 +47,8 @@ serde = "1"
 serde_json = "1"
 temp-env = "0.3"
 tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots" ]}
 tokio-util = { version = "0.7", features = ["full"] }
-tokio-websockets = { version = "0.11", features = ["client", "rustls-webpki-roots", "ring", "rand"] }
 tonic = "0.12"
 tracing = "0.1.40"
 tracing-opentelemetry = "0.28"

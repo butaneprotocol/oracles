@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use dashmap::DashMap;
 use futures::{future::BoxFuture, FutureExt, SinkExt, StreamExt};
 use rust_decimal::Decimal;
@@ -9,7 +9,7 @@ use tokio::{
     select,
     time::{sleep, timeout, Duration},
 };
-use tokio_websockets::{ClientBuilder, Message};
+use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 use crate::config::OracleConfig;
 
@@ -68,8 +68,7 @@ impl ByBitSource {
     }
 
     async fn query_impl(&self, sink: &PriceSink) -> Result<()> {
-        let uri = URL.try_into()?;
-        let (mut stream, _) = ClientBuilder::from_uri(uri).connect().await?;
+        let (mut stream, _) = connect_async(URL).await?;
 
         let subscribe_timeout = Duration::from_secs(60);
         timeout(
@@ -107,53 +106,49 @@ impl ByBitSource {
         let consumer = async move {
             while let Some(result) = stream.next().await {
                 let message = result?;
-                match message.as_text() {
-                    Some(content) => {
-                        let response: ByBitResponse = serde_json::from_str(content)?;
-                        let data = match response {
-                            ByBitResponse::StatusResponse { success, ret_msg } => {
-                                if !success {
-                                    return Err(anyhow!("Error subscribing: {}", ret_msg));
-                                }
-                                continue;
-                            }
-                            ByBitResponse::TickerResponse { data } => data,
-                        };
-                        let Some(mut info) = self.stream_info.get_mut(&data.symbol) else {
-                            continue;
-                        };
-                        let Some(value) = data
-                            .mark_price
-                            .and_then(|x| Decimal::from_str(&x).ok())
-                            .or(info.last_value)
-                        else {
-                            continue;
-                        };
-                        info.last_value = Some(value);
-
-                        let Some(volume) = data
-                            .volume_24h
-                            .and_then(|x| Decimal::from_str(&x).ok())
-                            .or(info.last_volume)
-                        else {
-                            continue;
-                        };
-                        info.last_volume = Some(volume);
-
-                        let price_info = PriceInfo {
-                            token: info.token.clone(),
-                            unit: info.unit.clone(),
-                            value,
-                            reliability: volume,
-                        };
-                        sink.send(price_info)?;
+                if !message.is_text() {
+                    continue;
+                }
+                let response: ByBitResponse = serde_json::from_str(&message.into_text()?)?;
+                let data = match response {
+                    ByBitResponse::StatusResponse { success, ret_msg } => {
+                        if !success {
+                            bail!("Error subscribing: {}", ret_msg);
+                        }
+                        continue;
                     }
-                    None => {
-                        return Err(anyhow!("Unexpected response {:?}", message));
-                    }
+                    ByBitResponse::TickerResponse { data } => data,
                 };
+                let Some(mut info) = self.stream_info.get_mut(&data.symbol) else {
+                    continue;
+                };
+                let Some(value) = data
+                    .mark_price
+                    .and_then(|x| Decimal::from_str(&x).ok())
+                    .or(info.last_value)
+                else {
+                    continue;
+                };
+                info.last_value = Some(value);
+
+                let Some(volume) = data
+                    .volume_24h
+                    .and_then(|x| Decimal::from_str(&x).ok())
+                    .or(info.last_volume)
+                else {
+                    continue;
+                };
+                info.last_volume = Some(volume);
+
+                let price_info = PriceInfo {
+                    token: info.token.clone(),
+                    unit: info.unit.clone(),
+                    value,
+                    reliability: volume,
+                };
+                sink.send(price_info)?;
             }
-            Err(anyhow!("ByBit stream has closed"))
+            bail!("ByBit stream has closed")
         };
 
         select! {
