@@ -13,12 +13,14 @@ use tracing::{debug, info, info_span};
 use crate::{
     config::OracleConfig,
     network::{Network, NetworkChannel, NodeId},
+    price_feed::PriceFeedEntry,
 };
 
 pub use client::RaftClient;
 use logic::RaftState;
 pub use logic::{RaftLeader, RaftMessage};
 
+#[derive(Debug)]
 pub enum RaftCommand {
     /// If we are currently leader, step down.
     /// Stop sending heartbeats, so that another node triggers election and wins.
@@ -29,6 +31,8 @@ pub enum RaftCommand {
 
 pub struct Raft {
     pub id: NodeId,
+    expected_payloads: usize,
+    price_feed_source: watch::Receiver<Vec<PriceFeedEntry>>,
     command_source: mpsc::Receiver<RaftCommand>,
     channel: NetworkChannel<RaftMessage>,
     state: RaftState,
@@ -39,12 +43,14 @@ impl Raft {
         config: &OracleConfig,
         network: &mut Network,
         leader_sink: watch::Sender<RaftLeader>,
+        price_feed_source: watch::Receiver<Vec<PriceFeedEntry>>,
         command_source: mpsc::Receiver<RaftCommand>,
     ) -> Self {
         // quorum is set to a majority of expected nodes (which includes ourself!)
         let quorum = ((config.network.peers.len() + 1) / 2) + 1;
         let heartbeat_freq = config.heartbeat;
         let timeout_freq = config.timeout;
+        let expected_payloads = config.synthetics.len();
 
         info!(
             quorum = quorum,
@@ -64,6 +70,8 @@ impl Raft {
         );
         Self {
             id,
+            expected_payloads,
+            price_feed_source,
             command_source,
             channel,
             state,
@@ -72,6 +80,7 @@ impl Raft {
 
     pub async fn handle_messages(self) {
         let (sender, mut receiver) = self.channel.split();
+        let mut price_feed_source = self.price_feed_source;
         let mut command_source = self.command_source;
         let mut state = self.state;
         loop {
@@ -85,13 +94,18 @@ impl Raft {
                     })
                 },
                 Some(command) = command_source.recv() => {
-                    let span = info_span!("raft_command");
+                    let span = info_span!("raft_command", ?command);
                     span.in_scope(|| {
                         match command {
                             RaftCommand::Abdicate => state.abdicate(),
                             RaftCommand::ForceElection(term) => state.run_election(term, Instant::now()),
                         }
                     })
+                }
+                Ok(()) = price_feed_source.changed() => {
+                    let present_payloads = price_feed_source.borrow().len();
+                    let missing_payloads = self.expected_payloads - present_payloads;
+                    state.set_missing_payloads(missing_payloads)
                 }
                 _ = sleep_until(next_event) => {
                     let span = info_span!("raft_tick");

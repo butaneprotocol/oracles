@@ -44,43 +44,49 @@ struct Node {
 
 impl Node {
     pub fn new(config: Arc<OracleConfig>) -> Result<Self> {
-        let (leader_tx, leader_rx) = watch::channel(RaftLeader::Unknown);
-        let (raft_client, raft_sink) = RaftClient::new();
+        let (leader_sink, leader_source) = watch::channel(RaftLeader::Unknown);
+        let (price_feed_sink, price_feed_source) = watch::channel(vec![]);
+        let (price_audit_sink, price_audit_source) = watch::channel(vec![]);
+        let (raft_client, raft_source) = RaftClient::new();
+
         let (health_server, health_sink) = HealthServer::new(
             config.frost_address.as_ref(),
             &config.network,
-            leader_rx.clone(),
+            leader_source.clone(),
             raft_client.clone(),
         );
 
         // Construct a peer-to-peer network that can connect to peers, and dispatch messages to the correct state machine
         let mut network = Network::new(&config.network, health_sink.clone());
 
-        let raft = Raft::new(&config, &mut network, leader_tx, raft_sink);
-
-        let (price_feed_tx, price_feed_rx) = watch::channel(vec![]);
-        let (price_audit_tx, price_audit_rx) = watch::channel(vec![]);
+        let raft = Raft::new(
+            &config,
+            &mut network,
+            leader_sink,
+            price_feed_source.clone(),
+            raft_source,
+        );
 
         let (signature_aggregator, payload_source) = if config.consensus {
             SignatureAggregator::consensus(
                 &config,
                 &mut network,
                 raft_client,
-                price_feed_rx,
-                leader_rx,
+                price_feed_source,
+                leader_source,
             )?
         } else {
-            SignatureAggregator::single(&config, raft_client, price_feed_rx, leader_rx)?
+            SignatureAggregator::single(&config, raft_client, price_feed_source, leader_source)?
         };
 
         let price_aggregator = PriceAggregator::new(
-            price_feed_tx,
-            price_audit_tx,
+            price_feed_sink,
+            price_audit_sink,
             payload_source.clone(),
             config.clone(),
         )?;
 
-        let api_server = APIServer::new(&config, payload_source.clone(), price_audit_rx);
+        let api_server = APIServer::new(&config, payload_source.clone(), price_audit_source);
 
         let publisher = Publisher::new(&config, payload_source)?;
 
