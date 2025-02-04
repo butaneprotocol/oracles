@@ -118,7 +118,7 @@ impl RaftState {
             next_event = next_event.min(election_time);
         }
 
-        if self.is_leader() {
+        if matches!(self.status, RaftStatus::Leader { abdicating: false }) {
             // If we're the leader, this is when we'll send our next heartbeat.
             let heartbeat_time = self.last_event + self.heartbeat_freq;
             next_event = next_event.min(heartbeat_time);
@@ -136,10 +136,6 @@ impl RaftState {
             } => Some(leader.clone()),
             _ => None,
         }
-    }
-
-    fn is_leader(&self) -> bool {
-        matches!(self.status, RaftStatus::Leader { .. })
     }
 
     pub fn abdicate(&mut self) -> Vec<(NodeId, RaftMessage)> {
