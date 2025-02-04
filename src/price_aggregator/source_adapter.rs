@@ -71,12 +71,13 @@ impl SourceAdapter {
                 let info = &snapshot.info;
                 let as_of = snapshot.as_of;
                 let name = snapshot.name.as_ref();
-                let span = info_span!("update_price", token = info.token, unit = info.unit, name);
                 if info.value.is_zero() {
+                    let span = info_span!("update_price", token = info.token, unit = info.unit, name);
                     span.in_scope(|| warn!("ignoring reported value of 0"));
                     continue;
                 }
                 if info.reliability.is_zero() {
+                    let span = info_span!("update_price", token = info.token, unit = info.unit, name);
                     span.in_scope(|| warn!("ignoring reported value with reliability 0"));
                     continue;
                 }
