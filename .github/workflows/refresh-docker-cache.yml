@@ -42,6 +42,13 @@ jobs:
           rustup target install ${{ matrix.rust_target }}
           sudo apt install musl-tools
 
+      - name: Install ARM toolchain
+        if: matrix.rust_target == 'aarch64-unknown-linux-musl'
+        run: |
+          sudo apt install gcc-aarch64-linux-gnu
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+          echo "CC=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+
       - name: Rust Cache
         id: cache
         uses: Swatinem/rust-cache@v2
