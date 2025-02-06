@@ -49,7 +49,7 @@ jobs:
         run: |
           rustup target install aarch64-unknown-linux-gnu
           apt install gcc-aarch64-linux-gnu
-    
+
       - name: Cargo Cache
         id: cache
         uses: actions/cache@v4
@@ -60,6 +60,9 @@ jobs:
           key: ${{ matrix.rust_target }}-cargo-cache-${{ github.sha }}
           restore-keys: |
             ${{ matrix.rust_target }}-cargo-cache
+
+      - name: Compile
+        run: cargo build --release --target ${{ matrix.rust_target }}
 
       - name: Build and push Docker image
         id: push

@@ -54,6 +54,9 @@ jobs:
           restore-keys: |
             ${{ matrix.rust_target }}-cargo-cache
 
+      - name: Compile
+        run: cargo build --release --target ${{ matrix.rust_target }}
+
       - name: Build Docker image
         id: build
         uses: docker/build-push-action@3b5e8027fcad23fda98b2e3ac259d8d67585f671
