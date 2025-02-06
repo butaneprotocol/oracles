@@ -1,11 +1,11 @@
 use std::{collections::BTreeMap, str::FromStr, time::Duration};
 
 use anyhow::{anyhow, Result};
-use futures::{future::BoxFuture, FutureExt, SinkExt, StreamExt};
+use futures::{future::BoxFuture, FutureExt, StreamExt};
 use rust_decimal::Decimal;
 use serde::Deserialize;
 use tokio::time::timeout;
-use tokio_websockets::{ClientBuilder, Message};
+use tokio_tungstenite::connect_async;
 use tracing::{trace, warn};
 
 use crate::{
@@ -53,9 +53,8 @@ impl BinanceSource {
             .map(|k| k.as_str())
             .collect::<Vec<&str>>()
             .join("/");
-        let url = format!("{BASE_URL}?streams={streams}");
-        let uri = url.try_into()?;
-        let (mut stream, _) = ClientBuilder::from_uri(uri).connect().await?;
+        let uri = format!("{BASE_URL}?streams={streams}");
+        let (mut stream, _) = connect_async(uri).await?;
         trace!("Connected to binance!");
 
         let connection_timeout = Duration::from_secs(60);
@@ -67,18 +66,12 @@ impl BinanceSource {
                     continue;
                 }
             };
-            if let Some(contents) = message.as_text() {
-                if let Err(err) = self.process_binance_message(contents, sink) {
-                    warn!("Unexpected error updating binance data: {:?}", err);
-                }
-            } else if message.is_ping() {
-                let data = message.into_payload();
-                trace!("Ping received from binance: {:?}", data);
-                if let Err(err) = stream.send(Message::pong(data)).await {
-                    warn!("Unexpected error replying to binance ping: {}", err);
-                }
-            } else {
-                warn!("Unexpected response from binance: {:?}", message);
+            if !message.is_text() {
+                continue;
+            }
+            let contents = message.into_text()?;
+            if let Err(err) = self.process_binance_message(&contents, sink) {
+                warn!("Unexpected error updating binance data: {:?}", err);
             }
         }
 

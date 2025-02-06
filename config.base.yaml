@@ -185,12 +185,6 @@ binance:
     - token: BTC
       unit: USDT
       stream: btcusdt@ticker
-    - token: EUR
-      unit: USDT
-      stream: eurusdt@ticker
-    - token: PAXG
-      unit: USDT
-      stream: paxgusdt@ticker
     - token: POL
       unit: USDT
       stream: polusdt@ticker
@@ -231,6 +225,46 @@ coinbase:
     - token: USDT
       unit: USD
       product_id: USDT-USD
+crypto_com:
+  tokens:
+    - token: ADA
+      unit: USD
+      stream: ticker.ADA_USD
+    - token: BTC
+      unit: USD
+      stream: ticker.BTC_USD
+    - token: EUR
+      unit: USDT
+      stream: ticker.EUR_USDT
+    - token: PAXG
+      unit: USD
+      stream: ticker.PAXG_USD
+    - token: POL
+      unit: USD
+      stream: ticker.POL_USD
+    - token: SOL
+      unit: USD
+      stream: ticker.SOL_USD
+    - token: USDT
+      unit: USD
+      stream: ticker.USDT_USD
+kucoin:
+  tokens:
+    - token: ADA
+      unit: USDT
+      symbol: ADA-USDT
+    - token: BTC
+      unit: USDT
+      symbol: BTC-USDT
+    - token: PAXG
+      unit: USDT
+      symbol: PAXG-USDT
+    - token: POL
+      unit: USDT
+      symbol: POL-USDT
+    - token: SOL
+      unit: USDT
+      symbol: SOL-USDT
 maestro:
   tokens:
     - token: DJED
