@@ -75,7 +75,6 @@ jobs:
           platforms: ${{ matrix.platform }}
           build-args: |
             RUST_TARGET=${{ matrix.rust_target }}
-          tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,name=sundaeswap/butane-oracle,push-by-digest=true,name-canonical=true,push=true
 
