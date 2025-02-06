@@ -3,9 +3,7 @@ name: Build Docker Image
 # It does not publish the new image.
 
 on:
-  push:
-    branches:
-      - main
+  push
 
 jobs:
   build_image:
