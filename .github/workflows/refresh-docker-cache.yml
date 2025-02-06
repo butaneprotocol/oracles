@@ -10,7 +10,17 @@ on:
 jobs:
   build_image:
     name: Build Docker image
-    runs-on: "ubuntu-20.04"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: "ubuntu-22.04"
+            platform: linux/amd64
+            rust_target: x86_64-unknown-linux-gnu
+          - os: "ubuntu-22.04"
+            platform: linux/arm64
+            rust_target: aarch64-unknown-linux-gnu
+
     permissions:
       contents: read
     steps:
@@ -27,6 +37,12 @@ jobs:
         with:
           images: sundaeswap/butane-oracle
 
+      - name: Install ARM toolchain
+        if: matrix.rust_target == 'aarch64-unknown-linux-gnu'
+        run: |
+          rustup target install aarch64-unknown-linux-gnu
+          apt install gcc-aarch64-linux-gnu
+
       - name: Cargo Cache
         id: cache
         uses: actions/cache@v4
@@ -34,19 +50,9 @@ jobs:
           path: |
             cargo-registry-cache
             sccache-cache
-          key: ${{ runner.os }}-cargo-cache-${{ github.sha }}
+          key: ${{ matrix.rust_target }}-cargo-cache-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-cargo-cache
-  
-      - name: inject cargo caches into docker
-        uses: reproducible-containers/buildkit-cache-dance@5b6db76d1da5c8b307d5d2e0706d266521b710de # v3.1.2
-        with:
-          cache-map: |
-            {
-              "cargo-registry-cache": "/usr/local/cargo/registry",
-              "sccache-cache": "/sccache"
-            }
-          skip-extraction: ${{ steps.cache.outputs.cache-hit }}
+            ${{ matrix.rust_target }}-cargo-cache
 
       - name: Build Docker image
         id: build
@@ -55,8 +61,10 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           context: .
-          file: ./Dockerfile
+          file: ./prebuilt.Dockerfile
           outputs: type=image
-          platforms: "linux/amd64,linux/arm64"
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            RUST_TARGET=${{ matrix.rust_target }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
