@@ -513,6 +513,33 @@ async fn should_start_new_election_if_current_election_times_out() {
 }
 
 #[tokio::test]
+async fn should_delay_starting_new_election_if_missing_payloads() {
+    let start_time = Instant::now();
+    let heartbeat_freq = Duration::from_millis(1000);
+    let timeout_freq = Duration::from_millis(2000);
+
+    let (mut state, [other_id1, other_id2], _) =
+        generate_state(start_time, heartbeat_freq, timeout_freq);
+    assert_eq!(state.receive(&other_id1, RaftMessage::Connect), vec![]);
+    assert_eq!(state.receive(&other_id2, RaftMessage::Connect), vec![]);
+
+    state.become_follower(&other_id1, 1);
+
+    state.set_missing_payloads(2);
+
+    // we're missing two payloads, so we should wait two timeout cycles before running for leader.
+    assert_eq!(state.tick(timeout_freq), vec![]);
+    assert_eq!(state.tick(timeout_freq), vec![]);
+    assert_eq!(
+        state.tick(timeout_freq),
+        vec![
+            (other_id1.clone(), RaftMessage::RequestVote { term: 2 }),
+            (other_id2.clone(), RaftMessage::RequestVote { term: 2 }),
+        ]
+    );
+}
+
+#[tokio::test]
 async fn should_stop_sending_messages_if_we_abdicate() {
     let start_time = Instant::now();
     let heartbeat_freq = Duration::from_millis(1000);
@@ -670,6 +697,10 @@ impl Participant {
 
     pub fn abdicate(&mut self) {
         self.state.abdicate();
+    }
+
+    pub fn set_missing_payloads(&mut self, missing_payloads: usize) {
+        self.state.set_missing_payloads(missing_payloads);
     }
 
     pub fn begin_election(&mut self) -> (Vec<NodeId>, usize) {

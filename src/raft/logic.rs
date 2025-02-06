@@ -1,4 +1,4 @@
-use std::{collections::BTreeSet, ops::Sub};
+use std::collections::BTreeSet;
 
 use minicbor::{Decode, Encode};
 use rand::Rng;
@@ -69,6 +69,7 @@ pub struct RaftState {
 
     pub status: RaftStatus,
     pub term: usize,
+    missing_payloads: usize,
 
     pub leader_sink: watch::Sender<RaftLeader>,
 }
@@ -96,6 +97,7 @@ impl RaftState {
                 voted_for: None,
             },
             term: 0,
+            missing_payloads: 0,
             leader_sink,
         };
         state.clear_status();
@@ -112,11 +114,11 @@ impl RaftState {
         let can_reach_quorum = (self.peers.len() + 1) >= self.quorum;
         if can_reach_quorum {
             // If we can reach quorum, this is when we'll hold our next election.
-            let election_time = self.last_event + self.timeout_freq.sub(self.jitter);
+            let election_time = self.last_event + self.time_until_next_election();
             next_event = next_event.min(election_time);
         }
 
-        if self.is_leader() {
+        if matches!(self.status, RaftStatus::Leader { abdicating: false }) {
             // If we're the leader, this is when we'll send our next heartbeat.
             let heartbeat_time = self.last_event + self.heartbeat_freq;
             next_event = next_event.min(heartbeat_time);
@@ -136,14 +138,15 @@ impl RaftState {
         }
     }
 
-    fn is_leader(&self) -> bool {
-        matches!(self.status, RaftStatus::Leader { .. })
-    }
-
     pub fn abdicate(&mut self) -> Vec<(NodeId, RaftMessage)> {
         if let RaftStatus::Leader { abdicating } = &mut self.status {
             *abdicating = true;
         }
+        vec![]
+    }
+
+    pub fn set_missing_payloads(&mut self, missing_payloads: usize) -> Vec<(NodeId, RaftMessage)> {
+        self.missing_payloads = missing_payloads;
         vec![]
     }
 
@@ -322,7 +325,7 @@ impl RaftState {
     }
 
     pub fn tick(&mut self, timestamp: Instant) -> Vec<(NodeId, RaftMessage)> {
-        let actual_timeout = self.timeout_freq.sub(self.jitter);
+        let actual_timeout = self.time_until_next_election();
         let elapsed_time = timestamp.duration_since(self.last_event);
         let heartbeat_timeout = elapsed_time > self.heartbeat_freq;
         let election_timeout = elapsed_time > actual_timeout;
@@ -397,6 +400,12 @@ impl RaftState {
             .iter()
             .map(|peer| (peer.clone(), RaftMessage::RequestVote { term: self.term }))
             .collect()
+    }
+
+    fn time_until_next_election(&self) -> Duration {
+        // The more payloads this node fails to produce, the longer it waits to start an election.
+        // This prevents unhealthy nodes from becoming leader.
+        (self.timeout_freq * (self.missing_payloads + 1) as u32) - self.jitter
     }
 
     fn clear_status(&mut self) {
