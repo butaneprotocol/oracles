@@ -8,7 +8,14 @@ on:
 jobs:
   push_to_registry:
     name: Push Docker image to Docker Hub
-    runs-on: "ubuntu-20.04"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: "ubuntu-22.04"
+            platforms: linux/amd64
+          - os: "ubuntu-22.04-arm"
+            platforms: linux/arm64
     permissions:
       packages: write
       contents: read
@@ -64,6 +71,6 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
-          platforms: "linux/amd64,linux/arm64"
+          platforms: ${{ matrix.platforms }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
