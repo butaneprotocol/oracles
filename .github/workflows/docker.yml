@@ -14,10 +14,10 @@ jobs:
         include:
           - os: "ubuntu-22.04"
             platform: linux/amd64
-            rust_target: x86_64-unknown-linux-gnu
+            rust_target: x86_64-unknown-linux-musl
           - os: "ubuntu-22.04"
             platform: linux/arm64
-            rust_target: aarch64-unknown-linux-gnu
+            rust_target: aarch64-unknown-linux-musl
 
     permissions:
       packages: write
@@ -44,11 +44,10 @@ jobs:
         with:
           images: sundaeswap/butane-oracle
 
-      - name: Install ARM toolchain
-        if: matrix.rust_target == 'aarch64-unknown-linux-gnu'
+      - name: Install toolchain
         run: |
-          rustup target install aarch64-unknown-linux-gnu
-          sudo apt install gcc-aarch64-linux-gnu
+          rustup target install ${{ matrix.rust_target }}
+          sudo apt install musl-tools
 
       - name: Rust Cache
         id: cache
