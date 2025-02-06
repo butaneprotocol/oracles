@@ -50,16 +50,11 @@ jobs:
           rustup target install aarch64-unknown-linux-gnu
           sudo apt install gcc-aarch64-linux-gnu
 
-      - name: Cargo Cache
+      - name: Rust Cache
         id: cache
-        uses: actions/cache@v4
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            cargo-registry-cache
-            sccache-cache
-          key: ${{ matrix.rust_target }}-cargo-cache-${{ github.sha }}
-          restore-keys: |
-            ${{ matrix.rust_target }}-cargo-cache
+          prefix-key: ${{ matrix.rust_target }}
 
       - name: Compile
         run: cargo build --release --target ${{ matrix.rust_target }}
