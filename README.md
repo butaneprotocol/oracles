@@ -20,7 +20,9 @@ Additionally, these node operators have performed a multi-party computation to e
 
 These operators establish connections directly to each other node. At any given moment, one of these nodes is acting as the "leader". If the leader goes offline, or is otherwise unreachable for too long, the rest of the nodes use a consensus protocol called [Raft](https://raft.github.io/) to decide on a new leader. This failover typically happens within a few hundred milliseconds.
 
-Meanwhile, each node is continually querying a number of different data sources, such as binance, coinbase, and on-chain DEX's for up to date pricing information. This includes pricing for the collateral that is accepted by the Butane protocol, the synthetic assets minted by the Butane protocol, and the underlying assets that the butane protocol tries to track. Thus, at any given moment, the node has its *own* view of these markets.
+Meanwhile, each node is continually querying a number of different data sources, such as binance, coinbase, and on-chain DEX's for up to date pricing information. This includes pricing for the collateral that is accepted by the Butane protocol, the synthetic assets minted by the Butane protocol, and the underlying assets that the Butane protocol tries to track. Thus, at any given moment, the node has its *own* view of these markets.
+
+Pricing information is collected in terms of trading pairs (i.e. SundaeSwap reports a price for BTN in ADA from a BTN-ADA pool), and we use those to compute a price in USD for each token. For any given token, the oracle uses an average of all collected prices (weighted by TVL) to decide the exact price to report.
 
 Every 10 seconds, assuming the network is healthy, the leader will "propose" a value for each synthetic, listing out the collateral prices. Each node will compare that proposed value to their own. If it is within some tight threshold, they will agree to sign the payload, otherwise they will refuse.
 
@@ -31,9 +33,9 @@ These nodes will then serve this signed payload via an API; anyone wishing to in
 Over time, the size of this set can be expanded and evolved, allowing for a more robust and decentralized oracle network.
 
 So, how does a node decide if it will sign the payload or not? There are a number of safety measures in place to ensure the Butane protocol does not take on bad debt:
-- The node confirms that its own pricing data is up to date by comparing multiple different sources of timing information
-- The node confirms that the messages from each other node are authenticated with the appropriate key pair
-- The node confirms that their own pricing data is high confidence from a minimum number of sources, using a "median discarding outliers"
+- The node confirms that its own pricing data is up to date by comparing multiple different sources of timing information.
+- The node confirms that the messages from each other node are authenticated with the appropriate key pair.
+- The node confirms that their own pricing data is high confidence from a minimum number of sources, using a weighted average price from each source.
 - The node adjusts the reported price differently depending on the change: drops in prices are seen by the oracle feed immediately, to liquidate quickly and guard against bad debt; while rises in prices are phased in over time, to ensure that short lived spikes don't get used to under-collateralize a synthetic.
 
 ## Butane Deployment
@@ -42,11 +44,21 @@ For the Butane mainnet deployment, currently we aggregate data from the followin
 - Binance
 - Bybit
 - Coinbase
+- Crypto.com
+- FXRatesAPI
+- Kucoin
+- OKX
 - Minswap
 - Spectrum
 - Sundae v3
 
-The oracle network is currently a set of 4 nodes, requiring agreement among 3 of them to produce a signature.
+The oracle network is currently a set of 5 nodes, requiring agreement among 3 of them to produce a signature. The current operators of those nodes:
+
+- TxPipe
+- Blink Labs
+- Sundae Labs
+- Easy1
+- Butane
 
 ## Setup
 
