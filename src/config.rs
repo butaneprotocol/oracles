@@ -48,6 +48,7 @@ struct RawOracleConfig {
     pub sundaeswap: SundaeSwapConfig,
     pub minswap: MinswapConfig,
     pub spectrum: SpectrumConfig,
+    pub wingriders: WingRidersConfig,
 }
 
 pub struct OracleConfig {
@@ -82,6 +83,7 @@ pub struct OracleConfig {
     pub sundaeswap: SundaeSwapConfig,
     pub minswap: MinswapConfig,
     pub spectrum: SpectrumConfig,
+    pub wingriders: WingRidersConfig,
 }
 
 impl OracleConfig {
@@ -189,6 +191,7 @@ impl TryFrom<RawOracleConfig> for OracleConfig {
             sundaeswap: raw.sundaeswap,
             minswap: raw.minswap,
             spectrum: raw.spectrum,
+            wingriders: raw.wingriders,
         })
     }
 }
@@ -388,6 +391,15 @@ pub struct MinswapConfig {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct SpectrumConfig {
+    pub kupo_address: String,
+    pub pools: Vec<Pool>,
+    pub max_concurrency: usize,
+    pub retries: usize,
+    pub timeout_ms: u64,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct WingRidersConfig {
     pub kupo_address: String,
     pub pools: Vec<Pool>,
     pub max_concurrency: usize,
