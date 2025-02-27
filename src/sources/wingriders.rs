@@ -2,7 +2,6 @@ use std::{sync::Arc, time::Duration};
 
 use anyhow::{anyhow, Result};
 use futures::{future::BoxFuture, FutureExt};
-use kupon::MatchOptions;
 use rust_decimal::Decimal;
 use tokio::time::sleep;
 use tracing::{warn, Level};
@@ -63,10 +62,7 @@ impl WingRidersSource {
         for pool in &self.pools {
             let client = self.client.clone();
             let pool = pool.clone();
-            let options = MatchOptions::default()
-                .credential(&pool.pool.credential)
-                .asset_id(&pool.pool.asset_id)
-                .only_unspent();
+            let options = pool.pool.kupo_query();
 
             set.push(async move {
                 let mut result = client.matches(&options).await?;
