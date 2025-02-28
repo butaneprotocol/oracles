@@ -296,6 +296,28 @@ sundaeswap:
   use_api: false
   policy_id: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b
   pools:
+    # V1
+    - token: DJED
+      unit: ADA
+      credential: 4020e7fc2de75a0729c3cc3af715b34d98381e0cdbcfa99c950bc3ac/*
+      asset_id: 0029cb7c88c7567b63d1a512c0ed626aa169688ec980730c0473b913.7020f803
+    - token: ENCS
+      unit: ADA
+      credential: 4020e7fc2de75a0729c3cc3af715b34d98381e0cdbcfa99c950bc3ac/*
+      asset_id: 0029cb7c88c7567b63d1a512c0ed626aa169688ec980730c0473b913.70200d04
+    - token: LENFI
+      unit: ADA
+      credential: 4020e7fc2de75a0729c3cc3af715b34d98381e0cdbcfa99c950bc3ac/*
+      asset_id: 0029cb7c88c7567b63d1a512c0ed626aa169688ec980730c0473b913.70201401
+    - token: MIN
+      unit: ADA
+      credential: 4020e7fc2de75a0729c3cc3af715b34d98381e0cdbcfa99c950bc3ac/*
+      asset_id: 0029cb7c88c7567b63d1a512c0ed626aa169688ec980730c0473b913.702018
+    - token: SNEK
+      unit: ADA
+      credential: 4020e7fc2de75a0729c3cc3af715b34d98381e0cdbcfa99c950bc3ac/*
+      asset_id: 0029cb7c88c7567b63d1a512c0ed626aa169688ec980730c0473b913.70201f04
+    # V2
     - token: BTN
       unit: ADA
       credential: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b/*

@@ -83,7 +83,10 @@ impl SundaeSwapKupoSource {
                 let Some(data) = client.datum(&hash.hash).await? else {
                     return Err(anyhow!("could not get datum for sundae token"));
                 };
-                let tx_fee = extract_tx_fee(&data)?;
+                let tx_fee = match pool.pool.credential.as_deref() {
+                    Some("4020e7fc2de75a0729c3cc3af715b34d98381e0cdbcfa99c950bc3ac/*") => 2_000_000,
+                    _ => extract_tx_fee(&data)?,
+                };
 
                 let Some(token_value) =
                     get_asset_value_minus_tx_fee(&matc, &pool.token_asset_id, tx_fee)
