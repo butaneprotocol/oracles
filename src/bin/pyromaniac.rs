@@ -5,7 +5,7 @@ use std::{
     thread,
 };
 
-use anyhow::*;
+use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use clap::Parser;
 use reqwest::header::USER_AGENT;
@@ -73,26 +73,55 @@ async fn main() -> Result<()> {
     }
 
     loop {
+        thread::sleep(std::time::Duration::from_millis(5000));
         println!("Fetching prices from https://api.butane.dev/prices");
         let response = client
             .get("https://api.butane.dev/prices")
             .header(USER_AGENT, "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36")
             .send()
-            .await?;
+            .await;
+        let response = match response {
+            Ok(response) => response,
+            Err(err) => {
+                eprintln!("Failed to fetch prices: {}", err);
+                continue;
+            }
+        };
         // let payload = response.text().await?;
-        let payloads: Vec<OraclePayload> = response.json().await?;
+        let payloads: Result<Vec<OraclePayload>> = response
+            .json()
+            .await
+            .context("failed to parse json response");
+        let payloads = match payloads {
+            Ok(payloads) => payloads,
+            Err(err) => {
+                eprintln!("Failed to parse prices: {}", err);
+                continue;
+            }
+        };
         if let Some(directory) = &args.directory {
             let payloads: Result<Vec<_>> = payloads
                 .iter()
                 .map(|p| to_payload("butane".to_string(), p).context("failed to convert payload"))
                 .collect();
+            let payloads = match payloads {
+                Ok(payloads) => payloads,
+                Err(err) => {
+                    eprintln!("Failed to convert payloads: {}", err);
+                    continue;
+                }
+            };
             let path = Path::join(
                 directory,
                 format!("{}.json", Utc::now().format("%Y-%m-%d_%H-%M-%S.%f")),
             );
             println!("Saving to {}", path.display());
-            save_file(payloads?, &path).await?;
-            thread::sleep(std::time::Duration::from_millis(5000));
+            match save_file(payloads, &path).await {
+                Ok(()) => {}
+                Err(err) => {
+                    eprintln!("Failed to save file: {}", err);
+                }
+            }
         }
     }
     /*
