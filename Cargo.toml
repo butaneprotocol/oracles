@@ -19,7 +19,6 @@ bech32 = "0.11"
 chacha20poly1305 = "0.10"
 clap = { version = "4.5", features = ["derive"] }
 config = "0.15"
-chrono = "0.4"
 cron = "0.15"
 dashmap = "6"
 ed25519 = { version = "2.2", features = ["pkcs8", "pem"] }
@@ -35,19 +34,30 @@ num-integer = "0.1"
 num-rational = "0.4"
 num-traits = "0.2"
 opentelemetry = "0.27"
-opentelemetry-otlp = { version = "0.27", features = ["gzip-tonic", "tls-webpki-roots"] }
+opentelemetry-otlp = { version = "0.27", features = [
+    "gzip-tonic",
+    "tls-webpki-roots",
+] }
 opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
 pallas-crypto = "0.32"
 pallas-primitives = "0.32"
 rand = "0.8.5"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "^0.12", default-features = false, features = [
+    "json",
+    "http2",
+    "rustls-tls",
+] }
 rust_decimal = "1.34.3"
-rustls = { version = "0.23", default-features = false, features = ["logging", "ring", "tls12"] }
-serde = "1"
-serde_json = "1"
 temp-env = "0.3"
-tokio = { version = "1", features = ["full"] }
-tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots" ]}
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
+rustls = { version = "^0.23", default-features = false, features = [
+    "logging",
+    "ring",
+    "tls12",
+] }
+serde = "1.0"
+serde_json = "1.0.114"
+tokio = { version = "1.36.0", features = ["full"] }
 tokio-util = { version = "0.7", features = ["full"] }
 tonic = "0.12"
 tracing = "0.1.40"
@@ -55,6 +65,15 @@ tracing-opentelemetry = "0.28"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 uuid = { version = "1", features = ["v4"] }
 x25519-dalek = { version = "2" }
+sqlx = { version = "0.8.3", features = [
+    "mysql",
+    "runtime-tokio",
+    "tls-rustls",
+    "time",
+    "chrono",
+] }
+serde-aux = "4.6.0"
+chrono = { version = "0.4.40", features = ["serde", "now"] }
 
 [package.metadata.dist]
 dist = true
@@ -75,7 +94,13 @@ installers = ["shell", "powershell", "homebrew"]
 # A GitHub repo to push Homebrew formulas to
 tap = "butaneprotocol/homebrew-tap"
 # Target platforms to build apps for (Rust target-triple syntax)
-targets = ["aarch64-apple-darwin", "aarch64-unknown-linux-gnu", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]
+targets = [
+    "aarch64-apple-darwin",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+]
 # Publish jobs to run in CI
 publish-jobs = ["homebrew"]
 # Which actions to run on pull requests
@@ -86,4 +111,6 @@ install-updater = false
 install-path = "CARGO_HOME"
 
 [workspace.metadata.dist.dependencies.apt]
-gcc-aarch64-linux-gnu = { version = '*', targets = ["aarch64-unknown-linux-gnu"] }
+gcc-aarch64-linux-gnu = { version = '*', targets = [
+    "aarch64-unknown-linux-gnu",
+] }
