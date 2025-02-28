@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "\n            INSERT INTO payloads\n            (source, synthetic, synthetic_numerator, synthetic_denominator, validity_lower, validity_upper, payload, error_text)\n            VALUES (?, ?, ?, ?, ?, ?, ?, ?)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": []
+  },
+  "hash": "eb014adf5d4c624cafca27446f1f0d91bf15ae4ca87e6f50e694584d0bd0083e"
+}
