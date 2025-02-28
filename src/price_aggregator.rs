@@ -178,6 +178,7 @@ impl PriceAggregator {
             source_prices,
             &default_prices,
             &self.config.synthetics,
+            &self.config.currencies,
             utils::decimal_to_rational(self.config.max_synthetic_divergence),
         );
 

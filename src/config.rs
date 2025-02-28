@@ -271,8 +271,9 @@ pub struct SyntheticConfig {
 pub struct CurrencyConfig {
     pub name: String,
     pub asset_id: Option<String>,
-    pub price: Option<Decimal>,
     pub digits: u32,
+    #[serde(default)]
+    pub min_tvl: Decimal,
 }
 
 #[derive(Debug, Deserialize)]
