@@ -129,8 +129,8 @@ fn to_payload(source: String, payload: &OraclePayload) -> Result<Payload> {
         synthetic: Some(payload.synthetic.clone()),
         synthetic_numerator: Some(payload.synthetic_price.numerator.clone()),
         synthetic_denominator: Some(payload.synthetic_price.denominator.clone()),
-        validity_lower: Some(payload.validity.lower_bound.clone()),
-        validity_upper: Some(payload.validity.upper_bound.clone()),
+        validity_lower: Some(payload.validity.lower_bound),
+        validity_upper: Some(payload.validity.upper_bound),
         payload: Some(hex::decode(payload.payload.clone())?),
         error_text: None,
     };
@@ -166,7 +166,7 @@ async fn save_file(payloads: Vec<OraclePayload>, directory: impl AsRef<Path>) ->
 async fn save_db(payloads: Vec<OraclePayload>, connection: &Pool<MySql>) -> Result<()> {
     for payload in payloads
         .iter()
-        .map(|p| to_payload("butane".to_string(), &p))
+        .map(|p| to_payload("butane".to_string(), p))
     {
         let payload = payload?;
         sqlx::query!(
