@@ -2,7 +2,6 @@ use std::{sync::Arc, time::Duration};
 
 use anyhow::{anyhow, Result};
 use futures::{future::BoxFuture, FutureExt};
-use kupon::MatchOptions;
 use rust_decimal::Decimal;
 use tokio::time::sleep;
 use tracing::{warn, Level};
@@ -14,15 +13,15 @@ use super::{
     source::{PriceInfo, PriceSink, Source},
 };
 
-pub struct SpectrumSource {
+pub struct SplashSource {
     client: Arc<kupon::Client>,
     max_concurrency: usize,
     pools: Vec<HydratedPool>,
 }
 
-impl Source for SpectrumSource {
+impl Source for SplashSource {
     fn name(&self) -> String {
-        "Spectrum".into()
+        "Splash".into()
     }
 
     fn tokens(&self) -> Vec<String> {
@@ -34,39 +33,36 @@ impl Source for SpectrumSource {
     }
 }
 
-impl SpectrumSource {
+impl SplashSource {
     pub fn new(config: &OracleConfig) -> Result<Self> {
-        let spectrum_config = &config.spectrum;
-        let client = kupon::Builder::with_endpoint(&spectrum_config.kupo_address)
-            .with_retries(spectrum_config.retries)
-            .with_timeout(Duration::from_millis(spectrum_config.timeout_ms))
+        let splash_config = &config.splash;
+        let client = kupon::Builder::with_endpoint(&splash_config.kupo_address)
+            .with_retries(splash_config.retries)
+            .with_timeout(Duration::from_millis(splash_config.timeout_ms))
             .build()?;
         Ok(Self {
             client: Arc::new(client),
-            max_concurrency: spectrum_config.max_concurrency,
-            pools: config.hydrate_pools(&spectrum_config.pools),
+            max_concurrency: splash_config.max_concurrency,
+            pools: config.hydrate_pools(&splash_config.pools),
         })
     }
 
     async fn query_impl(&self, sink: &PriceSink) -> Result<()> {
         loop {
-            self.query_spectrum(sink).await?;
+            self.query_splash(sink).await?;
             sleep(Duration::from_secs(3)).await;
         }
     }
 
     #[tracing::instrument(err(Debug, level = Level::WARN), skip_all)]
-    async fn query_spectrum(&self, sink: &PriceSink) -> Result<()> {
+    async fn query_splash(&self, sink: &PriceSink) -> Result<()> {
         wait_for_sync(&self.client).await;
 
         let mut set = MaxConcurrencyFutureSet::new(self.max_concurrency);
         for pool in &self.pools {
             let client = self.client.clone();
             let pool = pool.clone();
-            let options = MatchOptions::default()
-                .credential(&pool.pool.credential)
-                .asset_id(&pool.pool.asset_id)
-                .only_unspent();
+            let options = pool.pool.kupo_query();
 
             set.push(async move {
                 let mut result = client.matches(&options).await?;
@@ -88,13 +84,13 @@ impl SpectrumSource {
                 };
                 if unit_value == 0 {
                     return Err(anyhow!(
-                        "Spectrum reported value of {} as zero, ignoring",
+                        "Splash reported value of {} as zero, ignoring",
                         pool.pool.token
                     ));
                 }
                 if token_value == 0 {
                     return Err(anyhow!(
-                        "Spectrum reported value of {} as infinite, ignoring",
+                        "Splash reported value of {} as infinite, ignoring",
                         pool.pool.token
                     ));
                 }
@@ -119,7 +115,7 @@ impl SpectrumSource {
             match res {
                 Err(error) => {
                     // the task ran, but returned an error
-                    warn!("error querying spectrum: {}", error);
+                    warn!("error querying splash: {}", error);
                 }
                 Ok(()) => {
                     // all is well
