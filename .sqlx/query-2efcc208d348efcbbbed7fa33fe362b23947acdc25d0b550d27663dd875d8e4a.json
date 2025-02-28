@@ -1,0 +1,114 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT * FROM payloads",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": {
+          "type": "LongLong",
+          "flags": "NOT_NULL | PRIMARY_KEY | UNSIGNED | AUTO_INCREMENT",
+          "max_size": 20
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "timestamp",
+        "type_info": {
+          "type": "Timestamp",
+          "flags": "NOT_NULL | BINARY",
+          "max_size": 19
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "source",
+        "type_info": {
+          "type": "VarString",
+          "flags": "",
+          "max_size": 1020
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "synthetic",
+        "type_info": {
+          "type": "VarString",
+          "flags": "",
+          "max_size": 1020
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "synthetic_numerator",
+        "type_info": {
+          "type": "VarString",
+          "flags": "",
+          "max_size": 4096
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "synthetic_denominator",
+        "type_info": {
+          "type": "VarString",
+          "flags": "",
+          "max_size": 4096
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "validity_lower",
+        "type_info": {
+          "type": "LongLong",
+          "flags": "UNSIGNED",
+          "max_size": 20
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "validity_upper",
+        "type_info": {
+          "type": "LongLong",
+          "flags": "UNSIGNED",
+          "max_size": 20
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "payload",
+        "type_info": {
+          "type": "Blob",
+          "flags": "BINARY",
+          "max_size": 65535
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "error_text",
+        "type_info": {
+          "type": "VarString",
+          "flags": "",
+          "max_size": 32768
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "2efcc208d348efcbbbed7fa33fe362b23947acdc25d0b550d27663dd875d8e4a"
+}

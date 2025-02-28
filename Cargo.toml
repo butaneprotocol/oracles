@@ -70,8 +70,8 @@ sqlx = { version = "0.8.3", features = [
     "runtime-tokio",
     "tls-rustls",
     "time",
-    "chrono",
 ] }
+time = { version = "0.3", features = ["serde"] }
 serde-aux = "4.6.0"
 chrono = { version = "0.4.40", features = ["serde", "now"] }
 
