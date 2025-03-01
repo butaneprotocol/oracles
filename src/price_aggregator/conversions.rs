@@ -106,8 +106,9 @@ impl<'a> TokenPriceConverter<'a> {
                 continue;
             };
             for source in &price.sources {
-                value += &source.value * &conversion_factor * &source.reliability;
-                reliability += &source.reliability;
+                let normalized_reliability = &source.reliability * &conversion_factor;
+                value += &source.value * &conversion_factor * &normalized_reliability;
+                reliability += &normalized_reliability;
             }
         }
 
@@ -585,7 +586,7 @@ mod tests {
                 PriceInfo {
                     token: "USDT".into(),
                     unit: "USD".into(),
-                    value: Decimal::new(1005, 3),
+                    value: Decimal::new(5, 1),
                     reliability: Decimal::ONE,
                 },
             ),
@@ -594,7 +595,7 @@ mod tests {
                 PriceInfo {
                     token: "BTC".into(),
                     unit: "USD".into(),
-                    value: Decimal::new(5000, 0),
+                    value: Decimal::new(4995, 0),
                     reliability: Decimal::ONE,
                 },
             ),
@@ -603,8 +604,8 @@ mod tests {
                 PriceInfo {
                     token: "BTC".into(),
                     unit: "USDT".into(),
-                    value: Decimal::new(5000, 0),
-                    reliability: Decimal::ONE,
+                    value: Decimal::new(10010, 0),
+                    reliability: Decimal::TWO,
                 },
             ),
         ];
@@ -619,7 +620,7 @@ mod tests {
 
         assert_eq!(
             converter.value_in_usd("BTC"),
-            Some(decimal_rational(50125, 1))
+            Some(decimal_rational(5000, 0))
         );
     }
 
