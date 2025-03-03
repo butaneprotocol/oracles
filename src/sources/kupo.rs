@@ -87,21 +87,17 @@ impl<F: Future> MaxConcurrencyFutureSet<F> {
     }
 
     pub fn push(&mut self, future: F) {
-        if self.running.len() < self.concurrency {
-            self.running.push(future);
-        } else {
-            self.queued.push(future);
-        }
+        self.queued.push(future);
     }
 
     pub async fn next(&mut self) -> Option<F::Output> {
-        let next = self.running.next().await;
-        if next.is_none() {
+        while self.running.len() < self.concurrency {
             if let Some(another_task) = self.queued.pop() {
                 self.running.push(another_task);
-                return self.running.next().await;
+            } else {
+                break;
             }
         }
-        next
+        self.running.next().await
     }
 }
