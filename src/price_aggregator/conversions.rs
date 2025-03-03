@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use num_bigint::BigInt;
 use num_rational::BigRational;
-use num_traits::{Inv, One, Signed, Zero};
+use num_traits::{Inv, One, Signed};
 use serde::Serialize;
 
 use crate::{
@@ -46,7 +46,7 @@ impl<'a> TokenPriceConverter<'a> {
         default_prices: &'a [TokenPrice],
         synthetics: &'a [SyntheticConfig],
         currencies: &'a [CurrencyConfig],
-        max_synthetic_divergence: BigRational,
+        max_price_divergence: BigRational,
     ) -> Self {
         let synthetics = synthetics.iter().map(|s| (s.name.as_str(), s)).collect();
         let min_tvls = currencies
@@ -93,7 +93,7 @@ impl<'a> TokenPriceConverter<'a> {
             prices,
             synthetics,
             min_tvls,
-            threshold: max_synthetic_divergence,
+            threshold: max_price_divergence,
         }
     }
 
@@ -114,8 +114,7 @@ impl<'a> TokenPriceConverter<'a> {
             .get(token)
             .unwrap_or_else(|| panic!("Unrecognized currency {token}"));
 
-        let mut value = BigRational::new(BigInt::ZERO, BigInt::one());
-        let mut reliability = BigRational::new(BigInt::ZERO, BigInt::one());
+        let mut candidate_prices = vec![];
         for price in prices {
             let Some(conversion_factor) = self.value_in_usd(&price.unit) else {
                 continue;
@@ -125,16 +124,33 @@ impl<'a> TokenPriceConverter<'a> {
                 if &normalized_reliability < min_tvl {
                     continue;
                 }
-                value += &source.value * &conversion_factor * &normalized_reliability;
-                reliability += &normalized_reliability;
+                candidate_prices.push((&source.value * &conversion_factor, normalized_reliability));
             }
         }
 
-        if reliability.is_zero() {
-            None
-        } else {
-            Some(value / reliability)
+        let quorum = 1 + candidate_prices.len() / 2;
+        while candidate_prices.len() >= quorum {
+            let mut total_value = BigRational::new(BigInt::ZERO, BigInt::one());
+            let mut total_reliability = BigRational::new(BigInt::ZERO, BigInt::one());
+            for (value, reliability) in &candidate_prices {
+                total_value += value * reliability;
+                total_reliability += reliability;
+            }
+            let price = total_value / total_reliability;
+
+            let (index, max_divergence) = candidate_prices
+                .iter()
+                .map(|(value, _)| (value - &price).abs())
+                .enumerate()
+                .max_by(|(_, d1), (_, d2)| d1.cmp(d2))?;
+            if max_divergence <= &price * &self.threshold {
+                return Some(price);
+            } else {
+                candidate_prices.remove(index);
+            }
         }
+
+        None
     }
 
     fn synthetic_value_in_usd(&self, synthetic: &SyntheticConfig) -> Option<BigRational> {
@@ -417,7 +433,7 @@ mod tests {
                 PriceInfo {
                     token: "BTC".into(),
                     unit: "USD".into(),
-                    value: Decimal::new(100, 0),
+                    value: Decimal::new(97, 0),
                     reliability: Decimal::ONE,
                 },
             ),
@@ -426,7 +442,7 @@ mod tests {
                 PriceInfo {
                     token: "BTC".into(),
                     unit: "USD".into(),
-                    value: Decimal::new(200, 0),
+                    value: Decimal::new(101, 0),
                     reliability: Decimal::new(3, 0),
                 },
             ),
@@ -444,7 +460,7 @@ mod tests {
 
         assert_eq!(
             converter.value_in_usd("BTC"),
-            Some(decimal_rational(175, 0))
+            Some(decimal_rational(100, 0))
         );
     }
 
@@ -780,6 +796,90 @@ mod tests {
             converter.value_in_usd("SUNDAE"),
             Some(decimal_rational(1000, 0))
         );
+    }
+
+    #[test]
+    fn value_in_usd_should_ignore_outlier_source() {
+        let source_prices = vec![
+            (
+                "reasonable price".into(),
+                PriceInfo {
+                    token: "LENFI".into(),
+                    unit: "USD".into(),
+                    value: Decimal::new(98, 0),
+                    reliability: Decimal::new(100, 0),
+                },
+            ),
+            (
+                "also reasonable price".into(),
+                PriceInfo {
+                    token: "LENFI".into(),
+                    unit: "USD".into(),
+                    value: Decimal::new(102, 0),
+                    reliability: Decimal::new(100, 0),
+                },
+            ),
+            (
+                "extreme outlier".into(),
+                PriceInfo {
+                    token: "LENFI".into(),
+                    unit: "USD".into(),
+                    value: Decimal::new(200, 0),
+                    reliability: Decimal::new(100, 0),
+                },
+            ),
+        ];
+        let default_prices = vec![];
+        let synthetics = make_synthetics();
+        let currencies = make_currencies();
+        let converter = TokenPriceConverter::new(
+            &source_prices,
+            &default_prices,
+            &synthetics,
+            &currencies,
+            default_threshold(),
+        );
+
+        assert_eq!(
+            converter.value_in_usd("LENFI"),
+            Some(decimal_rational(100, 0))
+        );
+    }
+
+    #[test]
+    fn value_in_usd_should_not_report_price_if_sources_are_too_far_apart() {
+        let source_prices = vec![
+            (
+                "too low".into(),
+                PriceInfo {
+                    token: "LENFI".into(),
+                    unit: "USD".into(),
+                    value: Decimal::new(89, 0),
+                    reliability: Decimal::new(100, 0),
+                },
+            ),
+            (
+                "too high".into(),
+                PriceInfo {
+                    token: "LENFI".into(),
+                    unit: "USD".into(),
+                    value: Decimal::new(111, 0),
+                    reliability: Decimal::new(100, 0),
+                },
+            ),
+        ];
+        let default_prices = vec![];
+        let synthetics = make_synthetics();
+        let currencies = make_currencies();
+        let converter = TokenPriceConverter::new(
+            &source_prices,
+            &default_prices,
+            &synthetics,
+            &currencies,
+            default_threshold(),
+        );
+
+        assert_eq!(converter.value_in_usd("LENFI"), None,);
     }
 
     fn synthetic_multifeed_test<P: Into<Decimal>>(
