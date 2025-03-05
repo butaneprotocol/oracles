@@ -2,8 +2,9 @@ use std::collections::BTreeMap;
 
 use num_bigint::BigInt;
 use num_rational::BigRational;
-use num_traits::{Inv, One, Signed};
+use num_traits::{Inv, One, Signed, ToPrimitive};
 use serde::Serialize;
+use tracing::warn;
 
 use crate::{
     config::{CurrencyConfig, SyntheticConfig},
@@ -124,7 +125,11 @@ impl<'a> TokenPriceConverter<'a> {
                 if &normalized_reliability < min_tvl {
                     continue;
                 }
-                candidate_prices.push((&source.value * &conversion_factor, normalized_reliability));
+                candidate_prices.push((
+                    &source.name,
+                    &source.value * &conversion_factor,
+                    normalized_reliability,
+                ));
             }
         }
 
@@ -132,7 +137,7 @@ impl<'a> TokenPriceConverter<'a> {
         while candidate_prices.len() >= quorum {
             let mut total_value = BigRational::new(BigInt::ZERO, BigInt::one());
             let mut total_reliability = BigRational::new(BigInt::ZERO, BigInt::one());
-            for (value, reliability) in &candidate_prices {
+            for (_, value, reliability) in &candidate_prices {
                 total_value += value * reliability;
                 total_reliability += reliability;
             }
@@ -140,13 +145,19 @@ impl<'a> TokenPriceConverter<'a> {
 
             let (index, max_divergence) = candidate_prices
                 .iter()
-                .map(|(value, _)| (value - &price).abs())
+                .map(|(_, value, _)| (value - &price).abs())
                 .enumerate()
                 .max_by(|(_, d1), (_, d2)| d1.cmp(d2))?;
             if max_divergence <= &price * &self.threshold {
                 return Some(price);
             } else {
-                candidate_prices.remove(index);
+                let (source, value, _) = candidate_prices.remove(index);
+                let average_price = price.to_f64().expect("infallible");
+                let source_price = value.to_f64().expect("infallible");
+                warn!(
+                    token,
+                    source, average_price, source_price, "Ignoring outlier price"
+                );
             }
         }
 
