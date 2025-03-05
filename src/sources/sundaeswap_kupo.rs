@@ -2,7 +2,6 @@ use std::{sync::Arc, time::Duration};
 
 use anyhow::{anyhow, Result};
 use futures::{future::BoxFuture, FutureExt};
-use kupon::MatchOptions;
 use pallas_primitives::conway::{BigInt, PlutusData};
 use rust_decimal::Decimal;
 use tokio::time::sleep;
@@ -68,10 +67,7 @@ impl SundaeSwapKupoSource {
         for pool in &self.pools {
             let client = self.client.clone();
             let pool = pool.clone();
-            let options = MatchOptions::default()
-                .credential(&pool.pool.credential)
-                .asset_id(&pool.pool.asset_id)
-                .only_unspent();
+            let options = pool.pool.kupo_query();
 
             set.push(async move {
                 let mut result = client.matches(&options).await?;
@@ -88,7 +84,10 @@ impl SundaeSwapKupoSource {
                 let Some(data) = client.datum(&hash.hash).await? else {
                     return Err(anyhow!("could not get datum for sundae token"));
                 };
-                let tx_fee = extract_tx_fee(&data)?;
+                let tx_fee = match pool.pool.credential.as_deref() {
+                    Some("4020e7fc2de75a0729c3cc3af715b34d98381e0cdbcfa99c950bc3ac/*") => 2_000_000,
+                    _ => extract_tx_fee(&data)?,
+                };
 
                 let Some(token_value) =
                     get_asset_value_minus_tx_fee(&matc, &pool.token_asset_id, tx_fee)

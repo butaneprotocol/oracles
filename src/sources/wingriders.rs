@@ -13,15 +13,15 @@ use super::{
     source::{PriceInfo, PriceSink, Source},
 };
 
-pub struct MinswapSource {
+pub struct WingRidersSource {
     client: Arc<kupon::Client>,
     max_concurrency: usize,
     pools: Vec<HydratedPool>,
 }
 
-impl Source for MinswapSource {
+impl Source for WingRidersSource {
     fn name(&self) -> String {
-        "Minswap".into()
+        "WingRiders".into()
     }
 
     fn tokens(&self) -> Vec<String> {
@@ -33,29 +33,29 @@ impl Source for MinswapSource {
     }
 }
 
-impl MinswapSource {
+impl WingRidersSource {
     pub fn new(config: &OracleConfig) -> Result<Self> {
-        let minswap_config = &config.minswap;
-        let client = kupon::Builder::with_endpoint(&minswap_config.kupo_address)
-            .with_retries(minswap_config.retries)
-            .with_timeout(Duration::from_millis(minswap_config.timeout_ms))
+        let wingriders_config = &config.wingriders;
+        let client = kupon::Builder::with_endpoint(&wingriders_config.kupo_address)
+            .with_retries(wingriders_config.retries)
+            .with_timeout(Duration::from_millis(wingriders_config.timeout_ms))
             .build()?;
         Ok(Self {
             client: Arc::new(client),
-            max_concurrency: minswap_config.max_concurrency,
-            pools: config.hydrate_pools(&minswap_config.pools),
+            max_concurrency: wingriders_config.max_concurrency,
+            pools: config.hydrate_pools(&wingriders_config.pools),
         })
     }
 
     async fn query_impl(&self, sink: &PriceSink) -> Result<()> {
         loop {
-            self.query_minswap(sink).await?;
+            self.query_wingriders(sink).await?;
             sleep(Duration::from_secs(3)).await;
         }
     }
 
     #[tracing::instrument(err(Debug, level = Level::WARN), skip_all)]
-    async fn query_minswap(&self, sink: &PriceSink) -> Result<()> {
+    async fn query_wingriders(&self, sink: &PriceSink) -> Result<()> {
         wait_for_sync(&self.client).await;
 
         let mut set = MaxConcurrencyFutureSet::new(self.max_concurrency);
@@ -84,13 +84,13 @@ impl MinswapSource {
                 };
                 if unit_value == 0 {
                     return Err(anyhow!(
-                        "Minswap reported value of {} as zero, ignoring",
+                        "WingRiders reported value of {} as zero, ignoring",
                         pool.pool.token
                     ));
                 }
                 if token_value == 0 {
                     return Err(anyhow!(
-                        "Minswap reported value of {} as infinite, ignoring",
+                        "WingRiders reported value of {} as infinite, ignoring",
                         pool.pool.token
                     ));
                 }
@@ -115,7 +115,7 @@ impl MinswapSource {
             match res {
                 Err(error) => {
                     // the task ran, but returned an error
-                    warn!("error querying minswap: {}", error);
+                    warn!("error querying wingriders: {}", error);
                 }
                 Ok(()) => {
                     // all is well

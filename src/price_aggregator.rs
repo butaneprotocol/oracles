@@ -31,9 +31,11 @@ use crate::{
         minswap::MinswapSource,
         okx::OkxSource,
         source::{PriceInfo, PriceInfoSnapshot},
-        spectrum::SpectrumSource,
+        splash::SplashSource,
         sundaeswap::SundaeSwapSource,
         sundaeswap_kupo::SundaeSwapKupoSource,
+        vyfi::VyFiSource,
+        wingriders::WingRidersSource,
     },
 };
 
@@ -77,7 +79,9 @@ impl PriceAggregator {
             SourceAdapter::new(KucoinSource::new(&config), &config),
             SourceAdapter::new(MinswapSource::new(&config)?, &config),
             SourceAdapter::new(OkxSource::new(&config)?, &config),
-            SourceAdapter::new(SpectrumSource::new(&config)?, &config),
+            SourceAdapter::new(SplashSource::new(&config)?, &config),
+            SourceAdapter::new(VyFiSource::new(&config)?, &config),
+            SourceAdapter::new(WingRidersSource::new(&config)?, &config),
         ];
         if let Some(maestro_source) = MaestroSource::new(&config)? {
             sources.push(SourceAdapter::new(maestro_source, &config));
