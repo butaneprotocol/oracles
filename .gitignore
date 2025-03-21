@@ -2,5 +2,6 @@
 /keys
 /target
 /volumes
+/payloads
 .env
 config.yaml
