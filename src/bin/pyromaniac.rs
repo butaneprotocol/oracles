@@ -164,10 +164,7 @@ async fn save_file(payloads: Vec<OraclePayload>, directory: impl AsRef<Path>) ->
 }
 
 async fn save_db(payloads: Vec<OraclePayload>, connection: &Pool<MySql>) -> Result<()> {
-    for payload in payloads
-        .iter()
-        .map(|p| to_payload("butane".to_string(), p))
-    {
+    for payload in payloads.iter().map(|p| to_payload("butane".to_string(), p)) {
         let payload = payload?;
         sqlx::query!(
             "
