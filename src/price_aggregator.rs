@@ -18,8 +18,8 @@ use tracing::{debug, error, warn};
 use crate::{
     config::{OracleConfig, SyntheticConfig},
     health::HealthSink,
-    price_feed::{IntervalBound, PriceFeed, PriceFeedEntry, Validity},
-    signature_aggregator::{Payload, TimestampedPayloadEntry},
+    price_feed::{IntervalBound, PriceData, SyntheticPriceData, SyntheticPriceFeed, Validity},
+    signature_aggregator::Payload,
     sources::{
         binance::BinanceSource,
         bybit::ByBitSource,
@@ -52,7 +52,7 @@ struct PreviousPriceFeed {
 }
 
 pub struct PriceAggregator {
-    feed_sink: watch::Sender<Vec<PriceFeedEntry>>,
+    price_sink: watch::Sender<PriceData>,
     audit_sink: watch::Sender<Vec<TokenPrice>>,
     payload_source: watch::Receiver<Payload>,
     price_sources: Option<Vec<SourceAdapter>>,
@@ -64,7 +64,7 @@ pub struct PriceAggregator {
 
 impl PriceAggregator {
     pub fn new(
-        feed_sink: watch::Sender<Vec<PriceFeedEntry>>,
+        price_sink: watch::Sender<PriceData>,
         audit_sink: watch::Sender<Vec<TokenPrice>>,
         payload_source: watch::Receiver<Payload>,
         config: Arc<OracleConfig>,
@@ -98,7 +98,7 @@ impl PriceAggregator {
             ));
         }
         Ok(Self {
-            feed_sink,
+            price_sink,
             audit_sink,
             payload_source,
             price_sources: Some(sources),
@@ -145,11 +145,11 @@ impl PriceAggregator {
             }
             borrow.clone()
         };
-        for TimestampedPayloadEntry { timestamp, entry } in new_payload.entries {
+        for entry in new_payload.synthetics {
             if self
                 .previous_prices
                 .get(&entry.synthetic)
-                .is_some_and(|e| e.timestamp > timestamp)
+                .is_some_and(|e| e.timestamp > entry.timestamp)
             {
                 continue;
             }
@@ -163,8 +163,13 @@ impl PriceAggregator {
                 .into_iter()
                 .map(|n| BigRational::new(n.into(), denominator.clone().into()))
                 .collect();
-            self.previous_prices
-                .insert(entry.synthetic, PreviousPriceFeed { timestamp, prices });
+            self.previous_prices.insert(
+                entry.synthetic,
+                PreviousPriceFeed {
+                    timestamp: entry.timestamp,
+                    prices,
+                },
+            );
         }
     }
 
@@ -181,13 +186,13 @@ impl PriceAggregator {
             utils::decimal_to_rational(self.config.max_synthetic_divergence),
         );
 
-        let price_feeds = self
+        let synthetics = self
             .config
             .synthetics
             .iter()
-            .filter_map(|s| self.compute_payload(s, &converter))
+            .filter_map(|s| self.compute_synthetic_payload(s, &converter))
             .collect();
-        self.feed_sink.send_replace(price_feeds);
+        self.price_sink.send_replace(PriceData { synthetics });
 
         let token_values = converter.token_prices();
         self.audit_sink.send_replace(token_values);
@@ -195,11 +200,11 @@ impl PriceAggregator {
         self.persistence.save_prices(&converter).await;
     }
 
-    fn compute_payload(
+    fn compute_synthetic_payload(
         &self,
         synth: &SyntheticConfig,
         converter: &TokenPriceConverter,
-    ) -> Option<PriceFeedEntry> {
+    ) -> Option<SyntheticPriceData> {
         let synth_digits = self.get_digits(&synth.name);
         let synth_price = converter.value_in_usd(&synth.name)?;
 
@@ -241,9 +246,9 @@ impl PriceAggregator {
         let valid_from = SystemTime::now() - Duration::from_secs(60);
         let valid_to = valid_from + Duration::from_secs(360);
 
-        Some(PriceFeedEntry {
+        Some(SyntheticPriceData {
             price: synth_price,
-            data: PriceFeed {
+            feed: SyntheticPriceFeed {
                 collateral_names: Some(synth.collateral.clone()),
                 collateral_prices,
                 synthetic: synth.name.clone(),

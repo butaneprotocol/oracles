@@ -13,9 +13,8 @@ use std::{
 use anyhow::Result;
 use consensus_aggregator::ConsensusSignatureAggregator;
 use dashmap::DashMap;
-use minicbor::{CborLen, Encoder};
-use pallas_primitives::{conway::PlutusData, MaybeIndefArray};
-use serde::{Serialize, Serializer};
+use minicbor::CborLen;
+use serde::Serialize;
 pub use single_aggregator::SingleSignatureAggregator;
 use tokio::{
     select,
@@ -27,7 +26,10 @@ use tracing::{debug, info_span, warn};
 use crate::{
     config::OracleConfig,
     network::{Network, NodeId},
-    price_feed::{IntervalBoundType, PriceFeedEntry, SignedEntries, SignedEntry, SignedPriceFeed},
+    price_feed::{
+        cbor_encode_in_list, IntervalBoundType, PriceData, Signed, SignedEntries, SyntheticEntry,
+        SyntheticPriceFeed,
+    },
     raft::{RaftClient, RaftLeader},
 };
 
@@ -48,7 +50,7 @@ impl SignatureAggregator {
     pub fn single(
         config: &OracleConfig,
         raft_client: RaftClient,
-        price_source: watch::Receiver<Vec<PriceFeedEntry>>,
+        price_source: watch::Receiver<PriceData>,
         leader_source: watch::Receiver<RaftLeader>,
     ) -> Result<(Self, watch::Receiver<Payload>)> {
         SignatureAggregator::new(config, raft_client, |signed_entries_sink| {
@@ -66,7 +68,7 @@ impl SignatureAggregator {
         config: &OracleConfig,
         network: &mut Network,
         raft_client: RaftClient,
-        price_source: watch::Receiver<Vec<PriceFeedEntry>>,
+        price_source: watch::Receiver<PriceData>,
         leader_source: watch::Receiver<RaftLeader>,
     ) -> Result<(Self, watch::Receiver<Payload>)> {
         SignatureAggregator::new(config, raft_client, |signed_entries_sink| {
@@ -96,7 +98,7 @@ impl SignatureAggregator {
         let (payload_sink, mut payload_source) = watch::channel(Payload {
             publisher: config.id.clone(),
             timestamp: SystemTime::UNIX_EPOCH,
-            entries: vec![],
+            synthetics: vec![],
         });
         payload_source.mark_unchanged();
 
@@ -166,7 +168,7 @@ impl SignatureAggregator {
         let mut payload_source = self.signed_entries_source;
         let publish_task = async move {
             // map of synthetic name to most recent payload produced for that entry
-            let mut latest_entries: BTreeMap<String, TimestampedPayloadEntry> = BTreeMap::new();
+            let mut latest_entries: BTreeMap<String, SyntheticPayloadEntry> = BTreeMap::new();
 
             // map of synthetic name to number of times it's failed in a row
             let mut synthetic_failures: BTreeMap<String, usize> =
@@ -176,8 +178,8 @@ impl SignatureAggregator {
                 let span = info_span!("publish_entries");
                 let mut updated = BTreeSet::new();
                 // update the payload age monitor now that we have a new payload
-                for entry in &payload.entries {
-                    let synthetic = entry.data.data.synthetic.clone();
+                for entry in &payload.synthetics {
+                    let synthetic = entry.feed.data.synthetic.clone();
                     let last_updated = entry.timestamp.unwrap_or(payload.timestamp);
                     if latest_entries
                         .get(&synthetic)
@@ -187,7 +189,7 @@ impl SignatureAggregator {
                         continue;
                     }
                     updated.insert(synthetic.clone());
-                    let price_feed_size = entry.data.cbor_len(&mut ()) as u64;
+                    let price_feed_size = entry.feed.cbor_len(&mut ()) as u64;
                     span.in_scope(|| {
                         debug!(
                             histogram.price_feed_size = price_feed_size,
@@ -196,13 +198,11 @@ impl SignatureAggregator {
                     });
                     latest_entries.insert(
                         synthetic.clone(),
-                        TimestampedPayloadEntry {
+                        SyntheticPayloadEntry {
                             timestamp: last_updated,
-                            entry: PayloadEntry {
-                                synthetic: synthetic.clone(),
-                                price: entry.price,
-                                payload: entry.data.clone(),
-                            },
+                            synthetic: synthetic.clone(),
+                            price: entry.price,
+                            payload: entry.feed.clone(),
                         },
                     );
                     let valid_until = find_end_of_entry_validity(entry);
@@ -245,7 +245,7 @@ impl SignatureAggregator {
                 let payload = Payload {
                     publisher,
                     timestamp: payload.timestamp,
-                    entries,
+                    synthetics: entries,
                 };
                 self.payload_sink.send_replace(payload);
             }
@@ -259,8 +259,8 @@ impl SignatureAggregator {
     }
 }
 
-fn find_end_of_entry_validity(entry: &SignedEntry) -> SystemTime {
-    let upper_bound = entry.data.data.validity.upper_bound;
+fn find_end_of_entry_validity(entry: &SyntheticEntry) -> SystemTime {
+    let upper_bound = entry.feed.data.validity.upper_bound;
     match upper_bound.bound_type {
         IntervalBoundType::NegativeInfinity => SystemTime::UNIX_EPOCH,
         IntervalBoundType::PositiveInfinity => SystemTime::now() + Duration::from_secs(60 * 525600),
@@ -271,36 +271,17 @@ fn find_end_of_entry_validity(entry: &SignedEntry) -> SystemTime {
 }
 
 #[derive(Serialize, Clone)]
-pub struct PayloadEntry {
+pub struct SyntheticPayloadEntry {
+    pub timestamp: SystemTime,
     pub synthetic: String,
     pub price: f64,
-    #[serde(serialize_with = "cbor_encode_feed")]
-    pub payload: SignedPriceFeed,
-}
-
-#[derive(Serialize, Clone)]
-pub struct TimestampedPayloadEntry {
-    pub timestamp: SystemTime,
-    #[serde(flatten)]
-    pub entry: PayloadEntry,
+    #[serde(serialize_with = "cbor_encode_in_list")]
+    pub payload: Signed<SyntheticPriceFeed>,
 }
 
 #[derive(Serialize, Clone)]
 pub struct Payload {
     pub publisher: NodeId,
     pub timestamp: SystemTime,
-    pub entries: Vec<TimestampedPayloadEntry>,
-}
-
-fn cbor_encode_feed<S: Serializer>(
-    feed: &SignedPriceFeed,
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
-    let bytes = {
-        let data = PlutusData::Array(MaybeIndefArray::Indef(vec![(feed).into()]));
-        let mut encoder = Encoder::new(vec![]);
-        encoder.encode(data).expect("encoding is infallible");
-        encoder.into_writer()
-    };
-    serializer.serialize_str(&hex::encode(bytes))
+    pub synthetics: Vec<SyntheticPayloadEntry>,
 }

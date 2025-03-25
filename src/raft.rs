@@ -13,7 +13,7 @@ use tracing::{debug, info, info_span};
 use crate::{
     config::OracleConfig,
     network::{Network, NetworkChannel, NodeId},
-    price_feed::PriceFeedEntry,
+    price_feed::PriceData,
 };
 
 pub use client::RaftClient;
@@ -32,7 +32,7 @@ pub enum RaftCommand {
 pub struct Raft {
     pub id: NodeId,
     expected_payloads: usize,
-    price_feed_source: watch::Receiver<Vec<PriceFeedEntry>>,
+    price_source: watch::Receiver<PriceData>,
     command_source: mpsc::Receiver<RaftCommand>,
     channel: NetworkChannel<RaftMessage>,
     state: RaftState,
@@ -43,7 +43,7 @@ impl Raft {
         config: &OracleConfig,
         network: &mut Network,
         leader_sink: watch::Sender<RaftLeader>,
-        price_feed_source: watch::Receiver<Vec<PriceFeedEntry>>,
+        price_source: watch::Receiver<PriceData>,
         command_source: mpsc::Receiver<RaftCommand>,
     ) -> Self {
         // quorum is set to a majority of expected nodes (which includes ourself!)
@@ -71,7 +71,7 @@ impl Raft {
         Self {
             id,
             expected_payloads,
-            price_feed_source,
+            price_source,
             command_source,
             channel,
             state,
@@ -80,7 +80,7 @@ impl Raft {
 
     pub async fn handle_messages(self) {
         let (sender, mut receiver) = self.channel.split();
-        let mut price_feed_source = self.price_feed_source;
+        let mut price_source = self.price_source;
         let mut command_source = self.command_source;
         let mut state = self.state;
         loop {
@@ -102,8 +102,8 @@ impl Raft {
                         }
                     })
                 }
-                Ok(()) = price_feed_source.changed() => {
-                    let present_payloads = price_feed_source.borrow().len();
+                Ok(()) = price_source.changed() => {
+                    let present_payloads = price_source.borrow().synthetics.len();
                     let missing_payloads = self.expected_payloads - present_payloads;
                     state.set_missing_payloads(missing_payloads)
                 }

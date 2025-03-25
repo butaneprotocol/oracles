@@ -23,8 +23,8 @@ use crate::{
     cbor::{CborIdentifier, CborSignatureShare, CborSigningCommitments, CborSigningPackage},
     network::{NetworkSender, NodeId},
     price_feed::{
-        deserialize, serialize, PriceFeed, PriceFeedEntry, SignedEntries, SignedEntry,
-        SignedPriceFeed,
+        deserialize, serialize, PlutusCompatible, PriceData, Signed, SignedEntries, SyntheticEntry,
+        SyntheticPriceFeed,
     },
     raft::RaftLeader,
     signature_aggregator::price_comparator::choose_feeds_to_sign,
@@ -76,7 +76,7 @@ impl Display for SignerMessageData {
 #[derive(Decode, Encode, Clone, Debug)]
 pub struct CommitmentRequest {
     #[n(0)]
-    price_feed: Vec<PriceFeed>,
+    price_feed: Vec<SyntheticPriceFeed>,
 }
 
 #[derive(Decode, Encode, Clone, Debug)]
@@ -86,7 +86,7 @@ pub struct Commitment {
     #[n(1)]
     pub commitments: BTreeMap<String, CborSigningCommitments>,
     #[n(2)]
-    pub price_feed: Vec<PriceFeed>,
+    pub price_feed: Vec<SyntheticPriceFeed>,
 }
 
 #[derive(Decode, Encode, Clone, Debug)]
@@ -149,14 +149,14 @@ enum LeaderState {
     CollectingCommitments {
         round: String,
         round_span: Span,
-        price_data: Vec<PriceFeedEntry>,
+        price_data: PriceData,
         commitments: Vec<(NodeId, Commitment)>,
         my_nonces: BTreeMap<String, SigningNonces>,
     },
     CollectingSignatures {
         round: String,
         round_span: Span,
-        price_data: Vec<PriceFeedEntry>,
+        price_data: PriceData,
         signatures: Vec<Signature>,
         packages: BTreeMap<String, SigningPackage>,
         waiting_for: BTreeSet<NodeId>,
@@ -210,7 +210,7 @@ enum FollowerState {
     Committed {
         round: String,
         round_span: Span,
-        price_data: Vec<PriceFeedEntry>,
+        price_data: PriceData,
         nonces: BTreeMap<String, SigningNonces>,
     },
 }
@@ -262,7 +262,7 @@ pub struct Signer {
     id: NodeId,
     key: KeyPackage,
     public_key: PublicKeyPackage,
-    price_source: watch::Receiver<Vec<PriceFeedEntry>>,
+    price_source: watch::Receiver<PriceData>,
     message_sink: NetworkSender<SignerMessage>,
     signed_entries_sink: mpsc::Sender<(NodeId, SignedEntries)>,
     state: SignerState,
@@ -275,7 +275,7 @@ impl Signer {
         id: NodeId,
         key: KeyPackage,
         public_key: PublicKeyPackage,
-        price_source: watch::Receiver<Vec<PriceFeedEntry>>,
+        price_source: watch::Receiver<PriceData>,
         message_sink: NetworkSender<SignerMessage>,
         signed_entries_sink: mpsc::Sender<(NodeId, SignedEntries)>,
     ) -> Self {
@@ -367,7 +367,11 @@ impl Signer {
         round_span
             .in_scope(|| info!("Beginning round of signature collection, requesting commitments"));
 
-        let price_feed: Vec<_> = price_data.iter().map(|entry| entry.data.clone()).collect();
+        let price_feed: Vec<_> = price_data
+            .synthetics
+            .iter()
+            .map(|entry| entry.feed.clone())
+            .collect();
         let request = CommitmentRequest {
             price_feed: price_feed.clone(),
         };
@@ -382,8 +386,9 @@ impl Signer {
 
         // And commit ourself
         let all_synthetics: Vec<_> = price_data
+            .synthetics
             .iter()
-            .map(|entry| entry.data.synthetic.as_str())
+            .map(|entry| entry.feed.synthetic.as_str())
             .collect();
         let (my_nonces, commitment) = self.commit(&all_synthetics, &price_feed);
         self.state = SignerState::Leader(LeaderState::CollectingCommitments {
@@ -423,7 +428,11 @@ impl Signer {
             }
         };
 
-        let my_feed: Vec<PriceFeed> = price_data.iter().map(|entry| entry.data.clone()).collect();
+        let my_feed: Vec<SyntheticPriceFeed> = price_data
+            .synthetics
+            .iter()
+            .map(|entry| entry.feed.clone())
+            .collect();
         let mut synthetics_to_sign = vec![];
         for (synthetic, result) in choose_feeds_to_sign(&request.price_feed, &my_feed) {
             match result {
@@ -556,9 +565,9 @@ impl Signer {
         let price_data = price_data.clone();
         let mut packages = BTreeMap::new();
         // Request signatures from all the committees
-        for entry in &price_data {
-            let synthetic = &entry.data.synthetic;
-            let message = serialize(&entry.data);
+        for entry in &price_data.synthetics {
+            let synthetic = &entry.feed.synthetic;
+            let message = serialize(&entry.feed);
             let Some(commitments) = commitment_maps.remove(synthetic) else {
                 continue;
             };
@@ -653,11 +662,15 @@ impl Signer {
             return Ok(());
         };
 
-        let leader_feed: Result<Vec<PriceFeed>> = packages
+        let leader_feed: Result<Vec<SyntheticPriceFeed>> = packages
             .values()
             .map(|p| deserialize(p.message()).context("could not decode price_feed"))
             .collect();
-        let my_feed: Vec<PriceFeed> = price_data.iter().map(|entry| entry.data.clone()).collect();
+        let my_feed: Vec<SyntheticPriceFeed> = price_data
+            .synthetics
+            .iter()
+            .map(|entry| entry.feed.clone())
+            .collect();
 
         // Find the set which we are OK with signing
         let mut nonces_to_sign = nonces.clone();
@@ -759,17 +772,17 @@ impl Signer {
 
         let now = SystemTime::now();
         let mut payload_entries = BTreeMap::new();
-        for entry in price_data.iter() {
+        for entry in price_data.synthetics.iter() {
             // If we don't have a signature in the map, we're not signing this price feed
-            let Some(signature) = signatures.remove(&entry.data.synthetic) else {
+            let Some(signature) = signatures.remove(&entry.feed.synthetic) else {
                 continue;
             };
             payload_entries.insert(
-                entry.data.synthetic.clone(),
-                SignedEntry {
+                entry.feed.synthetic.clone(),
+                SyntheticEntry {
                     price: entry.price.to_f64().expect("Could not convert decimal"),
-                    data: SignedPriceFeed {
-                        data: entry.data.clone(),
+                    feed: Signed {
+                        data: entry.feed.clone(),
                         signature,
                     },
                     timestamp: Some(now),
@@ -780,8 +793,8 @@ impl Signer {
         // If there's any synthetics which were in a previous round but not this one,
         // include them in the payload as well.
         if let Some(old_payload) = self.latest_payload.as_ref() {
-            for entry in &old_payload.entries {
-                let synthetic = &entry.data.data.synthetic;
+            for entry in &old_payload.synthetics {
+                let synthetic = &entry.feed.data.synthetic;
                 if !payload_entries.contains_key(synthetic) {
                     payload_entries.insert(synthetic.clone(), entry.clone());
                 }
@@ -790,7 +803,7 @@ impl Signer {
 
         let payload = SignedEntries {
             timestamp: now,
-            entries: payload_entries.into_values().collect(),
+            synthetics: payload_entries.into_values().collect(),
         };
 
         self.publish(self.id.clone(), payload.clone()).await?;
@@ -810,8 +823,8 @@ impl Signer {
     }
 
     async fn publish(&mut self, publisher: NodeId, payload: SignedEntries) -> Result<()> {
-        for entry in &payload.entries {
-            self.validate_feed_signature(&entry.data)
+        for entry in &payload.synthetics {
+            self.validate_feed_signature(&entry.feed)
                 .context("tried to publish feed with invalid signature")?;
         }
         self.signed_entries_sink
@@ -833,7 +846,7 @@ impl Signer {
     fn commit(
         &self,
         synthetics: &[&str],
-        price_feed: &[PriceFeed],
+        price_feed: &[SyntheticPriceFeed],
     ) -> (BTreeMap<String, SigningNonces>, Commitment) {
         let mut nonces = BTreeMap::new();
         let mut commitments = BTreeMap::new();
@@ -868,12 +881,8 @@ impl Signer {
         })
     }
 
-    fn validate_feed_signature(&self, feed: &SignedPriceFeed) -> Result<()> {
-        let data = {
-            let mut bytes = vec![];
-            minicbor::encode(&feed.data, &mut bytes)?;
-            bytes
-        };
+    fn validate_feed_signature<T: PlutusCompatible>(&self, feed: &Signed<T>) -> Result<()> {
+        let data = serialize(&feed.data);
         let signature = frost_ed25519::Signature::deserialize(&feed.signature)?;
         self.key.verifying_key().verify(&data, &signature)?;
         Ok(())
@@ -924,7 +933,7 @@ mod tests {
 
     use crate::{
         network::{NetworkReceiver, NodeId, TestNetwork},
-        price_feed::{PriceFeed, PriceFeedEntry, SignedEntries, Validity},
+        price_feed::{PriceData, SignedEntries, SyntheticPriceData, SyntheticPriceFeed, Validity},
         raft::RaftLeader,
         signature_aggregator::signer::SignerMessage,
     };
@@ -957,7 +966,7 @@ mod tests {
 
     async fn construct_signers(
         min: u16,
-        prices: Vec<Vec<PriceFeedEntry>>,
+        prices: Vec<PriceData>,
     ) -> Result<(
         Vec<SignerOrchestrator>,
         TestNetwork<SignerMessage>,
@@ -1051,10 +1060,10 @@ mod tests {
         collateral_names: &[&str],
         collateral_prices: &[u64],
         denominator: u64,
-    ) -> PriceFeedEntry {
-        PriceFeedEntry {
+    ) -> SyntheticPriceData {
+        SyntheticPriceData {
             price: BigRational::from_f64(price).unwrap(),
-            data: PriceFeed {
+            feed: SyntheticPriceFeed {
                 collateral_names: Some(collateral_names.iter().map(|&s| s.to_string()).collect()),
                 collateral_prices: collateral_prices
                     .iter()
@@ -1069,10 +1078,12 @@ mod tests {
 
     #[tokio::test]
     async fn should_sign_payload_with_quorum_of_two() -> Result<()> {
-        let price_data = vec![
-            price_feed_entry("ADA", 3.50, &["A", "B"], &[3, 4], 1),
-            price_feed_entry("BTN", 1.21, &["A", "B"], &[5, 8], 1),
-        ];
+        let price_data = PriceData {
+            synthetics: vec![
+                price_feed_entry("ADA", 3.50, &["A", "B"], &[3, 4], 1),
+                price_feed_entry("BTN", 1.21, &["A", "B"], &[5, 8], 1),
+            ],
+        };
 
         let prices = vec![price_data.clone(); 3];
         let (mut signers, mut network, mut payload_source) = construct_signers(2, prices).await?;
@@ -1115,17 +1126,19 @@ mod tests {
 
         // leader should have published results
         let signed_entries = assert_round_complete(&mut payload_source)?;
-        assert_eq!(signed_entries.entries.len(), 2);
+        assert_eq!(signed_entries.synthetics.len(), 2);
 
         Ok(())
     }
 
     #[tokio::test]
     async fn should_sign_payload_with_quorum_of_three() -> Result<()> {
-        let price_data = vec![
-            price_feed_entry("ADA", 3.50, &["A", "B"], &[3, 4], 1),
-            price_feed_entry("BTN", 1.21, &["A", "B"], &[5, 8], 1),
-        ];
+        let price_data = PriceData {
+            synthetics: vec![
+                price_feed_entry("ADA", 3.50, &["A", "B"], &[3, 4], 1),
+                price_feed_entry("BTN", 1.21, &["A", "B"], &[5, 8], 1),
+            ],
+        };
 
         let (mut signers, mut network, mut payload_source) =
             construct_signers(3, vec![price_data; 4]).await?;
@@ -1133,15 +1146,19 @@ mod tests {
         run_round(&mut signers, &mut network).await;
 
         let signed_entries = assert_round_complete(&mut payload_source)?;
-        assert_eq!(signed_entries.entries.len(), 2);
+        assert_eq!(signed_entries.synthetics.len(), 2);
 
         Ok(())
     }
 
     #[tokio::test]
     async fn should_sign_close_enough_collateral_prices() -> Result<()> {
-        let leader_prices = vec![price_feed_entry("SYNTH", 3.50, &["A"], &[2], 1)];
-        let follower_prices = vec![price_feed_entry("SYNTH", 3.50, &["A"], &[199], 100)];
+        let leader_prices = PriceData {
+            synthetics: vec![price_feed_entry("SYNTH", 3.50, &["A"], &[2], 1)],
+        };
+        let follower_prices = PriceData {
+            synthetics: vec![price_feed_entry("SYNTH", 3.50, &["A"], &[199], 100)],
+        };
 
         let (mut signers, mut network, mut payload_source) =
             construct_signers(2, vec![leader_prices, follower_prices]).await?;
@@ -1149,15 +1166,19 @@ mod tests {
         run_round(&mut signers, &mut network).await;
 
         let signed_entries = assert_round_complete(&mut payload_source)?;
-        assert_eq!(signed_entries.entries.len(), 1);
+        assert_eq!(signed_entries.synthetics.len(), 1);
 
         Ok(())
     }
 
     #[tokio::test]
     async fn should_not_sign_distant_collateral_prices() -> Result<()> {
-        let leader_prices = vec![price_feed_entry("SYNTH", 3.50, &["A"], &[2], 1)];
-        let follower_prices = vec![price_feed_entry("SYNTH", 3.50, &["A"], &[3], 2)];
+        let leader_prices = PriceData {
+            synthetics: vec![price_feed_entry("SYNTH", 3.50, &["A"], &[2], 1)],
+        };
+        let follower_prices = PriceData {
+            synthetics: vec![price_feed_entry("SYNTH", 3.50, &["A"], &[3], 2)],
+        };
 
         let (mut signers, mut network, mut payload_source) =
             construct_signers(2, vec![leader_prices, follower_prices]).await?;
@@ -1165,21 +1186,25 @@ mod tests {
         run_round(&mut signers, &mut network).await;
 
         let signed_entries = assert_round_complete(&mut payload_source)?;
-        assert_eq!(signed_entries.entries.len(), 0);
+        assert_eq!(signed_entries.synthetics.len(), 0);
 
         Ok(())
     }
 
     #[tokio::test]
     async fn should_sign_some_collateral_prices_but_not_others() -> Result<()> {
-        let leader_prices = vec![
-            price_feed_entry("GOOD", 3.50, &["A"], &[2], 1),
-            price_feed_entry("BAD", 3.50, &["A"], &[2], 1),
-        ];
-        let follower_prices = vec![
-            price_feed_entry("GOOD", 3.50, &["A"], &[2], 1),
-            price_feed_entry("BAD", 3.50, &["A"], &[3], 2),
-        ];
+        let leader_prices = PriceData {
+            synthetics: vec![
+                price_feed_entry("GOOD", 3.50, &["A"], &[2], 1),
+                price_feed_entry("BAD", 3.50, &["A"], &[2], 1),
+            ],
+        };
+        let follower_prices = PriceData {
+            synthetics: vec![
+                price_feed_entry("GOOD", 3.50, &["A"], &[2], 1),
+                price_feed_entry("BAD", 3.50, &["A"], &[3], 2),
+            ],
+        };
 
         let (mut signers, mut network, mut payload_source) =
             construct_signers(2, vec![leader_prices, follower_prices]).await?;
@@ -1187,22 +1212,26 @@ mod tests {
         run_round(&mut signers, &mut network).await;
 
         let signed_entries = assert_round_complete(&mut payload_source)?;
-        assert_eq!(signed_entries.entries.len(), 1);
-        assert_eq!(signed_entries.entries[0].data.data.synthetic, "GOOD");
+        assert_eq!(signed_entries.synthetics.len(), 1);
+        assert_eq!(signed_entries.synthetics[0].feed.data.synthetic, "GOOD");
 
         Ok(())
     }
 
     #[tokio::test]
     async fn should_keep_collecting_commitments_if_not_all_synthetics_are_covered() -> Result<()> {
-        let leader_prices = vec![
-            price_feed_entry("ALL_MATCH", 3.50, &["A"], &[2], 1),
-            price_feed_entry("SOME_MATCH", 3.50, &["A"], &[2], 1),
-        ];
-        let partially_matching_prices = vec![
-            price_feed_entry("ALL_MATCH", 3.50, &["A"], &[2], 1),
-            price_feed_entry("SOME_MATCH", 3.50, &["A"], &[3], 2),
-        ];
+        let leader_prices = PriceData {
+            synthetics: vec![
+                price_feed_entry("ALL_MATCH", 3.50, &["A"], &[2], 1),
+                price_feed_entry("SOME_MATCH", 3.50, &["A"], &[2], 1),
+            ],
+        };
+        let partially_matching_prices = PriceData {
+            synthetics: vec![
+                price_feed_entry("ALL_MATCH", 3.50, &["A"], &[2], 1),
+                price_feed_entry("SOME_MATCH", 3.50, &["A"], &[3], 2),
+            ],
+        };
 
         // Follower #1 has some, but not all, values in common with the leader.
         // Follower #2 has all values in common with the leader.
@@ -1220,21 +1249,25 @@ mod tests {
         run_round(&mut signers, &mut network).await;
 
         let signed_entries = assert_round_complete(&mut payload_source)?;
-        assert_eq!(signed_entries.entries.len(), 2);
+        assert_eq!(signed_entries.synthetics.len(), 2);
 
         Ok(())
     }
 
     #[tokio::test]
     async fn should_stop_collecting_commitments_if_node_is_disconnected() -> Result<()> {
-        let leader_prices = vec![
-            price_feed_entry("ALL_MATCH", 3.50, &["A"], &[2], 1),
-            price_feed_entry("SOME_MATCH", 3.50, &["A"], &[2], 1),
-        ];
-        let partially_matching_prices = vec![
-            price_feed_entry("ALL_MATCH", 3.50, &["A"], &[2], 1),
-            price_feed_entry("SOME_MATCH", 3.50, &["A"], &[3], 2),
-        ];
+        let leader_prices = PriceData {
+            synthetics: vec![
+                price_feed_entry("ALL_MATCH", 3.50, &["A"], &[2], 1),
+                price_feed_entry("SOME_MATCH", 3.50, &["A"], &[2], 1),
+            ],
+        };
+        let partially_matching_prices = PriceData {
+            synthetics: vec![
+                price_feed_entry("ALL_MATCH", 3.50, &["A"], &[2], 1),
+                price_feed_entry("SOME_MATCH", 3.50, &["A"], &[3], 2),
+            ],
+        };
 
         // Follower #1 has some, but not all, values in common with the leader.
         // Follower #2 is disconnected.
@@ -1253,25 +1286,31 @@ mod tests {
         run_round(&mut signers, &mut network).await;
 
         let signed_entries = assert_round_complete(&mut payload_source)?;
-        assert_eq!(signed_entries.entries.len(), 1);
+        assert_eq!(signed_entries.synthetics.len(), 1);
 
         Ok(())
     }
 
     #[tokio::test]
     async fn should_collect_different_signatures_from_different_nodes() -> Result<()> {
-        let leader_prices = vec![
-            price_feed_entry("FIRST", 3.50, &["A"], &[2], 1),
-            price_feed_entry("SECOND", 3.50, &["A"], &[2], 1),
-        ];
-        let follower1_prices = vec![
-            price_feed_entry("FIRST", 3.50, &["A"], &[2], 1),
-            price_feed_entry("SECOND", 3.50, &["A"], &[3], 2),
-        ];
-        let follower2_prices = vec![
-            price_feed_entry("FIRST", 3.50, &["A"], &[3], 2),
-            price_feed_entry("SECOND", 3.50, &["A"], &[2], 1),
-        ];
+        let leader_prices = PriceData {
+            synthetics: vec![
+                price_feed_entry("FIRST", 3.50, &["A"], &[2], 1),
+                price_feed_entry("SECOND", 3.50, &["A"], &[2], 1),
+            ],
+        };
+        let follower1_prices = PriceData {
+            synthetics: vec![
+                price_feed_entry("FIRST", 3.50, &["A"], &[2], 1),
+                price_feed_entry("SECOND", 3.50, &["A"], &[3], 2),
+            ],
+        };
+        let follower2_prices = PriceData {
+            synthetics: vec![
+                price_feed_entry("FIRST", 3.50, &["A"], &[3], 2),
+                price_feed_entry("SECOND", 3.50, &["A"], &[2], 1),
+            ],
+        };
 
         // Follower #1 agrees with the leader on one price, follower #2 on another.
         // We can only sign two payloads if we wait for both of them to finish.
@@ -1282,7 +1321,7 @@ mod tests {
         run_round(&mut signers, &mut network).await;
 
         let signed_entries = assert_round_complete(&mut payload_source)?;
-        assert_eq!(signed_entries.entries.len(), 2);
+        assert_eq!(signed_entries.synthetics.len(), 2);
 
         Ok(())
     }

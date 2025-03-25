@@ -16,7 +16,7 @@ use crate::{
     config::OracleConfig,
     network::NodeId,
     price_aggregator::TokenPrice,
-    signature_aggregator::{Payload, TimestampedPayloadEntry},
+    signature_aggregator::{Payload, SyntheticPayloadEntry},
 };
 
 #[derive(Clone, Serialize)]
@@ -105,7 +105,7 @@ async fn report_all_prices(State(state): State<APIState>) -> impl IntoResponse {
 
 #[allow(clippy::large_enum_variant)]
 pub enum Response {
-    Ok(TimestampedPayloadEntry),
+    Ok(SyntheticPayloadEntry),
     NotFound,
 }
 impl IntoResponse for Response {
@@ -125,9 +125,9 @@ async fn report_payload(
 ) -> impl IntoResponse {
     let payload = state.payload_source.borrow().clone();
     match payload
-        .entries
+        .synthetics
         .iter()
-        .find(|&p| p.entry.synthetic == synthetic)
+        .find(|&p| p.synthetic == synthetic)
     {
         Some(entry) => Response::Ok(entry.clone()),
         None => Response::NotFound,

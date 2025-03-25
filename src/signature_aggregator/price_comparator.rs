@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::price_feed::{IntervalBound, IntervalBoundType, PriceFeed, Validity};
+use crate::price_feed::{IntervalBound, IntervalBoundType, SyntheticPriceFeed, Validity};
 
 #[derive(Debug)]
 pub enum ComparisonResult {
@@ -9,8 +9,8 @@ pub enum ComparisonResult {
 }
 
 pub fn choose_feeds_to_sign<'a>(
-    leader_feed: &'a [PriceFeed],
-    my_feed: &'a [PriceFeed],
+    leader_feed: &'a [SyntheticPriceFeed],
+    my_feed: &'a [SyntheticPriceFeed],
 ) -> Vec<(&'a str, ComparisonResult)> {
     let leader_values: BTreeMap<_, _> = leader_feed
         .iter()
@@ -45,7 +45,7 @@ pub fn choose_feeds_to_sign<'a>(
     results
 }
 
-fn should_sign(leader_feed: &PriceFeed, my_feed: &PriceFeed) -> ComparisonResult {
+fn should_sign(leader_feed: &SyntheticPriceFeed, my_feed: &SyntheticPriceFeed) -> ComparisonResult {
     if leader_feed.synthetic != my_feed.synthetic {
         return ComparisonResult::DoNotSign(format!(
             "mismatched synthetics: leader has {}, we have {}",
@@ -119,7 +119,7 @@ mod tests {
 
     use super::choose_feeds_to_sign;
     use crate::{
-        price_feed::{IntervalBound, PriceFeed, Validity},
+        price_feed::{IntervalBound, SyntheticPriceFeed, Validity},
         signature_aggregator::price_comparator::ComparisonResult,
     };
 
@@ -128,8 +128,8 @@ mod tests {
         collateral_names: &[&str],
         collateral_prices: &[u64],
         denominator: u64,
-    ) -> PriceFeed {
-        PriceFeed {
+    ) -> SyntheticPriceFeed {
+        SyntheticPriceFeed {
             collateral_names: Some(collateral_names.iter().map(|&s| s.to_string()).collect()),
             collateral_prices: collateral_prices
                 .iter()

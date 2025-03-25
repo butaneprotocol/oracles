@@ -15,7 +15,7 @@ use tracing::warn;
 use crate::{
     config::OracleConfig,
     network::NodeId,
-    price_feed::{serialize, PriceFeedEntry, SignedEntries, SignedEntry, SignedPriceFeed},
+    price_feed::{serialize, PriceData, Signed, SignedEntries, SyntheticEntry, SyntheticPriceData},
     raft::RaftLeader,
 };
 
@@ -23,7 +23,7 @@ use crate::{
 pub struct SingleSignatureAggregator {
     id: NodeId,
     key: SecretKey,
-    price_source: watch::Receiver<Vec<PriceFeedEntry>>,
+    price_source: watch::Receiver<PriceData>,
     leader_source: watch::Receiver<RaftLeader>,
     signed_entries_sink: mpsc::Sender<(NodeId, SignedEntries)>,
     round_duration: Duration,
@@ -32,7 +32,7 @@ pub struct SingleSignatureAggregator {
 impl SingleSignatureAggregator {
     pub fn new(
         config: &OracleConfig,
-        price_source: watch::Receiver<Vec<PriceFeedEntry>>,
+        price_source: watch::Receiver<PriceData>,
         leader_source: watch::Receiver<RaftLeader>,
         signed_entries_sink: mpsc::Sender<(NodeId, SignedEntries)>,
     ) -> Result<Self> {
@@ -53,12 +53,9 @@ impl SingleSignatureAggregator {
                 continue;
             }
 
-            let prices: Vec<PriceFeedEntry> = {
+            let prices = {
                 let price_feed_ref = self.price_source.borrow_and_update();
-                price_feed_ref
-                    .iter()
-                    .cloned()
-                    .collect::<Vec<PriceFeedEntry>>()
+                price_feed_ref.synthetics.clone()
             };
 
             let now = SystemTime::now();
@@ -68,7 +65,7 @@ impl SingleSignatureAggregator {
                 .collect();
             let payload = SignedEntries {
                 timestamp: SystemTime::now(),
-                entries: payload_entries,
+                synthetics: payload_entries,
             };
 
             if let Err(error) = self
@@ -81,13 +78,13 @@ impl SingleSignatureAggregator {
         }
     }
 
-    fn sign_price_feed(&self, data: PriceFeedEntry, timestamp: SystemTime) -> SignedEntry {
-        let price_feed_bytes = serialize(&data.data);
+    fn sign_price_feed(&self, data: SyntheticPriceData, timestamp: SystemTime) -> SyntheticEntry {
+        let price_feed_bytes = serialize(&data.feed);
         let signature = self.key.sign(price_feed_bytes);
-        SignedEntry {
+        SyntheticEntry {
             price: data.price.to_f64().expect("Could not convert decimal"),
-            data: SignedPriceFeed {
-                data: data.data.clone(),
+            feed: Signed {
+                data: data.feed.clone(),
                 signature: signature.as_ref().to_vec(),
             },
             timestamp: Some(timestamp),

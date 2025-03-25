@@ -2,10 +2,16 @@ use std::time::Duration;
 
 use anyhow::Result;
 use reqwest::Client;
+use serde::Serialize;
 use tokio::sync::watch;
 use tracing::{info, trace, warn};
 
-use crate::{config::OracleConfig, network::NodeId, signature_aggregator::Payload};
+use crate::{
+    config::OracleConfig,
+    network::NodeId,
+    price_feed::{cbor_encode_in_list, Signed, SyntheticPriceFeed},
+    signature_aggregator::Payload,
+};
 
 pub struct Publisher {
     id: NodeId,
@@ -30,11 +36,15 @@ impl Publisher {
         while source.changed().await.is_ok() {
             let payload = {
                 let latest = source.borrow_and_update();
-                let new_entries: Vec<_> = latest
-                    .entries
+                let new_entries: Vec<ButaneEntry> = latest
+                    .synthetics
                     .iter()
                     .filter(|e| e.timestamp == latest.timestamp)
-                    .map(|e| e.entry.clone())
+                    .map(|e| ButaneEntry {
+                        synthetic: e.synthetic.clone(),
+                        price: e.price,
+                        payload: e.payload.clone(),
+                    })
                     .collect();
                 let payload = serde_json::to_string(&new_entries).expect("infallible");
                 if latest.publisher != self.id {
@@ -55,6 +65,14 @@ impl Publisher {
             }
         }
     }
+}
+
+#[derive(Serialize)]
+struct ButaneEntry {
+    pub synthetic: String,
+    pub price: f64,
+    #[serde(serialize_with = "cbor_encode_in_list")]
+    pub payload: Signed<SyntheticPriceFeed>,
 }
 
 async fn make_request(url: &str, client: &Client, payload: String) -> Result<String> {
