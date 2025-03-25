@@ -4,6 +4,7 @@ use anyhow::Result;
 use config::{Config, Environment, File, FileFormat};
 use ed25519::{pkcs8::DecodePublicKey, PublicKeyBytes};
 use ed25519_dalek::{SigningKey, VerifyingKey};
+use itertools::izip;
 use kupon::AssetId;
 use rust_decimal::Decimal;
 use serde::Deserialize;
@@ -37,6 +38,7 @@ struct RawOracleConfig {
     pub keygen: KeygenConfig,
     pub synthetics: Vec<SyntheticConfig>,
     pub currencies: Vec<CurrencyConfig>,
+    pub feeds: FeedConfig,
     pub binance: BinanceConfig,
     pub bybit: ByBitConfig,
     pub coinbase: CoinbaseConfig,
@@ -71,6 +73,7 @@ pub struct OracleConfig {
     pub keygen: KeygenConfig,
     pub synthetics: Vec<SyntheticConfig>,
     pub currencies: Vec<CurrencyConfig>,
+    pub feeds: FeedConfig,
     pub bybit: ByBitConfig,
     pub binance: BinanceConfig,
     pub coinbase: CoinbaseConfig,
@@ -178,6 +181,7 @@ impl TryFrom<RawOracleConfig> for OracleConfig {
             keygen: raw.keygen,
             synthetics: raw.synthetics,
             currencies: raw.currencies,
+            feeds: raw.feeds,
             binance: raw.binance,
             bybit: raw.bybit,
             coinbase: raw.coinbase,
@@ -273,6 +277,41 @@ pub struct CurrencyConfig {
     pub asset_id: Option<String>,
     pub price: Option<Decimal>,
     pub digits: u32,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct FeedConfig {
+    pub currencies: Vec<String>,
+}
+impl FeedConfig {
+    pub fn all_feeds(&self) -> Vec<Feed> {
+        izip!(&self.currencies, [false, true], [false, true])
+            .map(|(currency, invert, smooth)| Feed {
+                currency: currency.clone(),
+                invert,
+                smooth,
+            })
+            .collect()
+    }
+}
+pub struct Feed {
+    /// The token this feed is for.
+    pub currency: String,
+    /// If true, this is USD/token. If false, token/USD.
+    pub invert: bool,
+    /// If true, this feed applies GEMA smoothing.
+    pub smooth: bool,
+}
+
+impl Feed {
+    pub fn name(&self) -> String {
+        format!(
+            "{}/{}#{}",
+            if self.invert { "USD" } else { &self.currency },
+            if self.invert { &self.currency } else { "USD" },
+            if self.smooth { "GEMA" } else { "RAW" },
+        )
+    }
 }
 
 #[derive(Debug, Deserialize)]

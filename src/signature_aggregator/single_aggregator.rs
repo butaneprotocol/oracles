@@ -66,6 +66,7 @@ impl SingleSignatureAggregator {
             let payload = SignedEntries {
                 timestamp: SystemTime::now(),
                 synthetics: payload_entries,
+                generics: vec![], // TODO
             };
 
             if let Err(error) = self

@@ -804,6 +804,7 @@ impl Signer {
         let payload = SignedEntries {
             timestamp: now,
             synthetics: payload_entries.into_values().collect(),
+            generics: vec![], // TODO
         };
 
         self.publish(self.id.clone(), payload.clone()).await?;

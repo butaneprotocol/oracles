@@ -177,6 +177,9 @@ currencies:
     digits: 6
   - name: XAUt
     digits: 6
+feeds:
+  currencies:
+    - ADA
 binance:
   tokens:
     - token: ADA
