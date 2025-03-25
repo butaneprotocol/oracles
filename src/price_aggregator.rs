@@ -192,7 +192,11 @@ impl PriceAggregator {
             .iter()
             .filter_map(|s| self.compute_synthetic_payload(s, &converter))
             .collect();
-        self.price_sink.send_replace(PriceData { synthetics });
+        let generics = vec![]; // TODO
+        self.price_sink.send_replace(PriceData {
+            synthetics,
+            generics,
+        });
 
         let token_values = converter.token_prices();
         self.audit_sink.send_replace(token_values);

@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 
-use crate::price_feed::{IntervalBound, IntervalBoundType, SyntheticPriceFeed, Validity};
+use crate::price_feed::{
+    GenericPriceFeed, IntervalBound, IntervalBoundType, SyntheticPriceFeed, Validity,
+};
 
 #[derive(Debug)]
 pub enum ComparisonResult {
@@ -8,44 +10,106 @@ pub enum ComparisonResult {
     DoNotSign(String),
 }
 
-pub fn choose_feeds_to_sign<'a>(
+pub fn choose_generic_feeds_to_sign<'a>(
+    leader_feed: &'a [GenericPriceFeed],
+    my_feed: &'a [GenericPriceFeed],
+) -> Vec<(&'a str, ComparisonResult)> {
+    choose_feeds_to_sign(
+        leader_feed,
+        my_feed,
+        |feed| &feed.name,
+        should_sign_generic_feed,
+    )
+}
+
+pub fn choose_synth_feeds_to_sign<'a>(
     leader_feed: &'a [SyntheticPriceFeed],
     my_feed: &'a [SyntheticPriceFeed],
 ) -> Vec<(&'a str, ComparisonResult)> {
+    choose_feeds_to_sign(
+        leader_feed,
+        my_feed,
+        |feed| &feed.synthetic,
+        should_sign_synth_feed,
+    )
+}
+
+fn choose_feeds_to_sign<'a, T, F, S>(
+    leader_feed: &'a [T],
+    my_feed: &'a [T],
+    feed_name: F,
+    should_sign: S,
+) -> Vec<(&'a str, ComparisonResult)>
+where
+    F: Fn(&T) -> &str,
+    S: Fn(&T, &T) -> ComparisonResult,
+{
     let leader_values: BTreeMap<_, _> = leader_feed
         .iter()
-        .map(|feed| (feed.synthetic.as_str(), feed))
+        .map(|feed| (feed_name(feed), feed))
         .collect();
-    let my_values: BTreeMap<_, _> = my_feed
-        .iter()
-        .map(|feed| (feed.synthetic.as_str(), feed))
-        .collect();
+    let my_values: BTreeMap<_, _> = my_feed.iter().map(|feed| (feed_name(feed), feed)).collect();
 
     let mut results = vec![];
-    for synthetic in leader_values.keys() {
-        if !my_values.contains_key(synthetic) {
+    for feed in leader_values.keys() {
+        if !my_values.contains_key(feed) {
             results.push((
-                *synthetic,
+                *feed,
                 ComparisonResult::DoNotSign(
-                    "the leader had a price feed for this synthetic, but we did not".into(),
+                    "the leader had a price for this feed, but we did not".into(),
                 ),
             ));
         }
     }
-    for (synthetic, my_feed) in my_values {
-        let comparison_result = match leader_values.get(synthetic) {
+    for (feed, my_feed) in my_values {
+        let comparison_result = match leader_values.get(feed) {
             Some(leader_feed) => should_sign(leader_feed, my_feed),
-            None => ComparisonResult::DoNotSign(
-                "the leader did not have a price feed for this synthetic".into(),
-            ),
+            None => {
+                ComparisonResult::DoNotSign("the leader did not have a price for this feed".into())
+            }
         };
-        results.push((synthetic, comparison_result));
+        results.push((feed, comparison_result));
     }
 
     results
 }
 
-fn should_sign(leader_feed: &SyntheticPriceFeed, my_feed: &SyntheticPriceFeed) -> ComparisonResult {
+fn should_sign_generic_feed(
+    leader_feed: &GenericPriceFeed,
+    my_feed: &GenericPriceFeed,
+) -> ComparisonResult {
+    if leader_feed.name != my_feed.name {
+        return ComparisonResult::DoNotSign(format!(
+            "mismatched feeds: leader has {}, we have {}",
+            leader_feed.name, my_feed.name
+        ));
+    }
+
+    // let timestamps drift up to 60 seconds
+    if leader_feed.timestamp.abs_diff(my_feed.timestamp) > 1000 * 60 {
+        return ComparisonResult::DoNotSign(format!(
+            "mismatched timestamps: leader has {}, we have {}",
+            leader_feed.timestamp, my_feed.timestamp
+        ));
+    }
+
+    let max_value = leader_feed.price.clone().max(my_feed.price.clone());
+    let min_value = leader_feed.price.clone().min(my_feed.price.clone());
+    let difference = &max_value - min_value;
+    if difference * 100u32 > max_value {
+        return ComparisonResult::DoNotSign(format!(
+            "prices ({}) are too distant: leader has {}, we have {}",
+            leader_feed.name, leader_feed.price, my_feed.price,
+        ));
+    }
+
+    ComparisonResult::Sign
+}
+
+fn should_sign_synth_feed(
+    leader_feed: &SyntheticPriceFeed,
+    my_feed: &SyntheticPriceFeed,
+) -> ComparisonResult {
     if leader_feed.synthetic != my_feed.synthetic {
         return ComparisonResult::DoNotSign(format!(
             "mismatched synthetics: leader has {}, we have {}",
@@ -117,13 +181,13 @@ fn are_bounds_close_enough(leader_bound: &IntervalBound, my_bound: &IntervalBoun
 mod tests {
     use num_bigint::BigUint;
 
-    use super::choose_feeds_to_sign;
+    use super::choose_synth_feeds_to_sign;
     use crate::{
-        price_feed::{IntervalBound, SyntheticPriceFeed, Validity},
-        signature_aggregator::price_comparator::ComparisonResult,
+        price_feed::{GenericPriceFeed, IntervalBound, SyntheticPriceFeed, Validity},
+        signature_aggregator::price_comparator::{choose_generic_feeds_to_sign, ComparisonResult},
     };
 
-    fn price_feed(
+    fn synthetic_feed(
         synthetic: &str,
         collateral_names: &[&str],
         collateral_prices: &[u64],
@@ -141,22 +205,30 @@ mod tests {
         }
     }
 
+    fn generic_feed(name: &str, price: u64) -> GenericPriceFeed {
+        GenericPriceFeed {
+            price: BigUint::from(price),
+            name: name.to_string(),
+            timestamp: 1337,
+        }
+    }
+
     #[test]
     fn should_sign_close_enough_collateral_prices() {
-        let leader_feed = vec![price_feed("SYNTH", &["COLL"], &[2], 1)];
-        let my_feed = vec![price_feed("SYNTH", &["COLL"], &[199], 100)];
+        let leader_feed = vec![synthetic_feed("SYNTH", &["COLL"], &[2], 1)];
+        let my_feed = vec![synthetic_feed("SYNTH", &["COLL"], &[199], 100)];
 
-        let result = choose_feeds_to_sign(&leader_feed, &my_feed);
+        let result = choose_synth_feeds_to_sign(&leader_feed, &my_feed);
         assert_eq!(result.len(), 1);
         assert!(matches!(result[0], ("SYNTH", ComparisonResult::Sign)));
     }
 
     #[test]
     fn should_not_sign_distant_collateral_prices() {
-        let leader_feed = vec![price_feed("SYNTH", &["COLL"], &[2], 1)];
-        let my_feed = vec![price_feed("SYNTH", &["COLL"], &[3], 2)];
+        let leader_feed = vec![synthetic_feed("SYNTH", &["COLL"], &[2], 1)];
+        let my_feed = vec![synthetic_feed("SYNTH", &["COLL"], &[3], 2)];
 
-        let result = choose_feeds_to_sign(&leader_feed, &my_feed);
+        let result = choose_synth_feeds_to_sign(&leader_feed, &my_feed);
         assert_eq!(result.len(), 1);
         assert!(matches!(
             result[0],
@@ -167,20 +239,20 @@ mod tests {
     #[test]
     fn should_sign_close_enough_validity() {
         const TIMESTAMP: u64 = 1712723729359;
-        let mut leader_price = price_feed("SYNTH", &["COLL"], &[1], 1);
+        let mut leader_price = synthetic_feed("SYNTH", &["COLL"], &[1], 1);
         leader_price.validity = Validity {
             lower_bound: IntervalBound::unix_timestamp(TIMESTAMP, true),
             upper_bound: IntervalBound::unix_timestamp(TIMESTAMP + 3000000, true),
         };
         let leader_feed = vec![leader_price];
-        let mut my_price = price_feed("SYNTH", &["COLL"], &[1], 1);
+        let mut my_price = synthetic_feed("SYNTH", &["COLL"], &[1], 1);
         my_price.validity = Validity {
             lower_bound: IntervalBound::unix_timestamp(TIMESTAMP + 5000, true),
             upper_bound: IntervalBound::unix_timestamp(TIMESTAMP + 3005000, true),
         };
         let my_feed = vec![my_price];
 
-        let result = choose_feeds_to_sign(&leader_feed, &my_feed);
+        let result = choose_synth_feeds_to_sign(&leader_feed, &my_feed);
         assert_eq!(result.len(), 1);
         assert!(matches!(result[0], ("SYNTH", ComparisonResult::Sign)));
     }
@@ -188,24 +260,82 @@ mod tests {
     #[test]
     fn should_not_sign_distant_validity() {
         const TIMESTAMP: u64 = 1712723729359;
-        let mut leader_price = price_feed("SYNTH", &["COLL"], &[1], 1);
+        let mut leader_price = synthetic_feed("SYNTH", &["COLL"], &[1], 1);
         leader_price.validity = Validity {
             lower_bound: IntervalBound::unix_timestamp(TIMESTAMP, true),
             upper_bound: IntervalBound::unix_timestamp(TIMESTAMP + 3000000, true),
         };
         let leader_feed = vec![leader_price];
-        let mut my_price = price_feed("SYNTH", &["COLL"], &[1], 1);
+        let mut my_price = synthetic_feed("SYNTH", &["COLL"], &[1], 1);
         my_price.validity = Validity {
             lower_bound: IntervalBound::unix_timestamp(TIMESTAMP + 5000000, true),
             upper_bound: IntervalBound::unix_timestamp(TIMESTAMP + 8000000, true),
         };
         let my_feed = vec![my_price];
 
-        let result = choose_feeds_to_sign(&leader_feed, &my_feed);
+        let result = choose_synth_feeds_to_sign(&leader_feed, &my_feed);
         assert_eq!(result.len(), 1);
         assert!(matches!(
             result[0],
             ("SYNTH", ComparisonResult::DoNotSign(_))
+        ));
+    }
+
+    #[test]
+    fn should_sign_close_enough_generic_prices() {
+        let leader_feed = vec![generic_feed("ADA/USD#RAW", 1000000)];
+        let my_feed = vec![generic_feed("ADA/USD#RAW", 1010000)];
+
+        let result = choose_generic_feeds_to_sign(&leader_feed, &my_feed);
+        assert_eq!(result.len(), 1);
+        assert!(matches!(result[0], ("ADA/USD#RAW", ComparisonResult::Sign)));
+    }
+
+    #[test]
+    fn should_not_sign_distant_generic_prices() {
+        let leader_feed = vec![generic_feed("ADA/USD#RAW", 1000000)];
+        let my_feed = vec![generic_feed("ADA/USD#RAW", 2000000)];
+
+        let result = choose_generic_feeds_to_sign(&leader_feed, &my_feed);
+        assert_eq!(result.len(), 1);
+        assert!(matches!(
+            result[0],
+            ("ADA/USD#RAW", ComparisonResult::DoNotSign(_))
+        ));
+    }
+
+    #[test]
+    fn should_sign_close_enough_timestamp() {
+        const TIMESTAMP: u64 = 1712723729359;
+        let mut leader_price = generic_feed("ADA/USD#RAW", 1000000);
+        leader_price.timestamp = TIMESTAMP;
+        let leader_feed = vec![leader_price];
+
+        let mut my_price = generic_feed("ADA/USD#RAW", 1000000);
+        my_price.timestamp = TIMESTAMP + 5000;
+        let my_feed = vec![my_price];
+
+        let result = choose_generic_feeds_to_sign(&leader_feed, &my_feed);
+        assert_eq!(result.len(), 1);
+        assert!(matches!(result[0], ("ADA/USD#RAW", ComparisonResult::Sign)));
+    }
+
+    #[test]
+    fn should_not_sign_distant_timestmap() {
+        const TIMESTAMP: u64 = 1712723729359;
+        let mut leader_price = generic_feed("ADA/USD#RAW", 1000000);
+        leader_price.timestamp = TIMESTAMP;
+        let leader_feed = vec![leader_price];
+
+        let mut my_price = generic_feed("ADA/USD#RAW", 1000000);
+        my_price.timestamp = TIMESTAMP + 5000000;
+        let my_feed = vec![my_price];
+
+        let result = choose_generic_feeds_to_sign(&leader_feed, &my_feed);
+        assert_eq!(result.len(), 1);
+        assert!(matches!(
+            result[0],
+            ("ADA/USD#RAW", ComparisonResult::DoNotSign(_))
         ));
     }
 }

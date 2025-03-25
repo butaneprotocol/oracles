@@ -16,6 +16,7 @@ mod synthetic;
 #[derive(Clone, Debug)]
 pub struct PriceData {
     pub synthetics: Vec<SyntheticPriceData>,
+    pub generics: Vec<GenericPriceFeed>,
 }
 
 #[derive(Decode, Encode, Clone, Debug)]

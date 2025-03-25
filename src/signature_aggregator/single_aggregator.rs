@@ -15,7 +15,10 @@ use tracing::warn;
 use crate::{
     config::OracleConfig,
     network::NodeId,
-    price_feed::{serialize, PriceData, Signed, SignedEntries, SyntheticEntry, SyntheticPriceData},
+    price_feed::{
+        serialize, GenericEntry, GenericPriceFeed, PriceData, Signed, SignedEntries,
+        SyntheticEntry, SyntheticPriceData,
+    },
     raft::RaftLeader,
 };
 
@@ -55,18 +58,24 @@ impl SingleSignatureAggregator {
 
             let prices = {
                 let price_feed_ref = self.price_source.borrow_and_update();
-                price_feed_ref.synthetics.clone()
+                price_feed_ref.clone()
             };
 
             let now = SystemTime::now();
-            let payload_entries = prices
+            let synthetics = prices
+                .synthetics
                 .into_iter()
-                .map(|p| self.sign_price_feed(p, now))
+                .map(|p| self.sign_synthetic_feed(p, now))
+                .collect();
+            let generics = prices
+                .generics
+                .into_iter()
+                .map(|p| self.sign_generic_feed(p, now))
                 .collect();
             let payload = SignedEntries {
-                timestamp: SystemTime::now(),
-                synthetics: payload_entries,
-                generics: vec![], // TODO
+                timestamp: now,
+                synthetics,
+                generics,
             };
 
             if let Err(error) = self
@@ -79,7 +88,11 @@ impl SingleSignatureAggregator {
         }
     }
 
-    fn sign_price_feed(&self, data: SyntheticPriceData, timestamp: SystemTime) -> SyntheticEntry {
+    fn sign_synthetic_feed(
+        &self,
+        data: SyntheticPriceData,
+        timestamp: SystemTime,
+    ) -> SyntheticEntry {
         let price_feed_bytes = serialize(&data.feed);
         let signature = self.key.sign(price_feed_bytes);
         SyntheticEntry {
@@ -89,6 +102,18 @@ impl SingleSignatureAggregator {
                 signature: signature.as_ref().to_vec(),
             },
             timestamp: Some(timestamp),
+        }
+    }
+
+    fn sign_generic_feed(&self, data: GenericPriceFeed, timestamp: SystemTime) -> GenericEntry {
+        let price_feed_bytes = serialize(&data);
+        let signature = self.key.sign(price_feed_bytes);
+        GenericEntry {
+            feed: Signed {
+                data,
+                signature: signature.as_ref().to_vec(),
+            },
+            timestamp,
         }
     }
 }

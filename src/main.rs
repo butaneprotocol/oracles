@@ -46,7 +46,10 @@ struct Node {
 impl Node {
     pub fn new(config: Arc<OracleConfig>) -> Result<Self> {
         let (leader_sink, leader_source) = watch::channel(RaftLeader::Unknown);
-        let (price_sink, price_source) = watch::channel(PriceData { synthetics: vec![] });
+        let (price_sink, price_source) = watch::channel(PriceData {
+            synthetics: vec![],
+            generics: vec![],
+        });
         let (price_audit_sink, price_audit_source) = watch::channel(vec![]);
         let (raft_client, raft_source) = RaftClient::new();
 

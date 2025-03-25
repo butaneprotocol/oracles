@@ -1,3 +1,4 @@
+use minicbor::{decode, encode, Decode, Decoder, Encode, Encoder};
 use num_bigint::BigUint;
 
 use super::{
@@ -31,5 +32,21 @@ impl PlutusCompatible for GenericPriceFeed {
             name,
             timestamp,
         })
+    }
+}
+
+impl<C> Encode<C> for GenericPriceFeed {
+    fn encode<W: encode::Write>(
+        &self,
+        e: &mut Encoder<W>,
+        ctx: &mut C,
+    ) -> Result<(), encode::Error<W::Error>> {
+        self.to_plutus().encode(e, ctx)
+    }
+}
+
+impl<'b, C> Decode<'b, C> for GenericPriceFeed {
+    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, decode::Error> {
+        Self::from_plutus(d.decode_with(ctx)?)
     }
 }
