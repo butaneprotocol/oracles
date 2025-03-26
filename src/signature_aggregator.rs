@@ -93,12 +93,16 @@ impl SignatureAggregator {
             mpsc::Sender<(NodeId, SignedEntries)>,
         ) -> Result<SignatureAggregatorImplementation>,
     {
-        let feeds = config
-            .synthetics
-            .iter()
-            .map(|s| s.name.clone())
-            .chain(config.feeds.all_feeds().iter().map(|f| f.name()))
-            .collect();
+        let mut feeds = vec![];
+        for synthetic in &config.synthetics {
+            feeds.push(synthetic.name.clone());
+        }
+        for currency in &config.feeds.currencies {
+            feeds.push(format!("USD/{currency}#RAW"));
+            feeds.push(format!("{currency}/USD#RAW"));
+            feeds.push(format!("USD/{currency}#GEMA"));
+            feeds.push(format!("{currency}/USD#GEMA"));
+        }
         let (signed_entries_sink, signed_entries_source) = mpsc::channel(10);
         let (payload_sink, mut payload_source) = watch::channel(Payload {
             publisher: config.id.clone(),

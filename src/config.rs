@@ -4,7 +4,6 @@ use anyhow::Result;
 use config::{Config, Environment, File, FileFormat};
 use ed25519::{pkcs8::DecodePublicKey, PublicKeyBytes};
 use ed25519_dalek::{SigningKey, VerifyingKey};
-use itertools::izip;
 use kupon::AssetId;
 use rust_decimal::Decimal;
 use serde::Deserialize;
@@ -283,17 +282,7 @@ pub struct CurrencyConfig {
 pub struct FeedConfig {
     pub currencies: Vec<String>,
 }
-impl FeedConfig {
-    pub fn all_feeds(&self) -> Vec<Feed> {
-        izip!(&self.currencies, [false, true], [false, true])
-            .map(|(currency, invert, smooth)| Feed {
-                currency: currency.clone(),
-                invert,
-                smooth,
-            })
-            .collect()
-    }
-}
+
 pub struct Feed {
     /// The token this feed is for.
     pub currency: String,
@@ -301,17 +290,6 @@ pub struct Feed {
     pub invert: bool,
     /// If true, this feed applies GEMA smoothing.
     pub smooth: bool,
-}
-
-impl Feed {
-    pub fn name(&self) -> String {
-        format!(
-            "{}/{}#{}",
-            if self.invert { "USD" } else { &self.currency },
-            if self.invert { &self.currency } else { "USD" },
-            if self.smooth { "GEMA" } else { "RAW" },
-        )
-    }
 }
 
 #[derive(Debug, Deserialize)]
