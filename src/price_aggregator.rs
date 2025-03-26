@@ -316,31 +316,31 @@ impl PriceAggregator {
         let Some(price) = converter.value_in_usd(currency) else {
             return feeds;
         };
-        let usd_per_token = to_int(&price);
-        let token_per_usd = to_int(&(BigRational::one() / &price));
+        let token_usd = to_int(&price);
+        let usd_token = to_int(&(BigRational::one() / &price));
 
         feeds.push(GenericPriceFeed {
-            price: usd_per_token.clone(),
-            name: format!("USD/{currency}#RAW"),
-            timestamp,
-        });
-        feeds.push(GenericPriceFeed {
-            price: token_per_usd.clone(),
+            price: token_usd.clone(),
             name: format!("{currency}/USD#RAW"),
             timestamp,
         });
-
-        let usd_per_token_gema_feed = format!("USD/{currency}#GEMA");
         feeds.push(GenericPriceFeed {
-            price: self.apply_gema(&usd_per_token_gema_feed, usd_per_token),
-            name: usd_per_token_gema_feed,
+            price: usd_token.clone(),
+            name: format!("USD/{currency}#RAW"),
             timestamp,
         });
 
-        let token_per_usd_gema_feed = format!("{currency}/USD#GEMA");
+        let token_usd_gema = format!("{currency}/USD#GEMA");
         feeds.push(GenericPriceFeed {
-            price: self.apply_gema(&token_per_usd_gema_feed, token_per_usd),
-            name: token_per_usd_gema_feed,
+            price: self.apply_gema(&token_usd_gema, token_usd),
+            name: token_usd_gema,
+            timestamp,
+        });
+
+        let usd_token_gema_feed = format!("USD/{currency}#GEMA");
+        feeds.push(GenericPriceFeed {
+            price: self.apply_gema(&usd_token_gema_feed, usd_token),
+            name: usd_token_gema_feed,
             timestamp,
         });
 
