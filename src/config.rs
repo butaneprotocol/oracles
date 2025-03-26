@@ -32,6 +32,7 @@ struct RawOracleConfig {
     pub use_persisted_prices: bool,
     pub max_synthetic_divergence: Decimal,
     pub publish_url: Option<String>,
+    pub publish_feed_base_url: Option<String>,
     pub logs: RawLogConfig,
     pub frost_address: Option<String>,
     pub keygen: KeygenConfig,
@@ -67,6 +68,7 @@ pub struct OracleConfig {
     pub use_persisted_prices: bool,
     pub max_synthetic_divergence: Decimal,
     pub publish_url: Option<String>,
+    pub publish_feed_base_url: Option<String>,
     pub logs: LogConfig,
     pub frost_address: Option<String>,
     pub keygen: KeygenConfig,
@@ -159,6 +161,11 @@ impl TryFrom<RawOracleConfig> for OracleConfig {
             uptrace_dsn: raw.logs.uptrace_dsn,
         };
 
+        let publish_feed_base_url = raw.publish_feed_base_url.or_else(|| {
+            let base_url = raw.publish_url.as_ref()?;
+            Some(base_url.strip_suffix("/oraclePrices")?.to_string())
+        });
+
         Ok(Self {
             id,
             label,
@@ -175,6 +182,7 @@ impl TryFrom<RawOracleConfig> for OracleConfig {
             use_persisted_prices: raw.use_persisted_prices,
             max_synthetic_divergence: raw.max_synthetic_divergence,
             publish_url: raw.publish_url,
+            publish_feed_base_url,
             logs,
             frost_address: raw.frost_address,
             keygen: raw.keygen,

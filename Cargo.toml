@@ -54,6 +54,7 @@ tonic = "0.12"
 tracing = "0.1.40"
 tracing-opentelemetry = "0.28"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+urlencoding = "2"
 uuid = { version = "1", features = ["v4"] }
 x25519-dalek = { version = "2" }
 
