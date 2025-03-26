@@ -27,8 +27,8 @@ use crate::{
     config::OracleConfig,
     network::{Network, NodeId},
     price_feed::{
-        cbor_encode_in_list, GenericPriceFeed, IntervalBoundType, PriceData, Signed, SignedEntries,
-        SyntheticPriceFeed,
+        cbor_encode_in_list, system_time_to_iso, GenericPriceFeed, IntervalBoundType, PriceData,
+        Signed, SignedEntries, SyntheticPriceFeed,
     },
     raft::{RaftClient, RaftLeader},
 };
@@ -324,6 +324,7 @@ fn find_end_of_entry_validity(entry: &SyntheticPayloadEntry) -> SystemTime {
 
 #[derive(Serialize, Clone)]
 pub struct SyntheticPayloadEntry {
+    #[serde(serialize_with = "system_time_to_iso")]
     pub timestamp: SystemTime,
     pub synthetic: String,
     pub price: f64,
@@ -333,6 +334,7 @@ pub struct SyntheticPayloadEntry {
 
 #[derive(Serialize, Clone)]
 pub struct GenericPayloadEntry {
+    #[serde(serialize_with = "system_time_to_iso")]
     pub timestamp: SystemTime,
     pub name: String,
     #[serde(serialize_with = "cbor_encode_in_list")]
@@ -342,6 +344,7 @@ pub struct GenericPayloadEntry {
 #[derive(Serialize, Clone)]
 pub struct Payload {
     pub publisher: NodeId,
+    #[serde(serialize_with = "system_time_to_iso")]
     pub timestamp: SystemTime,
     pub generics: Vec<GenericPayloadEntry>,
     pub synthetics: Vec<SyntheticPayloadEntry>,
