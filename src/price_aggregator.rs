@@ -309,7 +309,7 @@ impl PriceAggregator {
             .expect("it is after 1970")
             .as_millis() as u64;
         let to_int = |price: &BigRational| {
-            let int_price: BigInt = (price.numer() * 1_000_000) / price.denom();
+            let int_price: BigInt = (price.numer() * 10_000_000) / price.denom();
             int_price.to_biguint().unwrap()
         };
 
