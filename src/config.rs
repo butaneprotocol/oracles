@@ -291,15 +291,6 @@ pub struct FeedConfig {
     pub currencies: Vec<String>,
 }
 
-pub struct Feed {
-    /// The token this feed is for.
-    pub currency: String,
-    /// If true, this is USD/token. If false, token/USD.
-    pub invert: bool,
-    /// If true, this feed applies GEMA smoothing.
-    pub smooth: bool,
-}
-
 #[derive(Debug, Deserialize)]
 pub struct BinanceConfig {
     pub tokens: Vec<BinanceTokenConfig>,
