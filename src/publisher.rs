@@ -1,9 +1,10 @@
 use std::time::Duration;
 
 use anyhow::Result;
+use futures::{stream::FuturesUnordered, StreamExt};
 use reqwest::Client;
 use serde::Serialize;
-use tokio::sync::watch;
+use tokio::{join, sync::watch};
 use tracing::{info, trace, warn};
 
 use crate::{
@@ -17,7 +18,7 @@ pub struct Publisher {
     id: NodeId,
     publish_synthetic_url: Option<String>,
     publish_feed_base_url: Option<String>,
-    source: watch::Receiver<Payload>,
+    source: Option<watch::Receiver<Payload>>,
     client: Client,
 }
 
@@ -27,19 +28,18 @@ impl Publisher {
             id: config.id.clone(),
             publish_synthetic_url: config.publish_url.clone(),
             publish_feed_base_url: config.publish_feed_base_url.clone(),
-            source,
+            source: Some(source),
             client: Client::builder().build()?,
         })
     }
 
-    pub async fn run(self) {
-        let mut source = self.source;
-        let client = self.client;
+    pub async fn run(mut self) {
+        let mut source = self.source.take().unwrap();
         while source.changed().await.is_ok() {
             let (publisher, butane_payload, feeds) = {
                 let latest = source.borrow_and_update();
 
-                let new_entries: Vec<ButaneEntry> = latest
+                let butane_payload: Vec<ButaneEntry> = latest
                     .synthetics
                     .iter()
                     .filter(|e| e.timestamp == latest.timestamp)
@@ -49,7 +49,6 @@ impl Publisher {
                         payload: e.payload.clone(),
                     })
                     .collect();
-                let butane_payload = serde_json::to_string(&new_entries).expect("infallible");
 
                 let feeds: Vec<FeedEntry> = latest
                     .generics
@@ -66,37 +65,53 @@ impl Publisher {
             };
 
             if publisher != self.id {
+                let butane_payload = serde_json::to_string(&butane_payload).expect("infallible");
                 let feed_payloads = serde_json::to_string(&feeds).expect("infallible");
                 info!(%publisher, butane_payload, feed_payloads, "someone else is publishing a payload");
                 continue;
             }
 
-            if let Some(url) = &self.publish_synthetic_url {
-                info!(butane_payload, "publishing payload");
+            join!(
+                self.publish_synthetic_payload(butane_payload),
+                self.publish_feeds(feeds)
+            );
+        }
+    }
 
-                match make_request(url, &client, butane_payload).await {
-                    Ok(res) => trace!("Payload published! {}", res),
-                    Err(err) => warn!("Could not publish payload: {}", err),
-                }
-            } else {
-                info!(butane_payload, "final payload (not publishing)");
+    async fn publish_synthetic_payload(&self, entries: Vec<ButaneEntry>) {
+        let butane_payload = serde_json::to_string(&entries).expect("infallible");
+        if let Some(url) = &self.publish_synthetic_url {
+            info!(butane_payload, "publishing payload");
+
+            match make_request(url, &self.client, butane_payload).await {
+                Ok(res) => trace!("Payload published! {}", res),
+                Err(err) => warn!("Could not publish payload: {}", err),
             }
+        } else {
+            info!(butane_payload, "final payload (not publishing)");
+        }
+    }
 
-            for feed in feeds {
-                let name = feed.feed.clone();
-                let feed_payload = serde_json::to_string(&feed).expect("infallible");
-                if let Some(url) = &self.publish_feed_base_url {
-                    let full_url = format!("{url}/{}", urlencoding::encode(&name));
+    async fn publish_feeds(&self, feeds: Vec<FeedEntry>) {
+        let mut publish_tasks = FuturesUnordered::new();
+        for feed in feeds {
+            let name = feed.feed.clone();
+            let feed_payload = serde_json::to_string(&feed).expect("infallible");
+            if let Some(url) = &self.publish_feed_base_url {
+                let full_url = format!("{url}/{}", urlencoding::encode(&name));
+                let client = self.client.clone();
+                publish_tasks.push(async move {
                     info!(feed_payload, name, "publishing feed payload");
                     match make_request(&full_url, &client, feed_payload).await {
                         Ok(res) => trace!(name, "Payload published! {}", res),
                         Err(err) => warn!(name, "Could not publish payload: {}", err),
                     }
-                } else {
-                    info!(feed_payload, name, "feed payload (not publishing)")
-                }
+                });
+            } else {
+                info!(feed_payload, name, "feed payload (not publishing)")
             }
         }
+        while let Some(()) = publish_tasks.next().await {}
     }
 }
 

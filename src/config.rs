@@ -162,8 +162,8 @@ impl TryFrom<RawOracleConfig> for OracleConfig {
         };
 
         let publish_feed_base_url = raw.publish_feed_base_url.or_else(|| {
-            let base_url = raw.publish_url.as_ref()?;
-            Some(base_url.strip_suffix("/oraclePrices")?.to_string())
+            let base_url = raw.publish_url.as_ref()?.strip_suffix("/oraclePrices")?;
+            Some(format!("{base_url}/oracles"))
         });
 
         Ok(Self {
