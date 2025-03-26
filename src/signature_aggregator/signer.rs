@@ -932,6 +932,10 @@ impl Signer {
             self.validate_feed_signature(&entry.feed)
                 .context("tried to publish feed with invalid signature")?;
         }
+        for entry in &payload.generics {
+            self.validate_feed_signature(&entry.feed)
+                .context("tried to publish feed with invalid signature")?;
+        }
         self.signed_entries_sink
             .send((publisher, payload.clone()))
             .await
