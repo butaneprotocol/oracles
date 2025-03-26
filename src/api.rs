@@ -16,7 +16,7 @@ use crate::{
     config::OracleConfig,
     network::NodeId,
     price_aggregator::TokenPrice,
-    signature_aggregator::{Payload, SyntheticPayloadEntry},
+    signature_aggregator::{GenericPayloadEntry, Payload, SyntheticPayloadEntry},
 };
 
 #[derive(Clone, Serialize)]
@@ -58,7 +58,7 @@ impl APIServer {
 
         let app = Router::new()
             .route("/payload", get(report_all_payloads))
-            .route("/payload/{synthetic}", get(report_payload))
+            .route("/payload/{feed}", get(report_payload))
             .route("/prices", get(report_all_prices))
             .with_state(self.state);
         set.spawn(async move {
@@ -105,13 +105,15 @@ async fn report_all_prices(State(state): State<APIState>) -> impl IntoResponse {
 
 #[allow(clippy::large_enum_variant)]
 pub enum Response {
-    Ok(SyntheticPayloadEntry),
+    Synthetic(SyntheticPayloadEntry),
+    Generic(GenericPayloadEntry),
     NotFound,
 }
 impl IntoResponse for Response {
     fn into_response(self) -> axum::response::Response {
         match self {
-            Response::Ok(entry) => (StatusCode::OK, Json(entry)).into_response(),
+            Response::Synthetic(entry) => (StatusCode::OK, Json(entry)).into_response(),
+            Response::Generic(entry) => (StatusCode::OK, Json(entry)).into_response(),
             Response::NotFound => {
                 (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response()
             }
@@ -120,16 +122,15 @@ impl IntoResponse for Response {
 }
 
 async fn report_payload(
-    Path(synthetic): Path<String>,
+    Path(feed): Path<String>,
     State(state): State<APIState>,
 ) -> impl IntoResponse {
     let payload = state.payload_source.borrow().clone();
-    match payload
-        .synthetics
-        .iter()
-        .find(|&p| p.synthetic == synthetic)
-    {
-        Some(entry) => Response::Ok(entry.clone()),
-        None => Response::NotFound,
+    if let Some(entry) = payload.synthetics.into_iter().find(|p| p.synthetic == feed) {
+        return Response::Synthetic(entry);
     }
+    if let Some(entry) = payload.generics.into_iter().find(|p| p.name == feed) {
+        return Response::Generic(entry);
+    }
+    Response::NotFound
 }
