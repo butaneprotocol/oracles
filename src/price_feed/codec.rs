@@ -1,3 +1,6 @@
+use std::time::SystemTime;
+
+use chrono::{DateTime, Utc};
 use minicbor::{decode, Decoder, Encoder};
 use num_bigint::BigUint;
 use pallas_primitives::{BigInt, Constr, MaybeIndefArray, PlutusData};
@@ -175,4 +178,12 @@ pub fn cbor_encode_in_list<S: serde::Serializer, T: PlutusCompatible>(
         encoder.into_writer()
     };
     serializer.serialize_str(&hex::encode(bytes))
+}
+
+pub fn system_time_to_iso<S: serde::Serializer>(
+    time: &SystemTime,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    let datetime = DateTime::<Utc>::from(*time);
+    serializer.serialize_str(&datetime.to_rfc3339())
 }
