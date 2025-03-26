@@ -5,7 +5,7 @@ use num_traits::ToPrimitive;
 use tracing::debug;
 
 type Ratio = num_rational::Ratio<BigInt>;
-use crate::price_feed::{PriceFeed, PriceFeedEntry};
+use crate::price_feed::{PriceData, SyntheticPriceData, SyntheticPriceFeed};
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 struct PriceKey {
@@ -27,20 +27,21 @@ pub struct PriceInstrumentation {
 }
 
 impl PriceInstrumentation {
-    pub fn begin_round(&mut self, round: &str, my_prices: &[PriceFeedEntry]) {
+    pub fn begin_round(&mut self, round: &str, my_prices: &PriceData) {
         self.end_round();
         self.round = Some(round.to_string());
-        self.collateral_names = extract_collateral_names(my_prices);
+        self.collateral_names = extract_collateral_names(&my_prices.synthetics);
 
         for (key, value) in my_prices
+            .synthetics
             .iter()
-            .flat_map(|e| extract_prices_from_feed(&e.data))
+            .flat_map(|e| extract_prices_from_feed(&e.feed))
         {
             self.all_prices.insert(key, vec![value]);
         }
     }
 
-    pub fn track_prices(&mut self, round: &str, prices: &[PriceFeed]) {
+    pub fn track_prices(&mut self, round: &str, prices: &[SyntheticPriceFeed]) {
         if self.round.as_ref().is_none_or(|r| r != round) {
             return;
         }
@@ -74,7 +75,9 @@ impl PriceInstrumentation {
     }
 }
 
-fn extract_prices_from_feed(feed: &PriceFeed) -> impl Iterator<Item = (PriceKey, Ratio)> + '_ {
+fn extract_prices_from_feed(
+    feed: &SyntheticPriceFeed,
+) -> impl Iterator<Item = (PriceKey, Ratio)> + '_ {
     feed.collateral_prices
         .iter()
         .enumerate()
@@ -88,13 +91,13 @@ fn extract_prices_from_feed(feed: &PriceFeed) -> impl Iterator<Item = (PriceKey,
         })
 }
 
-fn extract_collateral_names(entries: &[PriceFeedEntry]) -> BTreeMap<String, Vec<String>> {
+fn extract_collateral_names(entries: &[SyntheticPriceData]) -> BTreeMap<String, Vec<String>> {
     entries
         .iter()
         .map(|e| {
-            let synthetic = e.data.synthetic.clone();
+            let synthetic = e.feed.synthetic.clone();
             let collateral = e
-                .data
+                .feed
                 .collateral_names
                 .as_ref()
                 .cloned()

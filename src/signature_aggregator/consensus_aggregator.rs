@@ -14,7 +14,7 @@ use crate::{
     config::OracleConfig,
     keys,
     network::{NetworkChannel, NetworkReceiver, NodeId},
-    price_feed::{PriceFeedEntry, SignedEntries},
+    price_feed::{PriceData, SignedEntries},
     raft::RaftLeader,
 };
 
@@ -30,7 +30,7 @@ impl ConsensusSignatureAggregator {
     pub fn new(
         config: &OracleConfig,
         channel: NetworkChannel<SignerMessage>,
-        price_source: watch::Receiver<Vec<PriceFeedEntry>>,
+        price_source: watch::Receiver<PriceData>,
         leader_source: watch::Receiver<RaftLeader>,
         signed_entries_sink: mpsc::Sender<(NodeId, SignedEntries)>,
     ) -> Result<Self> {

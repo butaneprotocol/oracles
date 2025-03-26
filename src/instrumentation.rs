@@ -14,16 +14,18 @@ use tracing_subscriber::{
 use crate::{config::LogConfig, network::NodeId};
 
 pub enum OtelGuard {
-    Enabled(metrics::SdkMeterProvider),
+    Enabled(trace::SdkTracerProvider, metrics::SdkMeterProvider),
     Disabled,
 }
 impl Drop for OtelGuard {
     fn drop(&mut self) {
-        if let Self::Enabled(meter_provider) = &self {
+        if let Self::Enabled(tracer_provider, meter_provider) = &self {
             if let Err(err) = meter_provider.shutdown() {
                 eprintln!("{:?}", err);
             }
-            global::shutdown_tracer_provider();
+            if let Err(err) = tracer_provider.shutdown() {
+                eprintln!("{:?}", err);
+            }
         }
     }
 }
@@ -57,7 +59,7 @@ where
             let metrics_layer = tracing_opentelemetry::MetricsLayer::new(meter_provider.clone());
 
             Dispatch::new(subscriber.with(metrics_layer).with(tracer_layer)).init();
-            Ok(OtelGuard::Enabled(meter_provider))
+            Ok(OtelGuard::Enabled(tracer_provider, meter_provider))
         }
         None => {
             Dispatch::new(subscriber).init();
@@ -77,13 +79,15 @@ fn init_providers(
     name: &str,
     endpoint: &str,
     uptrace_dsn: Option<&String>,
-) -> Result<(trace::TracerProvider, metrics::SdkMeterProvider)> {
-    let resource = Resource::default().merge(&Resource::new([
-        KeyValue::new("service.name", name.to_string()),
-        KeyValue::new("service.namespace", "oracles"),
-        KeyValue::new("service.instance.id", id.to_string()),
-        KeyValue::new("service.version", env!("CARGO_PKG_VERSION")),
-    ]));
+) -> Result<(trace::SdkTracerProvider, metrics::SdkMeterProvider)> {
+    let resource = Resource::builder()
+        .with_attributes([
+            KeyValue::new("service.name", name.to_string()),
+            KeyValue::new("service.namespace", "oracles"),
+            KeyValue::new("service.instance.id", id.to_string()),
+            KeyValue::new("service.version", env!("CARGO_PKG_VERSION")),
+        ])
+        .build();
 
     let exporter_provider = ExporterProvider::new(endpoint, uptrace_dsn)?;
 
@@ -96,9 +100,9 @@ fn init_providers(
 fn init_tracer_provider(
     resource: Resource,
     exporter_provider: &ExporterProvider,
-) -> Result<trace::TracerProvider> {
+) -> Result<trace::SdkTracerProvider> {
     let exporter = exporter_provider.span()?;
-    let processor = trace::BatchSpanProcessor::builder(exporter, opentelemetry_sdk::runtime::Tokio)
+    let processor = trace::BatchSpanProcessor::builder(exporter)
         .with_batch_config(
             opentelemetry_sdk::trace::BatchConfigBuilder::default()
                 .with_max_queue_size(30000)
@@ -108,7 +112,7 @@ fn init_tracer_provider(
         )
         .build();
 
-    let provider = trace::TracerProvider::builder()
+    let provider = trace::SdkTracerProvider::builder()
         .with_span_processor(processor)
         .with_resource(resource)
         .build();
@@ -123,10 +127,8 @@ fn init_meter_provider(
     exporter_provider: &ExporterProvider,
 ) -> Result<metrics::SdkMeterProvider> {
     let exporter = exporter_provider.metric()?;
-    let reader =
-        metrics::PeriodicReader::builder(exporter, opentelemetry_sdk::runtime::Tokio).build();
     let provider = metrics::SdkMeterProvider::builder()
-        .with_reader(reader)
+        .with_periodic_exporter(exporter)
         .with_resource(resource)
         .build();
 

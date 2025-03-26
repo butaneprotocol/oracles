@@ -10,6 +10,7 @@ use oracles::{
     instrumentation,
     network::Network,
     price_aggregator::PriceAggregator,
+    price_feed::PriceData,
     publisher::Publisher,
     raft::{Raft, RaftClient, RaftLeader},
     signature_aggregator::SignatureAggregator,
@@ -45,7 +46,10 @@ struct Node {
 impl Node {
     pub fn new(config: Arc<OracleConfig>) -> Result<Self> {
         let (leader_sink, leader_source) = watch::channel(RaftLeader::Unknown);
-        let (price_feed_sink, price_feed_source) = watch::channel(vec![]);
+        let (price_sink, price_source) = watch::channel(PriceData {
+            synthetics: vec![],
+            generics: vec![],
+        });
         let (price_audit_sink, price_audit_source) = watch::channel(vec![]);
         let (raft_client, raft_source) = RaftClient::new();
 
@@ -63,7 +67,7 @@ impl Node {
             &config,
             &mut network,
             leader_sink,
-            price_feed_source.clone(),
+            price_source.clone(),
             raft_source,
         );
 
@@ -72,15 +76,15 @@ impl Node {
                 &config,
                 &mut network,
                 raft_client,
-                price_feed_source,
+                price_source,
                 leader_source,
             )?
         } else {
-            SignatureAggregator::single(&config, raft_client, price_feed_source, leader_source)?
+            SignatureAggregator::single(&config, raft_client, price_source, leader_source)?
         };
 
         let price_aggregator = PriceAggregator::new(
-            price_feed_sink,
+            price_sink,
             price_audit_sink,
             payload_source.clone(),
             config.clone(),
