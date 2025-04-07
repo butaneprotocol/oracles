@@ -1,6 +1,6 @@
 use std::{collections::HashMap, str::FromStr, time::Duration};
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use config::{Config, Environment, File, FileFormat};
 use ed25519::{pkcs8::DecodePublicKey, PublicKeyBytes};
 use ed25519_dalek::{SigningKey, VerifyingKey};
@@ -39,6 +39,7 @@ struct RawOracleConfig {
     pub synthetics: Vec<SyntheticConfig>,
     pub currencies: Vec<CurrencyConfig>,
     pub feeds: FeedConfig,
+    pub kupo: RawKupoConfig,
     pub binance: BinanceConfig,
     pub bybit: ByBitConfig,
     pub coinbase: CoinbaseConfig,
@@ -75,6 +76,7 @@ pub struct OracleConfig {
     pub synthetics: Vec<SyntheticConfig>,
     pub currencies: Vec<CurrencyConfig>,
     pub feeds: FeedConfig,
+    pub kupo: KupoConfig,
     pub bybit: ByBitConfig,
     pub binance: BinanceConfig,
     pub coinbase: CoinbaseConfig,
@@ -107,6 +109,21 @@ impl OracleConfig {
                 }
             })
             .collect()
+    }
+
+    pub fn kupo_with_overrides(&self, raw: &RawKupoConfig) -> KupoConfig {
+        KupoConfig {
+            address: raw
+                .kupo_address
+                .as_ref()
+                .unwrap_or(&self.kupo.address)
+                .clone(),
+            retries: raw.retries.or(self.kupo.retries),
+            timeout: raw
+                .timeout_ms
+                .map(Duration::from_millis)
+                .or(self.kupo.timeout),
+        }
     }
 
     fn build_asset_lookup(&self) -> HashMap<&String, &CurrencyConfig> {
@@ -166,6 +183,15 @@ impl TryFrom<RawOracleConfig> for OracleConfig {
             Some(format!("{base_url}/oracles"))
         });
 
+        let kupo = KupoConfig {
+            address: match raw.kupo.kupo_address {
+                Some(addr) => addr,
+                None => bail!("kupo_address required"),
+            },
+            retries: raw.kupo.retries,
+            timeout: raw.kupo.timeout_ms.map(Duration::from_millis),
+        };
+
         Ok(Self {
             id,
             label,
@@ -189,6 +215,7 @@ impl TryFrom<RawOracleConfig> for OracleConfig {
             synthetics: raw.synthetics,
             currencies: raw.currencies,
             feeds: raw.feeds,
+            kupo,
             binance: raw.binance,
             bybit: raw.bybit,
             coinbase: raw.coinbase,
@@ -275,7 +302,14 @@ pub struct SyntheticConfig {
     #[serde(default)]
     pub invert: bool,
     pub digits: u32,
-    pub collateral: Vec<String>,
+    pub collateral: CollateralConfig,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum CollateralConfig {
+    List(Vec<String>),
+    Nft(String),
 }
 
 #[derive(Debug, Deserialize)]
@@ -289,6 +323,33 @@ pub struct CurrencyConfig {
 #[derive(Debug, Deserialize)]
 pub struct FeedConfig {
     pub currencies: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct RawKupoConfig {
+    pub kupo_address: Option<String>,
+    pub retries: Option<usize>,
+    pub timeout_ms: Option<u64>,
+}
+
+#[derive(Debug)]
+pub struct KupoConfig {
+    pub address: String,
+    pub retries: Option<usize>,
+    pub timeout: Option<Duration>,
+}
+
+impl KupoConfig {
+    pub fn new_client(&self) -> Result<kupon::Client> {
+        let mut builder = kupon::Builder::with_endpoint(&self.address);
+        if let Some(retries) = self.retries {
+            builder = builder.with_retries(retries);
+        }
+        if let Some(timeout) = self.timeout {
+            builder = builder.with_timeout(timeout);
+        }
+        Ok(builder.build()?)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -385,30 +446,27 @@ pub struct OkxTokenConfig {
 #[derive(Debug, Deserialize, Clone)]
 pub struct SundaeSwapConfig {
     pub use_api: bool,
-    pub kupo_address: String,
+    #[serde(flatten)]
+    pub kupo: RawKupoConfig,
     pub policy_id: String,
     pub pools: Vec<Pool>,
     pub max_concurrency: usize,
-    pub retries: usize,
-    pub timeout_ms: u64,
 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct MinswapConfig {
-    pub kupo_address: String,
+    #[serde(flatten)]
+    pub kupo: RawKupoConfig,
     pub pools: Vec<Pool>,
     pub max_concurrency: usize,
-    pub retries: usize,
-    pub timeout_ms: u64,
 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct SpectrumConfig {
-    pub kupo_address: String,
+    #[serde(flatten)]
+    pub kupo: RawKupoConfig,
     pub pools: Vec<Pool>,
     pub max_concurrency: usize,
-    pub retries: usize,
-    pub timeout_ms: u64,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -439,18 +497,7 @@ pub fn load_config(config_files: &[String]) -> Result<OracleConfig> {
     let config = builder
         .add_source(Environment::with_prefix("ORACLE_"))
         .build()?;
-    let mut raw: RawOracleConfig = config.try_deserialize()?;
-
-    // the collateral for synthetics must always be ordered by asset_id
-    let asset_ids: HashMap<_, _> = raw
-        .currencies
-        .iter()
-        .filter_map(|c| Some((&c.name, c.asset_id.as_ref()?)))
-        .collect();
-    for synth in raw.synthetics.iter_mut() {
-        synth.collateral.sort_by_cached_key(|c| asset_ids.get(c));
-    }
-
+    let raw: RawOracleConfig = config.try_deserialize()?;
     raw.try_into()
 }
 

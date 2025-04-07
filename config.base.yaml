@@ -22,98 +22,94 @@ synthetics:
     backing_currencies:
       - USD
     collateral:
-      - ADA
-      - BTN
-      - SNEK
-      - MIN
-      - LENFI
-      - ENCS
+      list:
+        - ADA
+        - BTN
+        - SNEK
+        - MIN
+        - LENFI
+        - ENCS
   - name: USDs
     digits: 6
     backing_currencies:
       - USD
     collateral:
-      - ADA
-      - USDb
-      - BTN
-      - DJED
-      - myUSD
-      - iUSD
+      list:
+        - ADA
+        - USDb
+        - BTN
+        - DJED
+        - myUSD
+        - iUSD
   - name: EURb
     digits: 6
     backing_currencies:
       - EUR
     collateral:
-      - ADA
-      - USDb
-      - USDs
-      - BTN
+      list:
+        - ADA
+        - USDb
+        - USDs
+        - BTN
   - name: JPYb
     digits: 6
     backing_currencies:
       - JPY
     collateral:
-      - ADA
-      - USDb
-      - USDs
-      - BTN
+      list:
+        - ADA
+        - USDb
+        - USDs
+        - BTN
   - name: BTCb
     digits: 8
     backing_currencies:
       - BTC
     collateral:
-      - ADA
-      - USDb
-      - USDs
-      - BTN
-      - SNEK
-      - MIN
-      - LENFI
-      - ENCS
+      list:
+        - ADA
+        - USDb
+        - USDs
+        - BTN
+        - SNEK
+        - MIN
+        - LENFI
+        - ENCS
   - name: POLb
     digits: 6
     backing_currencies:
       - POL
     collateral:
-      - ADA
-      - BTCb
-      - BTN
-      - SNEK
-      - MIN
-      - LENFI
-      - ENCS
+      list:
+        - ADA
+        - BTCb
+        - BTN
+        - SNEK
+        - MIN
+        - LENFI
+        - ENCS
   - name: SOLp
     digits: 9
     backing_currencies:
       - SOL
     invert: true
     collateral:
-      - ADA
-      - USDb
-      - USDs
-      - BTN
-      - SNEK
-      - MIN
-      - LENFI
-      - ENCS
+      list:
+        - ADA
+        - USDb
+        - USDs
+        - BTN
+        - SNEK
+        - MIN
+        - LENFI
+        - ENCS
   - name: MIDAS
     digits: 9
     backing_currencies:
       - PAXG
       - XAUt
     collateral:
-      - ADA
-      - BTN
-      - SNEK
-      - MIN
-      - FLDT
-      - IAG
-      - SHEN
-      - LENFI
-      - SUNDAE
-      - ENCS
-      - LQ
-      - iETH
+      nft: 00000000000410c2d9e01e8ec78ab1dc6bbc383fae76cbe2689beb02.705f4d49444153
 currencies:
   - name: ADA
     digits: 6
@@ -293,9 +289,12 @@ okx:
     - token: XAUt
       unit: USDT
       index: XAUT-USDT
+kupo:
+  kupo_address: http://kupo:1442
+  retries: 3
+  timeout_ms: 5000
 sundaeswap:
   use_api: false
-  kupo_address: http://kupo:1442
   policy_id: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b
   pools:
     - token: BTN
@@ -351,10 +350,7 @@ sundaeswap:
       credential: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b/*
       asset_id: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b.000de1402f36866691fa75a9aab66dec99f7cc2d297ca09e34d9ce68cde04773
   max_concurrency: 3
-  retries: 3
-  timeout_ms: 5000
 minswap:
-  kupo_address: http://kupo:1442
   pools:
     # V1 pools
     - token: BTN
@@ -475,10 +471,7 @@ minswap:
       credential: ea07b733d932129c378af627436e7cbc2ef0bf96e0036bb51b3bde6b/*
       asset_id: f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.f734af78799c4e857bfd37e8f919678020c0bb3f2aae9328bdb7c557a939a926
   max_concurrency: 3
-  retries: 3
-  timeout_ms: 5000
 spectrum:
-  kupo_address: http://kupo:1442
   pools:
     - token: BTN
       unit: ADA
@@ -505,8 +498,6 @@ spectrum:
       credential: 6b9c456aa650cb808a9ab54326e039d5235ed69f069c9664a8fe5b69/*
       asset_id: f8fd67ee46f66da669f68dc941090eb753687636b47fc6fd7f5e6254.534e454b5f4144415f4e4654
   max_concurrency: 3
-  retries: 3
-  timeout_ms: 5000
 fxratesapi:
   cron: "0 4 * ? * ? *" # Run four minutes past the hour, every hour
   currencies:

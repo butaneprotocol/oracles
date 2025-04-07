@@ -37,10 +37,9 @@ impl Source for SpectrumSource {
 impl SpectrumSource {
     pub fn new(config: &OracleConfig) -> Result<Self> {
         let spectrum_config = &config.spectrum;
-        let client = kupon::Builder::with_endpoint(&spectrum_config.kupo_address)
-            .with_retries(spectrum_config.retries)
-            .with_timeout(Duration::from_millis(spectrum_config.timeout_ms))
-            .build()?;
+        let client = config
+            .kupo_with_overrides(&spectrum_config.kupo)
+            .new_client()?;
         Ok(Self {
             client: Arc::new(client),
             max_concurrency: spectrum_config.max_concurrency,
