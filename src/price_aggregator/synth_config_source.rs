@@ -67,26 +67,59 @@ impl SyntheticConfigSource {
             let asset_names = &self.asset_names;
             let client = &self.client;
             futures.push(async move {
+                /// Convenient macro for returning an error,
+                /// plus whether or not we should clear older config for the synthetic.
+                /// In general, we want to keep using existing config on network error,
+                /// but clear it on any other kind of error.
+                macro_rules! fail {
+                    ($clear:expr, $msg:literal $(,)?) => {
+                        return Err(UpdateConfigError {
+                            synthetic,
+                            error: anyhow::anyhow!($msg),
+                            clear: $clear,
+                        })
+                    };
+                    ($clear:expr, $fmt:expr, $($arg:tt)*) => {
+                        return Err(UpdateConfigError {
+                            synthetic,
+                            error: anyhow::anyhow!($fmt, $($arg)*),
+                            clear: $clear,
+                        })
+                    };
+                }
                 let query = MatchOptions::default().asset_id(nft).only_unspent();
-                let mut matches = client.matches(&query).await?;
+                let mut matches = match client.matches(&query).await {
+                    Ok(matches) => matches,
+                    Err(error) => fail!(false, "could not fetch owner for NFT {nft}: {error}"),
+                };
                 if matches.is_empty() {
-                    bail!("No UTxO found for NFT {nft}");
+                    fail!(true, "no UTxO found for NFT {nft}");
                 }
                 if matches.len() > 1 {
-                    bail!("Found {} UTxOs for NFT {nft}, expected 1", matches.len());
+                    fail!(
+                        true,
+                        "found {} UTxOs for NFT {nft}, expected 1",
+                        matches.len()
+                    );
                 }
                 let Some(datum_hash) = matches.pop().unwrap().datum else {
-                    bail!("No datum associated with NFT {nft}");
+                    fail!(true, "no datum associated with NFT {nft}");
                 };
-                let Some(raw_datum) = client.datum(&datum_hash.hash).await? else {
-                    bail!("Datum not found for NFT {nft}");
+                let raw_datum = match client.datum(&datum_hash.hash).await {
+                    Ok(Some(raw_datum)) => raw_datum,
+                    Ok(None) => fail!(true, "datum not found for NFT {nft}"),
+                    Err(error) => fail!(false, "could not fetch datum for NFT {nft}: {error}"),
                 };
-                let datum_bytes = hex::decode(raw_datum)?;
-                let datum: PlutusData = minicbor::Decoder::new(&datum_bytes).decode()?;
+                let Ok(datum_bytes) = hex::decode(raw_datum) else {
+                    fail!(true, "malformed datum for NFT {nft}");
+                };
+                let Ok(datum) = minicbor::Decoder::new(&datum_bytes).decode() else {
+                    fail!(true, "invalid CBOR for NFT {nft}");
+                };
 
                 let collateral_assets = match extract_collateral_assets(datum) {
                     Ok(assets) => assets,
-                    Err(error) => bail!("Could not parse datum for NFT {nft}: {error}"),
+                    Err(error) => fail!(true, "could not parse datum for NFT {nft}: {error}"),
                 };
 
                 let mut collateral = vec![];
@@ -101,7 +134,7 @@ impl SyntheticConfigSource {
                     }
                     let asset_id = format!("{policy_id}.{asset_name}");
                     let Some(name) = asset_names.get(&asset_id) else {
-                        bail!("Unrecognized asset id {asset_id}");
+                        fail!(true, "unrecognized asset id {asset_id}");
                     };
                     collateral.push(name.clone());
                 }
@@ -116,7 +149,13 @@ impl SyntheticConfigSource {
                     self.collateral.insert(synthetic.clone(), collateral);
                 }
                 Err(error) => {
-                    warn!("{}", error);
+                    if error.clear {
+                        self.collateral.remove(error.synthetic);
+                    }
+                    warn!(
+                        "could not update parameters for {}: {}",
+                        error.synthetic, error.error
+                    );
                 }
             }
         }
@@ -179,6 +218,12 @@ fn decode_struct<const N: usize>(datum: PlutusData, variant: u64) -> Result<[Plu
         .map_err(|e: Vec<_>| {
             anyhow::anyhow!("too few elements (expected at least {N}, got {})", e.len())
         })
+}
+
+struct UpdateConfigError<'a> {
+    synthetic: &'a str,
+    error: anyhow::Error,
+    clear: bool,
 }
 
 struct AssetClass {
