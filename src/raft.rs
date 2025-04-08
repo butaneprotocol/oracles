@@ -50,7 +50,9 @@ impl Raft {
         let quorum = config.network.peers.len().div_ceil(2) + 1;
         let heartbeat_freq = config.heartbeat;
         let timeout_freq = config.timeout;
-        let expected_payloads = config.synthetics.len();
+        // If everything is working well, we should produce 1 payload per synthetic,
+        // as well as 4 payloads per generic feed (token/usd and usd/token, raw and GEMA)
+        let expected_payloads = config.synthetics.len() + (config.feeds.currencies.len() * 4);
 
         info!(
             quorum = quorum,
