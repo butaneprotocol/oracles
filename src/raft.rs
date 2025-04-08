@@ -47,7 +47,7 @@ impl Raft {
         command_source: mpsc::Receiver<RaftCommand>,
     ) -> Self {
         // quorum is set to a majority of expected nodes (which includes ourself!)
-        let quorum = ((config.network.peers.len() + 1) / 2) + 1;
+        let quorum = config.network.peers.len().div_ceil(2) + 1;
         let heartbeat_freq = config.heartbeat;
         let timeout_freq = config.timeout;
         let expected_payloads = config.synthetics.len();

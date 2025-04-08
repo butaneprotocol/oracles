@@ -52,10 +52,7 @@ impl<T> NetworkReceiver<T> {
     }
 
     pub async fn try_recv(&mut self) -> Option<IncomingMessage<T>> {
-        match self.0.try_recv() {
-            Ok(message) => Some(message),
-            _ => None,
-        }
+        self.0.try_recv().ok()
     }
 }
 

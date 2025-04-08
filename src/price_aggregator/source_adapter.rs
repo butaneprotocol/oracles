@@ -105,7 +105,7 @@ impl SourceAdapter {
                 for update_times in last_updated.iter() {
                     let too_long_without_update = update_times
                         .value()
-                        .map_or(true, |v| now - v >= max_time_without_updates);
+                        .is_none_or(|v| now - v >= max_time_without_updates);
                     if too_long_without_update {
                         missing_updates.push(update_times.key().clone());
                     }

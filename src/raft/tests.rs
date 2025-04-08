@@ -654,7 +654,7 @@ fn generate_state<const N: usize>(
     timeout_freq: Duration,
 ) -> (Participant, [NodeId; N], watch::Receiver<RaftLeader>) {
     let (leader_sink, leader_source) = watch::channel(RaftLeader::Unknown);
-    let quorum = ((N + 1) / 2) + 1;
+    let quorum = N.div_ceil(2) + 1;
     let my_id = NodeId::new("me".into());
     let participant = Participant {
         now: start_time,
