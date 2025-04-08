@@ -37,10 +37,9 @@ impl Source for MinswapSource {
 impl MinswapSource {
     pub fn new(config: &OracleConfig) -> Result<Self> {
         let minswap_config = &config.minswap;
-        let client = kupon::Builder::with_endpoint(&minswap_config.kupo_address)
-            .with_retries(minswap_config.retries)
-            .with_timeout(Duration::from_millis(minswap_config.timeout_ms))
-            .build()?;
+        let client = config
+            .kupo_with_overrides(&minswap_config.kupo)
+            .new_client()?;
         Ok(Self {
             client: Arc::new(client),
             max_concurrency: minswap_config.max_concurrency,

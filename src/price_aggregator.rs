@@ -12,6 +12,7 @@ use num_integer::Integer as _;
 use num_rational::BigRational;
 use num_traits::{One as _, Signed as _, ToPrimitive as _};
 use persistence::TokenPricePersistence;
+use synth_config_source::SyntheticConfigSource;
 use tokio::{sync::watch, task::JoinSet, time::sleep};
 use tracing::{debug, error, warn};
 
@@ -47,6 +48,7 @@ mod conversions;
 mod gema;
 mod persistence;
 mod source_adapter;
+mod synth_config_source;
 mod utils;
 
 struct PreviousSyntheticPrices {
@@ -64,6 +66,7 @@ pub struct PriceAggregator {
     audit_sink: watch::Sender<Vec<TokenPrice>>,
     payload_source: watch::Receiver<Payload>,
     price_sources: Option<Vec<SourceAdapter>>,
+    synth_config_source: SyntheticConfigSource,
     previous_synth_prices: BTreeMap<String, PreviousSyntheticPrices>,
     previous_prices: BTreeMap<String, PreviousPrice>,
     persistence: TokenPricePersistence,
@@ -111,6 +114,7 @@ impl PriceAggregator {
             audit_sink,
             payload_source,
             price_sources: Some(sources),
+            synth_config_source: SyntheticConfigSource::new(&config)?,
             previous_synth_prices: BTreeMap::new(),
             previous_prices: BTreeMap::new(),
             persistence: TokenPricePersistence::new(&config),
@@ -135,6 +139,7 @@ impl PriceAggregator {
         set.spawn(async move {
             loop {
                 self.update_previous_prices();
+                self.synth_config_source.refresh().await;
                 self.report(&reporter.latest_source_prices()).await;
                 sleep(Duration::from_secs(1)).await;
             }
@@ -243,9 +248,10 @@ impl PriceAggregator {
     ) -> Option<SyntheticPriceData> {
         let synth_digits = self.get_digits(&synth.name);
         let synth_price = converter.value_in_usd(&synth.name)?;
+        let collateral = self.synth_config_source.synthetic_collateral(&synth.name)?;
 
         let mut prices = vec![];
-        for collateral in &synth.collateral {
+        for collateral in &collateral {
             let collateral_digits = self.get_digits(collateral);
             let p = converter.value_in_usd(collateral)?;
             let p_scaled = p * BigInt::from(10i64.pow(synth_digits))
@@ -254,7 +260,7 @@ impl PriceAggregator {
         }
 
         // track prices before smoothing, to measure the effect of smoothing
-        for (collateral_name, collateral_price) in synth.collateral.iter().zip(prices.iter()) {
+        for (collateral_name, collateral_price) in collateral.iter().zip(prices.iter()) {
             let price = collateral_price.to_f64().expect("infallible");
             debug!(
                 collateral_name,
@@ -268,7 +274,7 @@ impl PriceAggregator {
         let prices = self.apply_synth_gema(&synth.name, prices);
 
         // track metrics for the different prices
-        for (collateral_name, collateral_price) in synth.collateral.iter().zip(prices.iter()) {
+        for (collateral_name, collateral_price) in collateral.iter().zip(prices.iter()) {
             let price = collateral_price.to_f64().expect("infallible");
             debug!(
                 collateral_name,
@@ -285,7 +291,7 @@ impl PriceAggregator {
         Some(SyntheticPriceData {
             price: synth_price,
             feed: SyntheticPriceFeed {
-                collateral_names: Some(synth.collateral.clone()),
+                collateral_names: Some(collateral),
                 collateral_prices,
                 synthetic: synth.name.clone(),
                 denominator,

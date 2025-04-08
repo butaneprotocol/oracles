@@ -4,6 +4,8 @@ keygen:
 frost_address: addr11111111111
   # This is the address of your current FROST public key. The key generation process will print it.
   # Every node must agree on this.
+kupo:
+  kupo_address: http://localhost:1442
 peers:
   - address: 127.0.0.1:8001
     label: Descriptive label

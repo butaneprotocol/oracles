@@ -181,7 +181,7 @@ mod tests {
     use rust_decimal::Decimal;
 
     use crate::{
-        config::SyntheticConfig,
+        config::{CollateralConfig, SyntheticConfig},
         price_aggregator::{TokenPrice, TokenPriceSource},
         sources::source::PriceInfo,
     };
@@ -224,21 +224,21 @@ mod tests {
                 backing_currencies: vec!["USD".into()],
                 invert: false,
                 digits: 6,
-                collateral: vec![],
+                collateral: CollateralConfig::List(vec![]),
             },
             SyntheticConfig {
                 name: "BTCb".into(),
                 backing_currencies: vec!["BTC".into()],
                 invert: false,
                 digits: 8,
-                collateral: vec![],
+                collateral: CollateralConfig::List(vec![]),
             },
             SyntheticConfig {
                 name: "SOLp".into(),
                 backing_currencies: vec!["SOL".into()],
                 invert: true,
                 digits: 9,
-                collateral: vec![],
+                collateral: CollateralConfig::List(vec![]),
             },
             SyntheticConfig {
                 name: "MULTI".into(),
@@ -247,7 +247,7 @@ mod tests {
                     .collect(),
                 invert: false,
                 digits: 6,
-                collateral: vec![],
+                collateral: CollateralConfig::List(vec![]),
             },
         ]
     }

@@ -42,10 +42,9 @@ impl Source for SundaeSwapKupoSource {
 impl SundaeSwapKupoSource {
     pub fn new(config: &OracleConfig) -> Result<Self> {
         let sundae_config = &config.sundaeswap;
-        let client = kupon::Builder::with_endpoint(&sundae_config.kupo_address)
-            .with_retries(sundae_config.retries)
-            .with_timeout(Duration::from_millis(sundae_config.timeout_ms))
-            .build()?;
+        let client = config
+            .kupo_with_overrides(&sundae_config.kupo)
+            .new_client()?;
         Ok(Self {
             client: Arc::new(client),
             max_concurrency: sundae_config.max_concurrency,
