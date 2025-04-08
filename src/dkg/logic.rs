@@ -8,13 +8,13 @@ use crate::{
     cbor::{CborDkgRound1Package, CborDkgRound2Package},
     network::{NetworkChannel, NetworkSender, NodeId},
 };
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use frost_ed25519::{
-    keys::{
-        dkg::{part1, part2, part3, round1, round2},
-        KeyPackage, PublicKeyPackage,
-    },
     Identifier,
+    keys::{
+        KeyPackage, PublicKeyPackage,
+        dkg::{part1, part2, part3, round1, round2},
+    },
 };
 use futures::future::join_all;
 use minicbor::{Decode, Encode};
@@ -221,7 +221,10 @@ pub async fn run(
                     if round1_packages.len() == peers_count {
                         // We have packages from every peer, and now we can start (or re-start) round 2
                         session_id = compute_session_id(&round1_hashes);
-                        info!(session_id, "Round 1 complete! Beginning round 2, waiting for all peers to send round 2 packages");
+                        info!(
+                            session_id,
+                            "Round 1 complete! Beginning round 2, waiting for all peers to send round 2 packages"
+                        );
 
                         round2_packages.clear();
 
@@ -251,8 +254,7 @@ pub async fn run(
                     if session_id != other_session_id {
                         trace!(
                             session_id,
-                            other_session_id,
-                            "Round 2 message received from another session"
+                            other_session_id, "Round 2 message received from another session"
                         );
                         continue;
                     }
@@ -270,7 +272,10 @@ pub async fn run(
                         let round2_secret_package = round2_secret_package.as_ref().unwrap();
                         let (key_package, public_key_package) =
                             part3(round2_secret_package, &round1_packages, &round2_packages)?;
-                        info!(session_id, "Key generation complete! Waiting for all peers to confirm they have generated keys as well");
+                        info!(
+                            session_id,
+                            "Key generation complete! Waiting for all peers to confirm they have generated keys as well"
+                        );
 
                         generated_keys.replace(GeneratedKeys(key_package, public_key_package));
                         done_sets

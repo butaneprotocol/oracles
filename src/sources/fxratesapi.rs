@@ -1,9 +1,9 @@
 use std::{collections::BTreeMap, env, str::FromStr, time::Duration};
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use chrono::Utc;
 use cron::Schedule;
-use futures::{future::BoxFuture, FutureExt};
+use futures::{FutureExt, future::BoxFuture};
 use num_traits::Inv;
 use reqwest::Client;
 use rust_decimal::Decimal;

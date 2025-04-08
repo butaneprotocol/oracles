@@ -4,8 +4,8 @@ use std::{
 };
 
 use crate::config::{CollateralConfig, OracleConfig};
-use anyhow::{bail, Result};
-use futures::{stream::FuturesUnordered, StreamExt};
+use anyhow::{Result, bail};
+use futures::{StreamExt, stream::FuturesUnordered};
 use kupon::MatchOptions;
 use pallas_primitives::{Constr, PlutusData};
 use tracing::warn;

@@ -184,7 +184,7 @@ mod tests {
     use super::choose_synth_feeds_to_sign;
     use crate::{
         price_feed::{GenericPriceFeed, IntervalBound, SyntheticPriceFeed, Validity},
-        signature_aggregator::price_comparator::{choose_generic_feeds_to_sign, ComparisonResult},
+        signature_aggregator::price_comparator::{ComparisonResult, choose_generic_feeds_to_sign},
     };
 
     fn synthetic_feed(

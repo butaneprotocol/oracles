@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use futures::{stream::FuturesUnordered, Future, StreamExt};
+use futures::{Future, StreamExt, stream::FuturesUnordered};
 use kupon::{AssetId, Client, HealthStatus, Match};
 use tokio::time::sleep;
 use tracing::{debug, warn};
@@ -30,7 +30,9 @@ pub async fn wait_for_sync(client: &Client) {
             }
             HealthStatus::Disconnected => {
                 if status_changed {
-                    warn!("Kupo server is disconnected from the underlying node. Please check that it is configured correctly. This source will be ignored until kupo is connected and fully synced.")
+                    warn!(
+                        "Kupo server is disconnected from the underlying node. Please check that it is configured correctly. This source will be ignored until kupo is connected and fully synced."
+                    )
                 } else {
                     debug!("Kupo server is still disconnected from the underlying node.");
                 }
@@ -38,7 +40,10 @@ pub async fn wait_for_sync(client: &Client) {
             }
             HealthStatus::Error(reason) => {
                 if status_changed {
-                    warn!("Kupo server is unreachable or otherwise unhealthy: {}. Please ensure the server is running and configured correctly. This source will be ignored until it is.", reason);
+                    warn!(
+                        "Kupo server is unreachable or otherwise unhealthy: {}. Please ensure the server is running and configured correctly. This source will be ignored until it is.",
+                        reason
+                    );
                 } else {
                     debug!("Kupo server is still unhealthy: {}", reason);
                 }

@@ -8,7 +8,7 @@ use tracing::Span;
 
 use crate::{
     network::{IncomingMessage, NodeId},
-    raft::{logic::RaftState, RaftLeader, RaftMessage},
+    raft::{RaftLeader, RaftMessage, logic::RaftState},
 };
 
 #[tokio::test]
@@ -730,9 +730,11 @@ impl Participant {
                 self.receive(&peer, RaftMessage::RequestVoteResponse { term, vote: true });
             if !heartbeat_messages.is_empty() {
                 // We know that we are the leader if we sent out heartbeats to every other node
-                assert!(heartbeat_messages
-                    .iter()
-                    .all(|(_, message)| matches!(message, RaftMessage::Heartbeat { .. })));
+                assert!(
+                    heartbeat_messages
+                        .iter()
+                        .all(|(_, message)| matches!(message, RaftMessage::Heartbeat { .. }))
+                );
                 return term;
             }
         }

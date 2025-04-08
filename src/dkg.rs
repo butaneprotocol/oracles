@@ -6,7 +6,7 @@ use logic::GeneratedKeys;
 pub use logic::KeygenMessage;
 
 use crate::{config::OracleConfig, health::HealthSink, keys, network::Network};
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use tokio::{select, task::spawn_blocking};
 use tracing::info;
 

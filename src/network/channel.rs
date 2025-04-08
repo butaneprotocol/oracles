@@ -1,5 +1,5 @@
 use tokio::sync::mpsc::{Receiver, Sender};
-use tracing::{warn, Span};
+use tracing::{Span, warn};
 
 use super::types::{IncomingMessage, NodeId, OutgoingMessage};
 

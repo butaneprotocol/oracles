@@ -27,8 +27,8 @@ use crate::{
     config::OracleConfig,
     network::{Network, NodeId},
     price_feed::{
-        cbor_encode_in_list, system_time_to_iso, GenericPriceFeed, IntervalBoundType, PriceData,
-        Signed, SignedEntries, SyntheticPriceFeed,
+        GenericPriceFeed, IntervalBoundType, PriceData, Signed, SignedEntries, SyntheticPriceFeed,
+        cbor_encode_in_list, system_time_to_iso,
     },
     raft::{RaftClient, RaftLeader},
 };

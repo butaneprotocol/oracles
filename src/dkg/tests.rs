@@ -7,8 +7,8 @@ use tokio::select;
 use crate::network::{NodeId, OutgoingMessage};
 
 use super::{
-    logic::{self, GeneratedKeys},
     KeygenMessage,
+    logic::{self, GeneratedKeys},
 };
 
 type TestNetwork = crate::network::TestNetwork<KeygenMessage>;

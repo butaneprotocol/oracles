@@ -1,16 +1,16 @@
 use std::{sync::Arc, time::Duration};
 
-use anyhow::{anyhow, Result};
-use futures::{future::BoxFuture, FutureExt};
+use anyhow::{Result, anyhow};
+use futures::{FutureExt, future::BoxFuture};
 use kupon::MatchOptions;
 use rust_decimal::Decimal;
 use tokio::time::sleep;
-use tracing::{warn, Level};
+use tracing::{Level, warn};
 
 use crate::config::{HydratedPool, OracleConfig};
 
 use super::{
-    kupo::{get_asset_value, wait_for_sync, MaxConcurrencyFutureSet},
+    kupo::{MaxConcurrencyFutureSet, get_asset_value, wait_for_sync},
     source::{PriceInfo, PriceSink, Source},
 };
 

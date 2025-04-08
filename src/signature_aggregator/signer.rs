@@ -6,32 +6,31 @@ use std::{
 
 use anyhow::{Context, Result};
 use frost_ed25519::{
-    aggregate,
+    Identifier, SigningPackage, aggregate,
     keys::{KeyPackage, PublicKeyPackage},
     round1::{self, SigningCommitments, SigningNonces},
     round2::{self, SignatureShare},
-    Identifier, SigningPackage,
 };
 use futures::future::join_all;
 use minicbor::{Decode, Encode};
 use rand::thread_rng;
 use rust_decimal::prelude::ToPrimitive;
 use tokio::sync::{mpsc, watch};
-use tracing::{info, info_span, instrument, warn, Instrument, Span};
+use tracing::{Instrument, Span, info, info_span, instrument, warn};
 
 use crate::{
     cbor::{CborIdentifier, CborSignatureShare, CborSigningCommitments, CborSigningPackage},
     network::{NetworkSender, NodeId},
     price_feed::{
-        deserialize, serialize, GenericEntry, GenericPriceFeed, PlutusCompatible, PriceData,
-        Signed, SignedEntries, SyntheticEntry, SyntheticPriceFeed,
+        GenericEntry, GenericPriceFeed, PlutusCompatible, PriceData, Signed, SignedEntries,
+        SyntheticEntry, SyntheticPriceFeed, deserialize, serialize,
     },
     raft::RaftLeader,
     signature_aggregator::price_comparator::choose_synth_feeds_to_sign,
 };
 
 use super::{
-    price_comparator::{choose_generic_feeds_to_sign, ComparisonResult},
+    price_comparator::{ComparisonResult, choose_generic_feeds_to_sign},
     price_instrumentation::PriceInstrumentation,
 };
 

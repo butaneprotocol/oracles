@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use bech32::{Bech32, Hrp};
-use ed25519::{pkcs8::DecodePrivateKey, KeypairBytes};
+use ed25519::{KeypairBytes, pkcs8::DecodePrivateKey};
 use ed25519_dalek::SigningKey;
 use frost_ed25519::keys::{KeyPackage, PublicKeyPackage};
 use pallas_crypto::hash::Hasher;

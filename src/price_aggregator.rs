@@ -91,15 +91,21 @@ impl PriceAggregator {
             SourceAdapter::new(OkxSource::new(&config)?, &config),
             SourceAdapter::new(SpectrumSource::new(&config)?, &config),
         ];
-        if let Some(maestro_source) = MaestroSource::new(&config)? {
-            sources.push(SourceAdapter::new(maestro_source, &config));
-        } else {
-            warn!("Not querying maestro, because no MAESTRO_API_KEY was provided");
+        match MaestroSource::new(&config)? {
+            Some(maestro_source) => {
+                sources.push(SourceAdapter::new(maestro_source, &config));
+            }
+            _ => {
+                warn!("Not querying maestro, because no MAESTRO_API_KEY was provided");
+            }
         }
-        if let Some(fxratesapi_source) = FxRatesApiSource::new(&config)? {
-            sources.push(SourceAdapter::new(fxratesapi_source, &config));
-        } else {
-            warn!("Not querying FXRatesAPI, because no FXRATESAPI_API_KEY was provided");
+        match FxRatesApiSource::new(&config)? {
+            Some(fxratesapi_source) => {
+                sources.push(SourceAdapter::new(fxratesapi_source, &config));
+            }
+            _ => {
+                warn!("Not querying FXRatesAPI, because no FXRATESAPI_API_KEY was provided");
+            }
         }
         if config.sundaeswap.use_api {
             sources.push(SourceAdapter::new(SundaeSwapSource::new(&config)?, &config));

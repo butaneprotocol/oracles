@@ -1,12 +1,12 @@
 use ed25519_dalek::VerifyingKey;
 use frost_ed25519::{
-    keys::dkg, round1::SigningCommitments, round2::SignatureShare, Identifier, SigningPackage,
+    Identifier, SigningPackage, keys::dkg, round1::SigningCommitments, round2::SignatureShare,
 };
 use minicbor::{
+    Decode, Decoder, Encode, Encoder,
     bytes::{ByteArray, ByteVec},
     decode,
     encode::{self, Write},
-    Decode, Decoder, Encode, Encoder,
 };
 use num_bigint::BigInt;
 use num_rational::BigRational;

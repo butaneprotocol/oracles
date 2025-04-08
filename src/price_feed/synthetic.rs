@@ -1,13 +1,13 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use minicbor::{decode, encode, Decode, Decoder, Encode, Encoder};
+use minicbor::{Decode, Decoder, Encode, Encoder, decode, encode};
 use num_bigint::BigUint;
 use num_rational::BigRational;
 use pallas_primitives::PlutusData;
 
 use super::{
-    codec::{decode_enum, decode_struct, encode_enum, encode_struct},
     PlutusCompatible,
+    codec::{decode_enum, decode_struct, encode_enum, encode_struct},
 };
 
 #[derive(Clone, Debug)]
@@ -36,8 +36,12 @@ impl PlutusCompatible for SyntheticPriceFeed {
     }
 
     fn from_plutus(data: PlutusData) -> Result<Self, minicbor::decode::Error> {
-        let [encoded_collateral_prices, encoded_synthetic, encoded_denominator, encoded_validity] =
-            decode_struct(data)?;
+        let [
+            encoded_collateral_prices,
+            encoded_synthetic,
+            encoded_denominator,
+            encoded_validity,
+        ] = decode_struct(data)?;
 
         let collateral_prices = Vec::from_plutus(encoded_collateral_prices)?;
         let synthetic = String::from_plutus(encoded_synthetic)?;

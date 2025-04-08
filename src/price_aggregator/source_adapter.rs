@@ -4,9 +4,9 @@ use dashmap::DashMap;
 use tokio::{
     select,
     sync::mpsc::unbounded_channel,
-    time::{sleep, Duration},
+    time::{Duration, sleep},
 };
-use tracing::{info_span, instrument, warn, Instrument};
+use tracing::{Instrument, info_span, instrument, warn};
 
 use crate::{
     config::OracleConfig,

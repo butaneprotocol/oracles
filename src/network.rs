@@ -1,7 +1,7 @@
 use anyhow::Result;
 use opentelemetry::Context;
 use tokio::{sync::mpsc, task::JoinSet};
-use tracing::{info, warn, Span};
+use tracing::{Span, info, warn};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::config::NetworkConfig;

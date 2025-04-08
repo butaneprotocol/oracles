@@ -16,8 +16,8 @@ use crate::{
     config::OracleConfig,
     network::NodeId,
     price_feed::{
-        serialize, GenericEntry, GenericPriceFeed, PriceData, Signed, SignedEntries,
-        SyntheticEntry, SyntheticPriceData,
+        GenericEntry, GenericPriceFeed, PriceData, Signed, SignedEntries, SyntheticEntry,
+        SyntheticPriceData, serialize,
     },
     raft::RaftLeader,
 };

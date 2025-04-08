@@ -1,8 +1,8 @@
 use std::{collections::HashMap, str::FromStr, time::Duration};
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use config::{Config, Environment, File, FileFormat};
-use ed25519::{pkcs8::DecodePublicKey, PublicKeyBytes};
+use ed25519::{PublicKeyBytes, pkcs8::DecodePublicKey};
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use kupon::AssetId;
 use rust_decimal::Decimal;

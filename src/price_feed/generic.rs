@@ -1,9 +1,9 @@
-use minicbor::{decode, encode, Decode, Decoder, Encode, Encoder};
+use minicbor::{Decode, Decoder, Encode, Encoder, decode, encode};
 use num_bigint::BigUint;
 
 use super::{
-    codec::{decode_struct, encode_struct},
     PlutusCompatible,
+    codec::{decode_struct, encode_struct},
 };
 
 #[derive(Clone, Debug)]

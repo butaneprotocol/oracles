@@ -1,10 +1,10 @@
-use anyhow::{anyhow, Result};
-use futures::{future::BoxFuture, FutureExt};
+use anyhow::{Result, anyhow};
+use futures::{FutureExt, future::BoxFuture};
 use reqwest::Client;
 use serde::Deserialize;
 use std::{env, sync::Arc, time::Duration};
 use tokio::{task::JoinSet, time::sleep};
-use tracing::{warn, Level};
+use tracing::{Level, warn};
 
 use crate::{
     config::{MaestroTokenConfig, OracleConfig},

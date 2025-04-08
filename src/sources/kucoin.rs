@@ -1,15 +1,15 @@
 use std::{collections::HashMap, time::Duration};
 
-use anyhow::{bail, Context, Result};
-use futures::{future::BoxFuture, FutureExt as _, SinkExt, StreamExt};
-use rand::{thread_rng, RngCore};
+use anyhow::{Context, Result, bail};
+use futures::{FutureExt as _, SinkExt, StreamExt, future::BoxFuture};
+use rand::{RngCore, thread_rng};
 use serde::{Deserialize, Serialize};
 use tokio::{
     net::TcpStream,
     select,
     time::{sleep, timeout},
 };
-use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite::Message};
 
 use crate::config::{KucoinTokenConfig, OracleConfig};
 

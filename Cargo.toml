@@ -1,7 +1,7 @@
 [package]
 name = "oracles"
 version = "0.24.0"
-edition = "2021"
+edition = "2024"
 default-run = "oracles"
 description = "Oracles"
 homepage = "https://github.com/butaneprotocol/oracles"

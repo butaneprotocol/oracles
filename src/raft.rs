@@ -6,7 +6,7 @@ mod tests;
 use tokio::{
     select,
     sync::{mpsc, watch},
-    time::{sleep_until, Instant},
+    time::{Instant, sleep_until},
 };
 use tracing::{debug, info, info_span};
 

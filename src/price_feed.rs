@@ -1,11 +1,11 @@
 use std::time::SystemTime;
 
 pub use codec::{
-    cbor_encode_in_list, deserialize, serialize, system_time_to_iso, PlutusCompatible,
+    PlutusCompatible, cbor_encode_in_list, deserialize, serialize, system_time_to_iso,
 };
 use codec::{decode_struct, encode_struct};
 pub use generic::GenericPriceFeed;
-use minicbor::{decode, encode, CborLen, Decode, Decoder, Encode, Encoder};
+use minicbor::{CborLen, Decode, Decoder, Encode, Encoder, decode, encode};
 use pallas_primitives::PlutusData;
 pub use synthetic::{
     IntervalBound, IntervalBoundType, SyntheticPriceData, SyntheticPriceFeed, Validity,

@@ -4,8 +4,8 @@ use crate::{
     config::{CryptoComTokenConfig, OracleConfig},
     sources::source::PriceInfo,
 };
-use anyhow::{bail, Context, Result};
-use futures::{future::BoxFuture, FutureExt, SinkExt, StreamExt};
+use anyhow::{Context, Result, bail};
+use futures::{FutureExt, SinkExt, StreamExt, future::BoxFuture};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use tokio::time::timeout;

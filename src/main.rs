@@ -4,7 +4,7 @@ use anyhow::Result;
 use clap::Parser;
 use oracles::{
     api::APIServer,
-    config::{load_config, OracleConfig},
+    config::{OracleConfig, load_config},
     dkg,
     health::{HealthServer, HealthSink},
     instrumentation,

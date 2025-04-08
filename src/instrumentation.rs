@@ -1,14 +1,14 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use opentelemetry::{global, trace::TracerProvider, KeyValue};
+use opentelemetry::{KeyValue, global, trace::TracerProvider};
 use opentelemetry_otlp::{MetricExporter, SpanExporter, WithExportConfig, WithTonicConfig};
-use opentelemetry_sdk::{metrics, trace, Resource};
+use opentelemetry_sdk::{Resource, metrics, trace};
 use tonic::{metadata::MetadataMap, transport::ClientTlsConfig};
 use tracing::{Dispatch, Level, Subscriber};
 use tracing_subscriber::{
-    filter::Targets, fmt, layer::SubscriberExt, registry::LookupSpan, util::SubscriberInitExt,
-    Layer, Registry,
+    Layer, Registry, filter::Targets, fmt, layer::SubscriberExt, registry::LookupSpan,
+    util::SubscriberInitExt,
 };
 
 use crate::{config::LogConfig, network::NodeId};

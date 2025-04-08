@@ -4,29 +4,29 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{anyhow, Context, Result};
-use chacha20poly1305::{aead::Aead, AeadCore, Key, KeyInit, XChaCha20Poly1305};
+use anyhow::{Context, Result, anyhow};
+use chacha20poly1305::{AeadCore, Key, KeyInit, XChaCha20Poly1305, aead::Aead};
 use dashmap::DashMap;
-use ed25519::{signature::Signer, Signature};
+use ed25519::{Signature, signature::Signer};
 use ed25519_dalek::{SigningKey as PrivateKey, Verifier};
-use minicbor::{bytes::ByteVec, Decode, Decoder, Encode, Encoder};
+use minicbor::{Decode, Decoder, Encode, Encoder, bytes::ByteVec};
 use minicbor_io::{AsyncReader, AsyncWriter};
-use opentelemetry::{propagation::TextMapPropagator, Context as OtelContext};
+use opentelemetry::{Context as OtelContext, propagation::TextMapPropagator};
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use rand::thread_rng;
 use tokio::{
     join,
     net::{
-        tcp::{OwnedReadHalf, OwnedWriteHalf},
         TcpListener, TcpStream,
+        tcp::{OwnedReadHalf, OwnedWriteHalf},
     },
     select,
-    sync::{mpsc, watch, Mutex},
+    sync::{Mutex, mpsc, watch},
     task::JoinSet,
     time,
 };
 use tokio_util::compat::{Compat, TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
-use tracing::{debug, error, info, info_span, trace, warn, Instrument, Level};
+use tracing::{Instrument, Level, debug, error, info, info_span, trace, warn};
 use uuid::Uuid;
 use x25519_dalek::{self as ecdh, SharedSecret};
 
@@ -34,7 +34,7 @@ type Nonce = chacha20poly1305::aead::generic_array::GenericArray<u8, chacha20pol
 
 use crate::{
     cbor::{CborEcdhPublicKey, CborSignature, CborVerifyingKey},
-    config::{compute_node_id, NetworkConfig, Peer},
+    config::{NetworkConfig, Peer, compute_node_id},
     health::{HealthSink, HealthStatus, Origin},
     raft::RaftMessage,
 };
@@ -304,7 +304,10 @@ impl Core {
                     }
                     Err(err) => {
                         if unhealthy_peers.insert(id.clone()) {
-                            warn!("Could not send message to {}: {} (won't log this again until it recovers)", id, err)
+                            warn!(
+                                "Could not send message to {}: {} (won't log this again until it recovers)",
+                                id, err
+                            )
                         }
                     }
                 };
@@ -606,7 +609,7 @@ impl Core {
         {
             Some(Message::ConfirmConnection(message)) => message,
             Some(Message::Disconnect(reason)) => {
-                return Err(anyhow!("Other side disconnected: {}", reason))
+                return Err(anyhow!("Other side disconnected: {}", reason));
             }
             Some(other) => {
                 return Err(anyhow!("Expected ConfirmConnection, got {:?}", other));

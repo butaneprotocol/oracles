@@ -1,7 +1,7 @@
 use std::time::SystemTime;
 
 use chrono::{DateTime, Utc};
-use minicbor::{decode, Decoder, Encoder};
+use minicbor::{Decoder, Encoder, decode};
 use num_bigint::BigUint;
 use pallas_primitives::{BigInt, Constr, MaybeIndefArray, PlutusData};
 use rust_decimal::prelude::ToPrimitive;

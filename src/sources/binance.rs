@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, str::FromStr, time::Duration};
 
-use anyhow::{anyhow, Result};
-use futures::{future::BoxFuture, FutureExt, StreamExt};
+use anyhow::{Result, anyhow};
+use futures::{FutureExt, StreamExt, future::BoxFuture};
 use rust_decimal::Decimal;
 use serde::Deserialize;
 use tokio::time::timeout;

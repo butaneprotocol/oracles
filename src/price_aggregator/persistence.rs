@@ -12,7 +12,7 @@ use tracing::{info, warn};
 
 use crate::{cbor::CborBigRational, config::OracleConfig};
 
-use super::{conversions::TokenPriceConverter, TokenPrice, TokenPriceSource};
+use super::{TokenPrice, TokenPriceSource, conversions::TokenPriceConverter};
 
 #[derive(Encode, Decode, Default)]
 struct PersistedData {

@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, str::FromStr as _, time::Duration};
 
-use anyhow::{bail, Result};
-use futures::{future::BoxFuture, stream::FuturesUnordered, FutureExt, StreamExt};
+use anyhow::{Result, bail};
+use futures::{FutureExt, StreamExt, future::BoxFuture, stream::FuturesUnordered};
 use reqwest::Client;
 use rust_decimal::Decimal;
 use serde::Deserialize;

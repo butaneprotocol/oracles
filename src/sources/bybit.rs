@@ -1,13 +1,13 @@
 use std::str::FromStr;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use dashmap::DashMap;
-use futures::{future::BoxFuture, FutureExt, SinkExt, StreamExt};
+use futures::{FutureExt, SinkExt, StreamExt, future::BoxFuture};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use tokio::{
     select,
-    time::{sleep, timeout, Duration},
+    time::{Duration, sleep, timeout},
 };
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 

@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use futures::{stream::FuturesUnordered, StreamExt};
+use futures::{StreamExt, stream::FuturesUnordered};
 use reqwest::Client;
 use serde::Serialize;
 use tokio::{join, sync::watch};
@@ -10,7 +10,7 @@ use tracing::{info, trace, warn};
 use crate::{
     config::OracleConfig,
     network::NodeId,
-    price_feed::{cbor_encode_in_list, GenericPriceFeed, Signed, SyntheticPriceFeed},
+    price_feed::{GenericPriceFeed, Signed, SyntheticPriceFeed, cbor_encode_in_list},
     signature_aggregator::Payload,
 };
 

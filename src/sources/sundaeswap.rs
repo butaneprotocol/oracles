@@ -1,12 +1,12 @@
 use std::{collections::HashMap, str::FromStr, time::Duration};
 
-use anyhow::{anyhow, Result};
-use futures::{future::BoxFuture, FutureExt};
+use anyhow::{Result, anyhow};
+use futures::{FutureExt, future::BoxFuture};
 use reqwest::Client;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
-use tracing::{warn, Level};
+use tracing::{Level, warn};
 
 use crate::config::OracleConfig;
 
