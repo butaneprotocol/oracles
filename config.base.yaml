@@ -290,7 +290,6 @@ okx:
       unit: USDT
       index: XAUT-USDT
 kupo:
-  kupo_address: http://kupo:1442
   retries: 3
   timeout_ms: 5000
 sundaeswap:

@@ -186,7 +186,7 @@ impl TryFrom<RawOracleConfig> for OracleConfig {
         let kupo = KupoConfig {
             address: match raw.kupo.kupo_address {
                 Some(addr) => addr,
-                None => bail!("kupo_address required"),
+                None => bail!("kupo.kupo_address required"),
             },
             retries: raw.kupo.retries,
             timeout: raw.kupo.timeout_ms.map(Duration::from_millis),
@@ -486,13 +486,15 @@ pub struct HydratedPool {
     pub unit_digits: u32,
 }
 
-pub fn load_config(config_files: &[String]) -> Result<OracleConfig> {
+pub fn load_config<S: AsRef<str>>(
+    config_files: impl IntoIterator<Item = S>,
+) -> Result<OracleConfig> {
     let mut builder = Config::builder().add_source(File::from_str(
         include_str!("../config.base.yaml"),
         FileFormat::Yaml,
     ));
     for config_file in config_files {
-        builder = builder.add_source(File::with_name(config_file));
+        builder = builder.add_source(File::with_name(config_file.as_ref()));
     }
     let config = builder
         .add_source(Environment::with_prefix("ORACLE_"))
@@ -514,8 +516,9 @@ mod tests {
     #[test]
     fn should_load_default_config_without_errors() -> Result<()> {
         let test_keys_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/test_data/keys");
+        let sample_config_file = concat!(env!("CARGO_MANIFEST_DIR"), "/config.example.yaml");
         temp_env::with_var("KEYS_DIRECTORY", Some(test_keys_dir), || {
-            load_config(&[]).unwrap();
+            load_config(&[sample_config_file]).unwrap();
         });
         Ok(())
     }
