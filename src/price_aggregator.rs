@@ -4,7 +4,7 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use dashmap::DashMap;
 use gema::GemaCalculator;
 use num_bigint::{BigInt, BigUint};
@@ -18,7 +18,7 @@ use tracing::{debug, error, warn};
 
 use crate::{
     config::{OracleConfig, SyntheticConfig},
-    health::HealthSink,
+    health::{HealthSink, HealthStatus, Origin},
     price_feed::{
         GenericPriceFeed, IntervalBound, PriceData, SyntheticPriceData, SyntheticPriceFeed,
         Validity,
@@ -142,11 +142,12 @@ impl PriceAggregator {
         }
 
         // Every second, we report the latest values from those price maps.
+        let health = health.clone();
         set.spawn(async move {
             loop {
                 self.update_previous_prices();
-                self.synth_config_source.refresh().await;
-                self.report(&reporter.latest_source_prices()).await;
+                self.synth_config_source.refresh(&health).await;
+                self.report(&reporter.latest_source_prices(), &health).await;
                 sleep(Duration::from_secs(1)).await;
             }
         });
@@ -210,7 +211,7 @@ impl PriceAggregator {
         }
     }
 
-    async fn report(&mut self, source_prices: &[(String, PriceInfo)]) {
+    async fn report(&mut self, source_prices: &[(String, PriceInfo)], health: &HealthSink) {
         let default_prices = if self.config.use_persisted_prices {
             self.persistence.saved_prices()
         } else {
@@ -227,14 +228,17 @@ impl PriceAggregator {
             .config
             .synthetics
             .iter()
-            .filter_map(|s| self.compute_synthetic_payload(s, &converter))
+            .filter_map(|s| self.compute_synthetic_payload(s, &converter, health))
             .collect();
         let generics = self
             .config
             .feeds
             .currencies
             .iter()
-            .flat_map(|c| self.compute_generic_payload(c, &converter).into_iter())
+            .flat_map(|c| {
+                self.compute_generic_payload(c, &converter, health)
+                    .into_iter()
+            })
             .collect();
         self.price_sink.send_replace(PriceData {
             synthetics,
@@ -251,15 +255,41 @@ impl PriceAggregator {
         &self,
         synth: &SyntheticConfig,
         converter: &TokenPriceConverter,
+        health: &HealthSink,
     ) -> Option<SyntheticPriceData> {
+        let origin = Origin::Currency(synth.name.clone());
+        match self.do_compute_synthetic_payload(synth, converter) {
+            Ok(data) => {
+                health.update(origin, HealthStatus::Healthy);
+                Some(data)
+            }
+            Err(error) => {
+                warn!("could not compute payload for {}: {error}", synth.name);
+                health.update(origin, HealthStatus::Unhealthy(error.to_string()));
+                None
+            }
+        }
+    }
+
+    fn do_compute_synthetic_payload(
+        &self,
+        synth: &SyntheticConfig,
+        converter: &TokenPriceConverter,
+    ) -> Result<SyntheticPriceData> {
         let synth_digits = self.get_digits(&synth.name);
-        let synth_price = converter.value_in_usd(&synth.name)?;
-        let collateral = self.synth_config_source.synthetic_collateral(&synth.name)?;
+        let Some(synth_price) = converter.value_in_usd(&synth.name) else {
+            bail!("could not compute synthetic price");
+        };
+        let Some(collateral) = self.synth_config_source.synthetic_collateral(&synth.name) else {
+            bail!("could not retrieve synthetic config");
+        };
 
         let mut prices = vec![];
         for collateral in &collateral {
             let collateral_digits = self.get_digits(collateral);
-            let p = converter.value_in_usd(collateral)?;
+            let Some(p) = converter.value_in_usd(collateral) else {
+                bail!("could not compute price for collateral {collateral}");
+            };
             let p_scaled = p * BigInt::from(10i64.pow(synth_digits))
                 / BigInt::from(10i64.pow(collateral_digits));
             prices.push(p_scaled / &synth_price);
@@ -294,7 +324,7 @@ impl PriceAggregator {
         let valid_from = SystemTime::now() - Duration::from_secs(60);
         let valid_to = valid_from + Duration::from_secs(360);
 
-        Some(SyntheticPriceData {
+        Ok(SyntheticPriceData {
             price: synth_price,
             feed: SyntheticPriceFeed {
                 collateral_names: Some(collateral),
@@ -313,7 +343,9 @@ impl PriceAggregator {
         &self,
         currency: &str,
         converter: &TokenPriceConverter,
+        health: &HealthSink,
     ) -> Vec<GenericPriceFeed> {
+        let origin = Origin::Currency(currency.to_string());
         let mut feeds = vec![];
         let now = SystemTime::now();
         let timestamp = now
@@ -326,6 +358,10 @@ impl PriceAggregator {
         };
 
         let Some(price) = converter.value_in_usd(currency) else {
+            health.update(
+                origin,
+                HealthStatus::Unhealthy("could not compute price".to_string()),
+            );
             return feeds;
         };
         let token_usd = to_int(&price);
@@ -356,6 +392,7 @@ impl PriceAggregator {
             timestamp,
         });
 
+        health.update(origin, HealthStatus::Healthy);
         feeds
     }
 

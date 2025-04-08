@@ -3,7 +3,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::config::{CollateralConfig, OracleConfig};
+use crate::{
+    config::{CollateralConfig, OracleConfig},
+    health::{HealthSink, HealthStatus, Origin},
+};
 use anyhow::{Result, bail};
 use futures::{StreamExt, stream::FuturesUnordered};
 use kupon::MatchOptions;
@@ -56,7 +59,7 @@ impl SyntheticConfigSource {
         })
     }
 
-    pub async fn refresh(&mut self) {
+    pub async fn refresh(&mut self, health: &HealthSink) {
         let now = Instant::now();
         if now < self.next_refresh {
             return;
@@ -147,6 +150,10 @@ impl SyntheticConfigSource {
             match result {
                 Ok((synthetic, collateral)) => {
                     self.collateral.insert(synthetic.clone(), collateral);
+                    health.update(
+                        Origin::SyntheticConfig(synthetic.clone()),
+                        HealthStatus::Healthy,
+                    );
                 }
                 Err(error) => {
                     if error.clear {
@@ -155,6 +162,10 @@ impl SyntheticConfigSource {
                     warn!(
                         "could not update parameters for {}: {}",
                         error.synthetic, error.error
+                    );
+                    health.update(
+                        Origin::SyntheticConfig(error.synthetic.to_string()),
+                        HealthStatus::Unhealthy(error.error.to_string()),
                     );
                 }
             }

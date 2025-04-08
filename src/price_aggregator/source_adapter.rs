@@ -115,8 +115,8 @@ impl SourceAdapter {
                     HealthStatus::Healthy
                 } else {
                     HealthStatus::Unhealthy(format!(
-                        "Went more than 30 seconds without updates for {:?}",
-                        missing_updates
+                        "Went more than {:?} without updates for {:?}",
+                        max_time_without_updates, missing_updates
                     ))
                 };
                 health.update(Origin::Source(name.clone()), status);

@@ -26,6 +26,8 @@ use crate::{
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum Origin {
     Source(String),
+    SyntheticConfig(String),
+    Currency(String),
     Peer(NodeId),
 }
 
@@ -226,10 +228,12 @@ async fn report_health(State(state): State<HealthState>) -> impl IntoResponse {
         let (origin, status) = entry.pair();
         if let HealthStatus::Unhealthy(reason) = status {
             let label = match origin {
-                Origin::Source(name) => name,
-                Origin::Peer(id) => &state.peer(id).label,
+                Origin::Source(name) => name.clone(),
+                Origin::SyntheticConfig(name) => format!("{name} config"),
+                Origin::Currency(name) => name.clone(),
+                Origin::Peer(id) => state.peer(id).label.clone(),
             };
-            errors.insert(label.to_string(), reason.clone());
+            errors.insert(label, reason.clone());
         }
     }
 
