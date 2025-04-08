@@ -518,7 +518,7 @@ mod tests {
         let test_keys_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/test_data/keys");
         let sample_config_file = concat!(env!("CARGO_MANIFEST_DIR"), "/config.example.yaml");
         temp_env::with_var("KEYS_DIRECTORY", Some(test_keys_dir), || {
-            load_config(&[sample_config_file]).unwrap();
+            load_config([sample_config_file]).unwrap();
         });
         Ok(())
     }
