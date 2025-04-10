@@ -58,6 +58,9 @@ urlencoding = "2"
 uuid = { version = "1", features = ["v4"] }
 x25519-dalek = { version = "2" }
 
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
 [package.metadata.dist]
 dist = true
 
@@ -65,3 +68,7 @@ dist = true
 [profile.dist]
 inherits = "release"
 lto = "thin"
+
+[[bench]]
+name = "signature"
+harness = false
