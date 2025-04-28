@@ -470,8 +470,9 @@ minswap:
       credential: ea07b733d932129c378af627436e7cbc2ef0bf96e0036bb51b3bde6b/*
       asset_id: f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.f734af78799c4e857bfd37e8f919678020c0bb3f2aae9328bdb7c557a939a926
   max_concurrency: 3
-spectrum:
+splash:
   pools:
+    # v1
     - token: BTN
       unit: ADA
       credential: 6b9c456aa650cb808a9ab54326e039d5235ed69f069c9664a8fe5b69/*
@@ -496,11 +497,35 @@ spectrum:
       unit: ADA
       credential: 6b9c456aa650cb808a9ab54326e039d5235ed69f069c9664a8fe5b69/*
       asset_id: f8fd67ee46f66da669f68dc941090eb753687636b47fc6fd7f5e6254.534e454b5f4144415f4e4654
+    - token: SUNDAE
+      unit: ADA
+      credential: 6b9c456aa650cb808a9ab54326e039d5235ed69f069c9664a8fe5b69/*
+      asset_id: e3a879f88db87ed3107502bf21f0f43a0210ac7546a54887f2c84d76.53554e4441455f4144415f4e4654
+    # v2
+    - token: IAG
+      unit: ADA
+      credential: 9dee0659686c3ab807895c929e3284c11222affd710b09be690f924d/*
+      asset_id: 8475b1a7546a1a8eb929b27868797b0a3ffcfeb547fc1e249cfe13bd.4941475f4144415f4e4654
+    - token: iUSD
+      unit: ADA
+      credential: 9dee0659686c3ab807895c929e3284c11222affd710b09be690f924d/*
+      asset_id: f751741b9ebfb387acfea914dbfe2dd5a94ab1293d2225dbfeaf7ca6.695553445f4144415f4e4654
+    - token: LENFI
+      unit: ADA
+      credential: e628bfd68c07a7a38fcd7d8df650812a9dfdbee54b1ed4c25c87ffbf/*
+      asset_id: a22ebe57c45d0be3ba4bebca5a9d4877b42d7fd872f3d740414fa124.414144415f4144415f4e4654
+    - token: SHEN
+      unit: ADA
+      credential: e628bfd68c07a7a38fcd7d8df650812a9dfdbee54b1ed4c25c87ffbf/*
+      asset_id: 544ab8ca262e397d1dce7750742c56f934af83591362fe5b52e29d2b.5368656e4d6963726f5553445f4144415f4e4654
+    - token: SNEK
+      unit: ADA
+      credential: cb684a69e78907a9796b21fc150a758af5f2805e5ed5d5a8ce9f76f1/*
+      asset_id: ce1a4f1103fca3f93c1ba9b4e87fb0d9e855d66965ca3cf45165824a.534e454b5f4144415f4e4654
   max_concurrency: 3
   retries: 3
   timeout_ms: 5000
 vyfi:
-  kupo_address: http://kupo:1442
   pools:
     - token: BTN
       unit: ADA
@@ -556,7 +581,6 @@ vyfi:
       asset_id: daa6903a721fd0ab2e9402304c43dc53b48f73d791882cbdc3abbe0d
   max_concurrency: 3
 wingriders:
-  kupo_address: http://kupo:1442
   pools:
     # V1
     - token: BTN

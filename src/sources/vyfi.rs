@@ -36,9 +36,7 @@ impl Source for VyFiSource {
 impl VyFiSource {
     pub fn new(config: &OracleConfig) -> Result<Self> {
         let vyfi_config = &config.vyfi;
-        let client = config
-            .kupo_with_overrides(&vyfi_config.kupo)
-            .new_client()?;
+        let client = config.kupo_with_overrides(&vyfi_config.kupo).new_client()?;
         Ok(Self {
             client: Arc::new(client),
             max_concurrency: vyfi_config.max_concurrency,
