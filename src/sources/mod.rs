@@ -12,3 +12,4 @@ pub mod source;
 pub mod spectrum;
 pub mod sundaeswap;
 pub mod sundaeswap_kupo;
+pub mod wingriders;
