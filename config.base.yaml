@@ -497,6 +497,64 @@ spectrum:
       credential: 6b9c456aa650cb808a9ab54326e039d5235ed69f069c9664a8fe5b69/*
       asset_id: f8fd67ee46f66da669f68dc941090eb753687636b47fc6fd7f5e6254.534e454b5f4144415f4e4654
   max_concurrency: 3
+  retries: 3
+  timeout_ms: 5000
+vyfi:
+  kupo_address: http://kupo:1442
+  pools:
+    - token: BTN
+      unit: ADA
+      credential: 2303d158c69aa3ca38657f6d97225f2a35d331608901907f42ffbc47/*
+      asset_id: 4b29b9203fbbf66ff1190668f375b91ac6af0814f17c57d5af3ab495
+    - token: DJED
+      unit: ADA
+      credential: 99a917d3773ff635dacebc6908284ea402656ceab373eb3a5a007df4/*
+      asset_id: 7fe95f7516f5a53f835f80ce1053eec933efba9c1b49fab0f7398bc2
+    - token: ENCS
+      unit: ADA
+      credential: afa8060050463d4a0fddc7c5e1ff6a1bcd5469be269f910f2aa430aa/*
+      asset_id: 88ec2602667e9878ab1a4c87a0820768ec4a1b2e80e5fd7d5bf343d8
+    - token: FLDT
+      unit: ADA
+      credential: 76ac805e3a39c9469627bcb4ada851e9359c544275bc0b6634e5eb50/*
+      asset_id: 4c1a1b6384f7b1e3b3296aee0c871437c213c0aa2db89d2478e1cb23
+    - token: IAG
+      unit: ADA
+      credential: 55126301921898feca9c79517d5464b7e52bc4a7e0e6110a46a27f08/*
+      asset_id: 91273656a81cc90ae6a5403a39052eeae71f17332cc1928be01ec656
+    - token: iETH
+      unit: ADA
+      credential: 4e974d891115a3dcb8059c88524b54385fd116425c99792aa7d1fd31/*
+      asset_id: d86bc07992849859dcfa415b08e756c335d27f57ec0cf4aaf3cc4895
+    - token: iUSD
+      unit: ADA
+      credential: f7c76feffdd3422398178c6ccbc30f3935a07ffcd681df20778c1c10/*
+      asset_id: 9a3eebe6132a6b02a0d09f96ff3988bd0d62d5809c0185076acc31d8
+    - token: LENFI
+      unit: ADA
+      credential: d56c8ca890ffc9b209c691fd184cfb861b51d6a9b0e4e7784348c8e8/*
+      asset_id: 46b0cd4e67ee7e7ea9f11b4723733d490b2d27b41d2b43d63e3448df
+    - token: LQ
+      unit: ADA
+      credential: ed6938f106c4a3bc6c06460c87ddf311cb1889c19b751a4f295491ef/*
+      asset_id: 60d04ebc9b110ba8690fe79204d23ad7e94f060221fa02d037126ffd
+    - token: MIN
+      unit: ADA
+      credential: e93ec0e79a07e6b3f30c8c9f1e6f463e86363848f5a96d66a5c25ba8/*
+      asset_id: 21a6080759a747b9aa826f70c587c0ec480de62f19d58a2fae079c03
+    - token: SHEN
+      unit: ADA
+      credential: c118e8085de87a2b5b40fca831bfc019054876367715dcd3e01d5ca6/*
+      asset_id: e0a17a3caab32b95a86c1f48f2f178c66e79c4d847eb1b1b054480bf
+    - token: SNEK
+      unit: ADA
+      credential: 232c10966ce4d8e67c2eae17bb57c2cf4854a57509a752fbb3c02bd1/*
+      asset_id: 96c31772282e6ae5c629120471c5bbcdef538226b31b97d74c50ca3c
+    - token: SUNDAE
+      unit: ADA
+      credential: 65302bbfb05636b784c9b95abf6dd619931e7a5c3f3c7b6fb08d2faf/*
+      asset_id: daa6903a721fd0ab2e9402304c43dc53b48f73d791882cbdc3abbe0d
+  max_concurrency: 3
 wingriders:
   kupo_address: http://kupo:1442
   pools:

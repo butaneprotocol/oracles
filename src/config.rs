@@ -4,7 +4,7 @@ use anyhow::{Result, bail};
 use config::{Config, Environment, File, FileFormat};
 use ed25519::{PublicKeyBytes, pkcs8::DecodePublicKey};
 use ed25519_dalek::{SigningKey, VerifyingKey};
-use kupon::AssetId;
+use kupon::{AssetId, MatchOptions};
 use rust_decimal::Decimal;
 use serde::Deserialize;
 use tracing::Level;
@@ -51,6 +51,7 @@ struct RawOracleConfig {
     pub sundaeswap: SundaeSwapConfig,
     pub minswap: MinswapConfig,
     pub spectrum: SpectrumConfig,
+    pub vyfi: VyFiConfig,
     pub wingriders: WingRidersConfig,
 }
 
@@ -89,6 +90,7 @@ pub struct OracleConfig {
     pub sundaeswap: SundaeSwapConfig,
     pub minswap: MinswapConfig,
     pub spectrum: SpectrumConfig,
+    pub vyfi: VyFiConfig,
     pub wingriders: WingRidersConfig,
 }
 
@@ -229,6 +231,7 @@ impl TryFrom<RawOracleConfig> for OracleConfig {
             sundaeswap: raw.sundaeswap,
             minswap: raw.minswap,
             spectrum: raw.spectrum,
+            vyfi: raw.vyfi,
             wingriders: raw.wingriders,
         })
     }
@@ -473,6 +476,14 @@ pub struct SpectrumConfig {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+pub struct VyFiConfig {
+    #[serde(flatten)]
+    pub kupo: RawKupoConfig,
+    pub pools: Vec<Pool>,
+    pub max_concurrency: usize,
+}
+
+#[derive(Debug, Deserialize, Clone)]
 pub struct WingRidersConfig {
     #[serde(flatten)]
     pub kupo: RawKupoConfig,
@@ -484,8 +495,18 @@ pub struct WingRidersConfig {
 pub struct Pool {
     pub token: String,
     pub unit: String,
-    pub credential: String,
+    pub credential: Option<String>,
     pub asset_id: String,
+}
+
+impl Pool {
+    pub fn kupo_query(&self) -> MatchOptions {
+        let mut query = MatchOptions::default();
+        if let Some(credential) = &self.credential {
+            query = query.credential(credential);
+        }
+        query.asset_id(&self.asset_id).only_unspent()
+    }
 }
 
 #[derive(Debug, Clone)]
