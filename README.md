@@ -47,10 +47,12 @@ For the Butane mainnet deployment, currently we aggregate data from the followin
 - Crypto.com
 - FXRatesAPI
 - Kucoin
+- Minswap v1+v2
 - OKX
-- Minswap
-- Spectrum
-- Sundae v3
+- Splash
+- Sundae v1+v3
+- VyFi
+- WingRiders v1+v2
 
 The oracle network is currently a set of 5 nodes, requiring agreement among 3 of them to produce a signature. The current operators of those nodes:
 

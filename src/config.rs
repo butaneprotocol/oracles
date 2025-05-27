@@ -4,7 +4,7 @@ use anyhow::{Result, bail};
 use config::{Config, Environment, File, FileFormat};
 use ed25519::{PublicKeyBytes, pkcs8::DecodePublicKey};
 use ed25519_dalek::{SigningKey, VerifyingKey};
-use kupon::AssetId;
+use kupon::{AssetId, MatchOptions};
 use rust_decimal::Decimal;
 use serde::Deserialize;
 use tracing::Level;
@@ -50,7 +50,9 @@ struct RawOracleConfig {
     pub okx: OkxConfig,
     pub sundaeswap: SundaeSwapConfig,
     pub minswap: MinswapConfig,
-    pub spectrum: SpectrumConfig,
+    pub splash: SplashConfig,
+    pub vyfi: VyFiConfig,
+    pub wingriders: WingRidersConfig,
 }
 
 pub struct OracleConfig {
@@ -87,7 +89,9 @@ pub struct OracleConfig {
     pub okx: OkxConfig,
     pub sundaeswap: SundaeSwapConfig,
     pub minswap: MinswapConfig,
-    pub spectrum: SpectrumConfig,
+    pub splash: SplashConfig,
+    pub vyfi: VyFiConfig,
+    pub wingriders: WingRidersConfig,
 }
 
 impl OracleConfig {
@@ -226,7 +230,9 @@ impl TryFrom<RawOracleConfig> for OracleConfig {
             okx: raw.okx,
             sundaeswap: raw.sundaeswap,
             minswap: raw.minswap,
-            spectrum: raw.spectrum,
+            splash: raw.splash,
+            vyfi: raw.vyfi,
+            wingriders: raw.wingriders,
         })
     }
 }
@@ -462,7 +468,23 @@ pub struct MinswapConfig {
 }
 
 #[derive(Debug, Deserialize, Clone)]
-pub struct SpectrumConfig {
+pub struct SplashConfig {
+    #[serde(flatten)]
+    pub kupo: RawKupoConfig,
+    pub pools: Vec<Pool>,
+    pub max_concurrency: usize,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct VyFiConfig {
+    #[serde(flatten)]
+    pub kupo: RawKupoConfig,
+    pub pools: Vec<Pool>,
+    pub max_concurrency: usize,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct WingRidersConfig {
     #[serde(flatten)]
     pub kupo: RawKupoConfig,
     pub pools: Vec<Pool>,
@@ -473,8 +495,18 @@ pub struct SpectrumConfig {
 pub struct Pool {
     pub token: String,
     pub unit: String,
-    pub credential: String,
+    pub credential: Option<String>,
     pub asset_id: String,
+}
+
+impl Pool {
+    pub fn kupo_query(&self) -> MatchOptions {
+        let mut query = MatchOptions::default();
+        if let Some(credential) = &self.credential {
+            query = query.credential(credential);
+        }
+        query.asset_id(&self.asset_id).only_unspent()
+    }
 }
 
 #[derive(Debug, Clone)]
