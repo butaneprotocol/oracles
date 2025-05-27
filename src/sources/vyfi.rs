@@ -93,7 +93,7 @@ impl VyFiSource {
                 }
                 let value = Decimal::new(unit_value as i64, pool.unit_digits)
                     / Decimal::new(token_value as i64, pool.token_digits);
-                let tvl = Decimal::new(token_value as i64 * 2, 0);
+                let tvl = Decimal::new(unit_value as i64 * 2, 0);
 
                 sink.send_named(
                     PriceInfo {

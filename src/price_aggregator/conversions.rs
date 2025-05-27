@@ -5,7 +5,10 @@ use num_rational::BigRational;
 use num_traits::{Inv, One, Signed, Zero};
 use serde::Serialize;
 
-use crate::{config::SyntheticConfig, sources::source::PriceInfo};
+use crate::{
+    config::{CurrencyConfig, SyntheticConfig},
+    sources::source::PriceInfo,
+};
 
 use super::utils;
 
@@ -33,6 +36,7 @@ pub struct TokenPriceSource {
 pub struct TokenPriceConverter<'a> {
     prices: BTreeMap<&'a str, Vec<TokenPrice>>,
     synthetics: BTreeMap<&'a str, &'a SyntheticConfig>,
+    min_tvls: BTreeMap<&'a str, BigRational>,
     threshold: BigRational,
 }
 
@@ -41,9 +45,14 @@ impl<'a> TokenPriceConverter<'a> {
         source_prices: &'a [(String, PriceInfo)],
         default_prices: &'a [TokenPrice],
         synthetics: &'a [SyntheticConfig],
+        currencies: &'a [CurrencyConfig],
         max_synthetic_divergence: BigRational,
     ) -> Self {
         let synthetics = synthetics.iter().map(|s| (s.name.as_str(), s)).collect();
+        let min_tvls = currencies
+            .iter()
+            .map(|c| (c.name.as_str(), utils::decimal_to_rational(c.min_tvl)))
+            .collect();
 
         let mut value_sources = BTreeMap::new();
         for (source_name, price) in source_prices {
@@ -83,6 +92,7 @@ impl<'a> TokenPriceConverter<'a> {
         Self {
             prices,
             synthetics,
+            min_tvls,
             threshold: max_synthetic_divergence,
         }
     }
@@ -99,6 +109,11 @@ impl<'a> TokenPriceConverter<'a> {
 
         let prices = self.prices.get(token).into_iter().flat_map(|p| p.iter());
 
+        let min_tvl = self
+            .min_tvls
+            .get(token)
+            .unwrap_or_else(|| panic!("Unrecognized currency {token}"));
+
         let mut value = BigRational::new(BigInt::ZERO, BigInt::one());
         let mut reliability = BigRational::new(BigInt::ZERO, BigInt::one());
         for price in prices {
@@ -107,6 +122,9 @@ impl<'a> TokenPriceConverter<'a> {
             };
             for source in &price.sources {
                 let normalized_reliability = &source.reliability * &conversion_factor;
+                if &normalized_reliability < min_tvl {
+                    continue;
+                }
                 value += &source.value * &conversion_factor * &normalized_reliability;
                 reliability += &normalized_reliability;
             }
@@ -181,7 +199,7 @@ mod tests {
     use rust_decimal::Decimal;
 
     use crate::{
-        config::{CollateralConfig, SyntheticConfig},
+        config::{CollateralConfig, CurrencyConfig, SyntheticConfig},
         price_aggregator::{TokenPrice, TokenPriceSource},
         sources::source::PriceInfo,
     };
@@ -252,6 +270,18 @@ mod tests {
         ]
     }
 
+    fn make_currencies() -> Vec<CurrencyConfig> {
+        ["ADA", "BTC", "LENFI", "USDT", "SOL", "COL0", "COL1", "COL2"]
+            .into_iter()
+            .map(|name| CurrencyConfig {
+                name: name.into(),
+                asset_id: None,
+                digits: 0,
+                min_tvl: Decimal::new(0, 0),
+            })
+            .collect()
+    }
+
     fn make_default_prices() -> Vec<TokenPrice> {
         vec![
             make_default_price("ADA", decimal_rational(6, 1)),
@@ -266,10 +296,12 @@ mod tests {
         let source_prices = vec![];
         let default_prices = vec![];
         let synthetics = make_synthetics();
+        let currencies = make_currencies();
         let converter = TokenPriceConverter::new(
             &source_prices,
             &default_prices,
             &synthetics,
+            &currencies,
             default_threshold(),
         );
 
@@ -281,10 +313,12 @@ mod tests {
         let source_prices = vec![];
         let default_prices = make_default_prices();
         let synthetics = make_synthetics();
+        let currencies = make_currencies();
         let converter = TokenPriceConverter::new(
             &source_prices,
             &default_prices,
             &synthetics,
+            &currencies,
             default_threshold(),
         );
 
@@ -296,10 +330,12 @@ mod tests {
         let source_prices = vec![];
         let default_prices = vec![];
         let synthetics = make_synthetics();
+        let currencies = make_currencies();
         let converter = TokenPriceConverter::new(
             &source_prices,
             &default_prices,
             &synthetics,
+            &currencies,
             default_threshold(),
         );
 
@@ -319,10 +355,12 @@ mod tests {
         )];
         let default_prices = vec![];
         let synthetics = make_synthetics();
+        let currencies = make_currencies();
         let converter = TokenPriceConverter::new(
             &source_prices,
             &default_prices,
             &synthetics,
+            &currencies,
             default_threshold(),
         );
 
@@ -356,10 +394,12 @@ mod tests {
         ];
         let default_prices = vec![];
         let synthetics = make_synthetics();
+        let currencies = make_currencies();
         let converter = TokenPriceConverter::new(
             &source_prices,
             &default_prices,
             &synthetics,
+            &currencies,
             default_threshold(),
         );
 
@@ -392,11 +432,13 @@ mod tests {
             ),
         ];
         let default_prices = vec![];
-        let synthetics = vec![];
+        let synthetics = make_synthetics();
+        let currencies = make_currencies();
         let converter = TokenPriceConverter::new(
             &source_prices,
             &default_prices,
             &synthetics,
+            &currencies,
             default_threshold(),
         );
 
@@ -419,10 +461,12 @@ mod tests {
         )];
         let default_prices = make_default_prices();
         let synthetics = make_synthetics();
+        let currencies = make_currencies();
         let converter = TokenPriceConverter::new(
             &source_prices,
             &default_prices,
             &synthetics,
+            &currencies,
             default_threshold(),
         );
 
@@ -445,10 +489,12 @@ mod tests {
         )];
         let default_prices = vec![];
         let synthetics = make_synthetics();
+        let currencies = make_currencies();
         let converter = TokenPriceConverter::new(
             &source_prices,
             &default_prices,
             &synthetics,
+            &currencies,
             default_threshold(),
         );
 
@@ -479,10 +525,12 @@ mod tests {
         ];
         let default_prices = vec![];
         let synthetics = make_synthetics();
+        let currencies = make_currencies();
         let converter = TokenPriceConverter::new(
             &source_prices,
             &default_prices,
             &synthetics,
+            &currencies,
             default_threshold(),
         );
 
@@ -505,10 +553,12 @@ mod tests {
         )];
         let default_prices = make_default_prices();
         let synthetics = make_synthetics();
+        let currencies = make_currencies();
         let converter = TokenPriceConverter::new(
             &source_prices,
             &default_prices,
             &synthetics,
+            &currencies,
             default_threshold(),
         );
 
@@ -531,10 +581,12 @@ mod tests {
         )];
         let default_prices = vec![];
         let synthetics = make_synthetics();
+        let currencies = make_currencies();
         let converter = TokenPriceConverter::new(
             &source_prices,
             &default_prices,
             &synthetics,
+            &currencies,
             default_threshold(),
         );
 
@@ -565,10 +617,12 @@ mod tests {
         ];
         let default_prices = make_default_prices();
         let synthetics = make_synthetics();
+        let currencies = make_currencies();
         let converter = TokenPriceConverter::new(
             &source_prices,
             &default_prices,
             &synthetics,
+            &currencies,
             default_threshold(),
         );
 
@@ -611,10 +665,12 @@ mod tests {
         ];
         let default_prices = vec![];
         let synthetics = make_synthetics();
+        let currencies = make_currencies();
         let converter = TokenPriceConverter::new(
             &source_prices,
             &default_prices,
             &synthetics,
+            &currencies,
             default_threshold(),
         );
 
@@ -637,10 +693,12 @@ mod tests {
         )];
         let default_prices = vec![];
         let synthetics = make_synthetics();
+        let currencies = make_currencies();
         let converter = TokenPriceConverter::new(
             &source_prices,
             &default_prices,
             &synthetics,
+            &currencies,
             default_threshold(),
         );
 
@@ -663,10 +721,12 @@ mod tests {
         )];
         let default_prices = vec![];
         let synthetics = make_synthetics();
+        let currencies = make_currencies();
         let converter = TokenPriceConverter::new(
             &source_prices,
             &default_prices,
             &synthetics,
+            &currencies,
             default_threshold(),
         );
 
@@ -674,6 +734,51 @@ mod tests {
         assert_eq!(
             converter.value_in_usd("SOLp"),
             Some(decimal_rational(25, 2))
+        );
+    }
+
+    #[test]
+    fn value_in_usd_should_ignore_source_with_tvl_below_threshold() {
+        let source_prices = vec![
+            (
+                "price for SUNDAE in USD".into(),
+                PriceInfo {
+                    token: "SUNDAE".into(),
+                    unit: "USD".into(),
+                    value: Decimal::new(100, 0),
+                    reliability: Decimal::new(100, 0),
+                },
+            ),
+            (
+                "price for SUNDAE in USD".into(),
+                PriceInfo {
+                    token: "SUNDAE".into(),
+                    unit: "USD".into(),
+                    value: Decimal::new(1000, 0),
+                    reliability: Decimal::new(1000, 0),
+                },
+            ),
+        ];
+        let default_prices = vec![];
+        let synthetics = make_synthetics();
+        let mut currencies = make_currencies();
+        currencies.push(CurrencyConfig {
+            name: "SUNDAE".into(),
+            asset_id: None,
+            digits: 0,
+            min_tvl: Decimal::new(1000, 0),
+        });
+        let converter = TokenPriceConverter::new(
+            &source_prices,
+            &default_prices,
+            &synthetics,
+            &currencies,
+            default_threshold(),
+        );
+
+        assert_eq!(
+            converter.value_in_usd("SUNDAE"),
+            Some(decimal_rational(1000, 0))
         );
     }
 
@@ -698,10 +803,12 @@ mod tests {
         assert!(source_prices.len() <= MULTIFEED_BACKING_CURRENCIES);
         let default_prices = vec![];
         let synthetics = make_synthetics();
+        let currencies = make_currencies();
         let converter = TokenPriceConverter::new(
             &source_prices,
             &default_prices,
             &synthetics,
+            &currencies,
             default_threshold(),
         );
         assert_eq!(converter.value_in_usd("MULTI"), result);
@@ -775,10 +882,12 @@ mod tests {
         ];
         let default_prices = vec![];
         let synthetics = make_synthetics();
+        let currencies = make_currencies();
         let converter = TokenPriceConverter::new(
             &source_prices,
             &default_prices,
             &synthetics,
+            &currencies,
             default_threshold(),
         );
 
@@ -811,10 +920,12 @@ mod tests {
         let source_prices = vec![];
         let default_prices = make_default_prices();
         let synthetics = make_synthetics();
+        let currencies = make_currencies();
         let converter = TokenPriceConverter::new(
             &source_prices,
             &default_prices,
             &synthetics,
+            &currencies,
             default_threshold(),
         );
 
@@ -840,10 +951,12 @@ mod tests {
         let source_prices = vec![];
         let default_prices = vec![];
         let synthetics = make_synthetics();
+        let currencies = make_currencies();
         let converter = TokenPriceConverter::new(
             &source_prices,
             &default_prices,
             &synthetics,
+            &currencies,
             default_threshold(),
         );
 

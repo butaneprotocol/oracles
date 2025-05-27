@@ -147,7 +147,7 @@ impl SundaeSwapSource {
 
             let value = Decimal::new(unit_value, pool.asset_a.decimals)
                 / Decimal::new(token_value, pool.asset_b.decimals);
-            let tvl = Decimal::new(token_value * 2, 0);
+            let tvl = Decimal::new(unit_value * 2, 0);
 
             sink.send_named(
                 PriceInfo {
