@@ -44,51 +44,51 @@ currencies:
   - name: BTN
     asset_id: 016be5325fd988fea98ad422fcfd53e5352cacfced5c106a932a35a4.42544e
     digits: 6
-    min_tvl: 5000
+    min_tvl: 50_000_000
   - name: DJED
     asset_id: 8db269c3ec630e06ae29f74bc39edd1f87c819f1056206e879a1cd61.446a65644d6963726f555344
     digits: 6
-    min_tvl: 5000
+    min_tvl: 50_000_000
   - name: ENCS
     asset_id: 9abf0afd2f236a19f2842d502d0450cbcd9c79f123a9708f96fd9b96.454e4353
     digits: 6
-    min_tvl: 5000
+    min_tvl: 50_000_000
   - name: EUR
     digits: 6
   - name: FLDT
     asset_id: 577f0b1342f8f8f4aed3388b80a8535812950c7a892495c0ecdf0f1e.0014df10464c4454
     digits: 6
-    min_tvl: 5000
+    min_tvl: 50_000_000
   - name: IAG
     asset_id: 5d16cc1a177b5d9ba9cfa9793b07e60f1fb70fea1f8aef064415d114.494147
     digits: 6
-    min_tvl: 5000
+    min_tvl: 50_000_000
   - name: iETH
     asset_id: f66d78b4a3cb3d37afa0ec36461e51ecbde00f26c8f0a68f94b69880.69455448
     digits: 6
-    min_tvl: 5000
+    min_tvl: 50_000_000
   - name: iUSD
     asset_id: f66d78b4a3cb3d37afa0ec36461e51ecbde00f26c8f0a68f94b69880.69555344
     digits: 6
-    min_tvl: 5000
+    min_tvl: 50_000_000
   - name: JPY
     digits: 6
   - name: LENFI
     asset_id: 8fef2d34078659493ce161a6c7fba4b56afefa8535296a5743f69587.41414441
     digits: 6
-    min_tvl: 5000
+    min_tvl: 50_000_000
   - name: LQ
     asset_id: da8c30857834c6ae7203935b89278c532b3995245295456f993e1d24.4c51
     digits: 6
-    min_tvl: 5000
+    min_tvl: 50_000_000
   - name: MIN
     asset_id: 29d222ce763455e3d7a09a665ce554f00ac89d2e99a1a83d267170c6.4d494e
     digits: 6
-    min_tvl: 5000
+    min_tvl: 50_000_000
   - name: myUSD
     asset_id: 92776616f1f32c65a173392e4410a3d8c39dcf6ef768c73af164779c.4d79555344
     digits: 6
-    min_tvl: 5000
+    min_tvl: 50_000_000
   - name: PAXG
     digits: 4
   - name: POL
@@ -96,17 +96,17 @@ currencies:
   - name: SHEN
     asset_id: 8db269c3ec630e06ae29f74bc39edd1f87c819f1056206e879a1cd61.5368656e4d6963726f555344
     digits: 6
-    min_tvl: 5000
+    min_tvl: 50_000_000
   - name: SNEK
     asset_id: 279c909f348e533da5808898f87f9a14bb2c3dfbbacccd631d927a3f.534e454b
     digits: 0
-    min_tvl: 5000
+    min_tvl: 50_000_000
   - name: SOL
     digits: 9
   - name: SUNDAE
     asset_id: 9a9693a9a37912a5097918f97918d15240c92ab729a0b7c4aa144d77.53554e444145
     digits: 6
-    min_tvl: 5000
+    min_tvl: 50_000_000
   - name: USD
     digits: 6
   - name: USDT
