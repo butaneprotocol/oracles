@@ -3,6 +3,7 @@ use std::{collections::HashMap, time::Duration};
 use anyhow::{Context, Result, bail};
 use futures::{FutureExt as _, SinkExt, StreamExt, future::BoxFuture};
 use rand::{RngCore, thread_rng};
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use tokio::{
     net::TcpStream,
@@ -96,7 +97,7 @@ impl KucoinSource {
                     token: symbol.token.clone(),
                     unit: symbol.unit.clone(),
                     value: data.data.buy.try_into()?,
-                    reliability: data.data.vol.try_into()?,
+                    reliability: Decimal::ONE,
                 })?;
             }
             bail!("Kucoin stream has closed")
@@ -162,7 +163,6 @@ struct KucoinMessage {
 struct KucoinResponseData {
     symbol: String,
     buy: f64,
-    vol: f64,
 }
 
 #[derive(Deserialize)]

@@ -107,12 +107,11 @@ impl CryptoComSource {
             }
             let data = &result.data[0];
             let value = Decimal::from_str(&data.best_bid_price)?;
-            let volume = Decimal::from_str(&data.volume_24h)?;
             sink.send(PriceInfo {
                 token: stream.token.clone(),
                 unit: stream.unit.clone(),
                 value,
-                reliability: volume,
+                reliability: Decimal::ONE,
             })?;
         }
 
@@ -159,6 +158,4 @@ struct CryptoComResponseResult {
 struct CryptoComResponseData {
     #[serde(rename = "b")]
     best_bid_price: String,
-    #[serde(rename = "v")]
-    volume_24h: String,
 }

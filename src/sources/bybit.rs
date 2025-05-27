@@ -21,7 +21,6 @@ struct ByBitPriceInfo {
     token: String,
     unit: String,
     last_value: Option<Decimal>,
-    last_volume: Option<Decimal>,
 }
 impl ByBitPriceInfo {
     fn new(token: &str, unit: &str) -> Self {
@@ -29,7 +28,6 @@ impl ByBitPriceInfo {
             token: token.to_string(),
             unit: unit.to_string(),
             last_value: None,
-            last_volume: None,
         }
     }
 }
@@ -131,20 +129,11 @@ impl ByBitSource {
                 };
                 info.last_value = Some(value);
 
-                let Some(volume) = data
-                    .volume_24h
-                    .and_then(|x| Decimal::from_str(&x).ok())
-                    .or(info.last_volume)
-                else {
-                    continue;
-                };
-                info.last_volume = Some(volume);
-
                 let price_info = PriceInfo {
                     token: info.token.clone(),
                     unit: info.unit.clone(),
                     value,
-                    reliability: volume,
+                    reliability: Decimal::ONE,
                 };
                 sink.send(price_info)?;
             }
@@ -185,5 +174,4 @@ enum ByBitResponse {
 struct TickerSnapshotData {
     symbol: String,
     mark_price: Option<String>,
-    volume_24h: Option<String>,
 }

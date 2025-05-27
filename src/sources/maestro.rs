@@ -1,6 +1,7 @@
 use anyhow::{Result, anyhow};
 use futures::{FutureExt, future::BoxFuture};
 use reqwest::Client;
+use rust_decimal::Decimal;
 use serde::Deserialize;
 use std::{env, sync::Arc, time::Duration};
 use tokio::{task::JoinSet, time::sleep};
@@ -99,13 +100,12 @@ impl MaestroSource {
         let contents = response.text().await?;
         let messages: [MaestroOHLCMessage; 1] = serde_json::from_str(&contents)?;
         let res = (messages[0].coin_a_open + messages[0].coin_a_close) / 2.;
-        let volume = messages[0].coin_a_volume;
 
         sink.send(PriceInfo {
             token: config.token.to_string(),
             unit: config.unit.to_string(),
             value: res.try_into()?,
-            reliability: volume.try_into()?,
+            reliability: Decimal::ONE,
         })?;
         Ok(())
     }
@@ -115,5 +115,4 @@ impl MaestroSource {
 struct MaestroOHLCMessage {
     coin_a_open: f64,
     coin_a_close: f64,
-    coin_a_volume: f64,
 }
