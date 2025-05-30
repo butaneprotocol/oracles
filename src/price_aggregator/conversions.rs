@@ -135,7 +135,7 @@ impl<'a> TokenPriceConverter<'a> {
         }
 
         // Find the weighted median of all prices being considered
-        let quorum = 1 + candidate_prices.len() / 2;
+        let total_weight: BigRational = candidate_prices.iter().map(|(_, _, weight)| weight).sum();
         let median_price = find_weighted_median(&candidate_prices)?;
 
         // Filter out "outlier" prices which are too distant from the median
@@ -155,8 +155,10 @@ impl<'a> TokenPriceConverter<'a> {
             }
         });
 
-        // if half or more prices were outliers, just don't report a price
-        if candidate_prices.len() < quorum {
+        // if more than half of our prices by weight are outliers, these prices are too unstable to use
+        let remaining_weight: BigRational =
+            candidate_prices.iter().map(|(_, _, weight)| weight).sum();
+        if remaining_weight < total_weight / BigRational::new(BigInt::from(2), BigInt::one()) {
             return None;
         }
 
