@@ -226,7 +226,7 @@ impl PriceAggregator {
             &default_prices,
             &self.config.synthetics,
             &self.config.currencies,
-            utils::decimal_to_rational(self.config.max_synthetic_divergence),
+            utils::decimal_to_rational(self.config.max_price_divergence),
         );
 
         let synthetics = self
