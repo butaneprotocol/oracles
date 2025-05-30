@@ -1,8 +1,9 @@
 use std::collections::BTreeMap;
 
+use itertools::Itertools;
 use num_bigint::BigInt;
 use num_rational::BigRational;
-use num_traits::{Inv, One, Signed, ToPrimitive};
+use num_traits::{Inv, One, Signed, ToPrimitive, Zero};
 use serde::Serialize;
 use tracing::warn;
 
@@ -70,8 +71,8 @@ impl<'a> TokenPriceConverter<'a> {
 
         let mut prices = BTreeMap::new();
         for (tokens, sources) in value_sources {
-            let mut value_sum = BigRational::new(BigInt::ZERO, BigInt::one());
-            let mut reliability_sum = BigRational::new(BigInt::ZERO, BigInt::one());
+            let mut value_sum = BigRational::zero();
+            let mut reliability_sum = BigRational::zero();
             for source in &sources {
                 value_sum += &source.value * &source.reliability;
                 reliability_sum += &source.reliability;
@@ -133,35 +134,41 @@ impl<'a> TokenPriceConverter<'a> {
             }
         }
 
+        // Find the weighted median of all prices being considered
         let quorum = 1 + candidate_prices.len() / 2;
-        while candidate_prices.len() >= quorum {
-            let mut total_value = BigRational::new(BigInt::ZERO, BigInt::one());
-            let mut total_reliability = BigRational::new(BigInt::ZERO, BigInt::one());
-            for (_, value, reliability) in &candidate_prices {
-                total_value += value * reliability;
-                total_reliability += reliability;
-            }
-            let price = total_value / total_reliability;
+        let median_price = find_weighted_median(&candidate_prices)?;
 
-            let (index, max_divergence) = candidate_prices
-                .iter()
-                .map(|(_, value, _)| (value - &price).abs())
-                .enumerate()
-                .max_by(|(_, d1), (_, d2)| d1.cmp(d2))?;
-            if max_divergence <= &price * &self.threshold {
-                return Some(price);
-            } else {
-                let (source, value, _) = candidate_prices.remove(index);
-                let average_price = price.to_f64().expect("infallible");
-                let source_price = value.to_f64().expect("infallible");
+        // Filter out "outlier" prices which are too distant from the median
+        let max_divergence = &median_price * &self.threshold;
+        candidate_prices.retain(|(source, price, _)| {
+            let divergence = (price - &median_price).abs();
+            if divergence > max_divergence {
+                let median_price = median_price.to_f64().expect("infallible");
+                let source_price = price.to_f64().expect("infallible");
                 warn!(
                     token,
-                    source, average_price, source_price, "Ignoring outlier price"
+                    source, median_price, source_price, "Ignoring outlier price"
                 );
+                false
+            } else {
+                true
             }
+        });
+
+        // if half or more prices were outliers, just don't report a price
+        if candidate_prices.len() < quorum {
+            return None;
         }
 
-        None
+        // otherwise, use the weighted average of every "normal" price
+        let mut total_value = BigRational::zero();
+        let mut total_reliability = BigRational::zero();
+        for (_, value, reliability) in candidate_prices {
+            total_value += value * &reliability;
+            total_reliability += reliability;
+        }
+
+        Some(total_value / total_reliability)
     }
 
     fn synthetic_value_in_usd(&self, synthetic: &SyntheticConfig) -> Option<BigRational> {
@@ -218,6 +225,28 @@ fn find_divergence(v1: &BigRational, v2: &BigRational) -> BigRational {
     (v1 - v2).abs() / v1.min(v2)
 }
 
+fn find_weighted_median(prices: &[(&String, BigRational, BigRational)]) -> Option<BigRational> {
+    let sorted_prices: Vec<_> = prices.iter().sorted_by_key(|(_, price, _)| price).collect();
+    let two = BigRational::new(BigInt::from(2), BigInt::one());
+
+    let total_weight: BigRational = sorted_prices.iter().map(|(_, _, weight)| weight).sum();
+    let threshold_weight = total_weight / &two;
+
+    let mut seen_weight = BigRational::zero();
+    for (index, (_, price, weight)) in sorted_prices.iter().enumerate() {
+        seen_weight += weight;
+        if seen_weight == threshold_weight {
+            let next_price = &sorted_prices[index + 1].1;
+            return Some((price + next_price) / two);
+        }
+        if seen_weight > threshold_weight {
+            return Some(price.clone());
+        }
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use num_bigint::BigInt;
@@ -231,7 +260,7 @@ mod tests {
         sources::source::PriceInfo,
     };
 
-    use super::TokenPriceConverter;
+    use super::{TokenPriceConverter, find_weighted_median};
 
     fn decimal_rational(value: u64, scale: u32) -> BigRational {
         let numer = BigInt::from(value);
@@ -316,6 +345,60 @@ mod tests {
             make_default_price("LENFI", decimal_rational(379, 2)),
             make_default_price("USDT", BigRational::one()),
         ]
+    }
+
+    #[test]
+    fn find_weighted_median_should_return_none_for_empty_list() {
+        let prices = [];
+        let median = find_weighted_median(&prices);
+        assert_eq!(median, None);
+    }
+
+    #[test]
+    fn find_weighted_median_should_return_lone_element() {
+        let source = String::new();
+        let prices = [(&source, decimal_rational(1337, 0), decimal_rational(1, 0))];
+        let median = find_weighted_median(&prices);
+        assert_eq!(median, Some(decimal_rational(1337, 0)));
+    }
+
+    #[test]
+    fn find_weighted_median_should_return_middle_element_by_weight() {
+        let source = String::new();
+        let prices = [
+            (&source, decimal_rational(1, 0), decimal_rational(2, 0)),
+            (&source, decimal_rational(2, 0), decimal_rational(1, 0)),
+            (&source, decimal_rational(3, 0), decimal_rational(1, 0)),
+            (&source, decimal_rational(4, 0), decimal_rational(1, 0)),
+        ];
+        let median = find_weighted_median(&prices);
+        assert_eq!(median, Some(decimal_rational(2, 0)));
+    }
+
+    #[test]
+    fn find_weighted_median_should_return_mean_on_ties() {
+        let source = String::new();
+        let prices = [
+            (&source, decimal_rational(1, 0), decimal_rational(1, 0)),
+            (&source, decimal_rational(2, 0), decimal_rational(1, 0)),
+            (&source, decimal_rational(3, 0), decimal_rational(1, 0)),
+            (&source, decimal_rational(4, 0), decimal_rational(1, 0)),
+        ];
+        let median = find_weighted_median(&prices);
+        assert_eq!(median, Some(decimal_rational(25, 1)));
+    }
+
+    #[test]
+    fn find_weighted_median_should_not_require_sorted_input() {
+        let source = String::new();
+        let prices = [
+            (&source, decimal_rational(3, 0), decimal_rational(1, 0)),
+            (&source, decimal_rational(4, 0), decimal_rational(1, 0)),
+            (&source, decimal_rational(2, 0), decimal_rational(1, 0)),
+            (&source, decimal_rational(1, 0), decimal_rational(1, 0)),
+        ];
+        let median = find_weighted_median(&prices);
+        assert_eq!(median, Some(decimal_rational(25, 1)));
     }
 
     #[test]
