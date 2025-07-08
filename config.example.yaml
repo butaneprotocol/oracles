@@ -1,11 +1,7 @@
-keygen:
-  enabled: false # Set this to true to generate frost keys instead of serving traffic
-  min_signers: 2 # How many signers do we need to publish a package? Every node must agree on this.
-frost_address: addr11111111111
-  # This is the address of your current FROST public key. The key generation process will print it.
-  # Every node must agree on this.
-kupo:
-  kupo_address: http://localhost:1442
+# Node-specific configuration
+# The keygen, frost_address, and kupo settings are inherited from config.base.yaml
+# Only override them here if you need different values from the base config
+
 peers:
   - address: 127.0.0.1:8001
     label: Descriptive label

@@ -1,46 +1,126 @@
-api_port: 8080                  # Port to serve API requests
-network_port: 31415             # Port to handle traffic from other nodes
-health_port: 18000              # Port to report our health status
-heartbeat_ms: 500               # How long should the leader wait before sending a heartbeat
-timeout_ms: 2000                # How long should we wait before picking a new leader
-network_timeout_ms: 30000       # How long to allow TCP requests to run before timing out
-round_duration_ms: 10000        # How long does it take to run a round?
-gema_periods: 10                # Factor to use for GEMA price smoothing
-price_precision: 1024           # How many bits of precision are allowed in prices in the final output?
+api_port: 8080 # Port to serve API requests
+network_port: 31415 # Port to handle traffic from other nodes
+health_port: 18000 # Port to report our health status
+heartbeat_ms: 500 # How long should the leader wait before sending a heartbeat
+timeout_ms: 2000 # How long should we wait before picking a new leader
+network_timeout_ms: 30000 # How long to allow TCP requests to run before timing out
+round_duration_ms: 10000 # How long does it take to run a round?
+gema_periods: 10 # Factor to use for GEMA price smoothing
+price_precision: 1024 # How many bits of precision are allowed in prices in the final output?
 max_source_price_age_ms: 120000 # How long should we trust the price reported by a source, before treating it as stale?
-use_persisted_prices: false     # If true, use price data from older rounds when newer data is unavailable.
-max_price_divergence: 0.1       # If a price is backed by more than one source, how dramatically can the prices differ?
+use_persisted_prices: false # If true, use price data from older rounds when newer data is unavailable.
+max_price_divergence: 0.1 # If a price is backed by more than one source, how dramatically can the prices differ?
 consensus: true
+keygen:
+  enabled: false # Set this to true to generate frost keys instead of serving traffic
+  min_signers: 2 # How many signers do we need to publish a package? Every node must agree on this.
+frost_address: addr1v8eh3vtc30n055hz7cn5us8w3lqgmuzcsrs259q64qsh8uqlzgc6r
+  # This is the address of your current FROST public key. The key generation process will print it.
+  # Every node must agree on this.
+kupo:
+  kupo_address: https://kupo1ttl6wwyprf2x7rmn0da.mainnet-v2.kupo-m1.demeter.run
+  retries: 3
+  timeout_ms: 5000
 logs:
   json: true
   level: info
-keygen:
-  enabled: false
-synthetics:
-  - name: USDb
-    digits: 6
-    backing_currencies:
-      - USD
-    collateral:
-      list:
-        - ADA
-        - BTN
-        - SNEK
-        - MIN
-        - LENFI
-        - ENCS
-  - name: MIDAS
-    digits: 9
-    backing_currencies:
-      - PAXG
-      - XAUt
-    collateral:
-      nft: 00000000000410c2d9e01e8ec78ab1dc6bbc383fae76cbe2689beb02.705f4d49444153
+# synthetics:
+# - name: USDb
+#   digits: 6
+#   backing_currencies:
+#     - USD
+#   collateral:
+#     list:
+#       - ADA
+#       - BTN
+#       - SNEK
+#       - MIN
+#       - LENFI
+#       - ENCS
+# - name: USDs
+#   digits: 6
+#   backing_currencies:
+#     - USD
+#   collateral:
+#     list:
+#       - ADA
+#       - USDb
+#       - BTN
+#       - DJED
+#       - myUSD
+#       - iUSD
+# - name: EURb
+#   digits: 6
+#   backing_currencies:
+#     - EUR
+#   collateral:
+#     list:
+#       - ADA
+#       - USDb
+#       - USDs
+#       - BTN
+# - name: JPYb
+#   digits: 6
+#   backing_currencies:
+#     - JPY
+#   collateral:
+#     list:
+#       - ADA
+#       - USDb
+#       - USDs
+#       - BTN
+# - name: BTCb
+#   digits: 8
+#   backing_currencies:
+#     - BTC
+#   collateral:
+#     list:
+#       - ADA
+#       - USDb
+#       - USDs
+#       - BTN
+#       - SNEK
+#       - MIN
+#       - LENFI
+#       - ENCS
+# - name: POLb
+#   digits: 6
+#   backing_currencies:
+#     - POL
+#   collateral:
+#     list:
+#       - ADA
+#       - BTCb
+#       - BTN
+#       - SNEK
+#       - MIN
+#       - LENFI
+#       - ENCS
+# - name: SOLp
+#   digits: 9
+#   backing_currencies:
+#     - SOL
+#   invert: true
+#   collateral:
+#     list:
+#       - ADA
+#       - USDb
+#       - USDs
+#       - BTN
+#       - SNEK
+#       - MIN
+#       - LENFI
+#       - ENCS
+# - name: MIDAS
+#   digits: 9
+#   backing_currencies:
+#     - PAXG
+#     - XAUt
+#   collateral:
+#     nft: 00000000000410c2d9e01e8ec78ab1dc6bbc383fae76cbe2689beb02.705f4d49444153
 currencies:
   - name: ADA
     digits: 6
-  - name: BTC
-    digits: 8
   - name: BTN
     asset_id: 016be5325fd988fea98ad422fcfd53e5352cacfced5c106a932a35a4.42544e
     digits: 6
@@ -88,150 +168,167 @@ currencies:
   - name: myUSD
     asset_id: 92776616f1f32c65a173392e4410a3d8c39dcf6ef768c73af164779c.4d79555344
     digits: 6
-    min_tvl: 20_000_000
-  - name: PAXG
-    digits: 4
-  - name: POL
-    digits: 6
   - name: SHEN
     asset_id: 8db269c3ec630e06ae29f74bc39edd1f87c819f1056206e879a1cd61.5368656e4d6963726f555344
     digits: 6
-    min_tvl: 20_000_000
-  - name: SNEK
+  - name: SNEK #SNEK
     asset_id: 279c909f348e533da5808898f87f9a14bb2c3dfbbacccd631d927a3f.534e454b
     digits: 0
-    min_tvl: 20_000_000
-  - name: SOL
-    digits: 9
+  - name: 6bc39bafc188d1ac97182256d270ef34630525cca26b5e8c33a983a0414e47454c53 # ANGELS
+    asset_id: 8fe8039d057c71fdfb1095e260f153f18a5834d85d9c868ddf7307bc.0014df10414e47454c53
+    digits: 6
+  - name: 6bc39bafc188d1ac97182256d270ef34630525cca26b5e8c33a983a0424f44454741 #BODEGA
+    asset_id: 5deab590a137066fef0e56f06ef1b830f21bc5d544661ba570bdd2ae.424f44454741
+    digits: 6
+  - name: 6bc39bafc188d1ac97182256d270ef34630525cca26b5e8c33a983a04353574150 # CSWAP
+    asset_id: c863ceaa796d5429b526c336ab45016abd636859f331758e67204e5c.4353574150
+    digits: 6
+  - name: 6bc39bafc188d1ac97182256d270ef34630525cca26b5e8c33a983a0534e454b # SNEK
+    asset_id: 279c909f348e533da5808898f87f9a14bb2c3dfbbacccd631d927a3f.534e454b
+    digits: 0
+  - name: 6bc39bafc188d1ac97182256d270ef34630525cca26b5e8c33a983a0576f726c644d6f62696c65546f6b656e58 # WMTX
+    asset_id: e5a42a1a1d3d1da71b0449663c32798725888d2eb0843c4dabeca05a.576f726c644d6f62696c65546f6b656e58
+    digits: 6
+  - name: 6bc39bafc188d1ac97182256d270ef34630525cca26b5e8c33a983a0494147 # IAG
+    asset_id: 5d16cc1a177b5d9ba9cfa9793b07e60f1fb70fea1f8aef064415d114.494147
+    digits: 6
+  - name: 6bc39bafc188d1ac97182256d270ef34630525cca26b5e8c33a983a0535452494b45 # STRIKE
+    asset_id: f13ac4d66b3ee19a6aa0f2a22298737bd907cc95121662fc971b5275.535452494b45
+    digits: 0
   - name: SUNDAE
     asset_id: 9a9693a9a37912a5097918f97918d15240c92ab729a0b7c4aa144d77.53554e444145
     digits: 6
-    min_tvl: 20_000_000
-  - name: USD
-    digits: 6
-  - name: USDT
-    digits: 6
-  - name: XAUt
+  #  - name: 6bc39bafc188d1ac97182256d270ef34630525cca26b5e8c33a983a05553444d #USDM
+  #    asset_id: c48cbb3d5e57ed56e276bc45f99ab39abe94e6cd7ac39fb402da47ad.0014df105553444d
+  #    digits: 6
+  - name: 6bc39bafc188d1ac97182256d270ef34630525cca26b5e8c33a983a05553444d #USDM
+    asset_id: c48cbb3d5e57ed56e276bc45f99ab39abe94e6cd7ac39fb402da47ad.0014df105553444d
     digits: 6
 feeds:
   currencies:
+    - iUSD
     - ADA
-binance:
-  tokens:
-    - token: ADA
-      unit: USDT
-      stream: adausdt@ticker
-    - token: BTC
-      unit: USDT
-      stream: btcusdt@ticker
-    - token: POL
-      unit: USDT
-      stream: polusdt@ticker
-    - token: SOL
-      unit: USDT
-      stream: solusdt@ticker
-bybit:
-  tokens:
-    - token: ADA
-      unit: USDT
-      stream: ADAUSDT
-    - token: BTC
-      unit: USDT
-      stream: BTCUSDT
-    - token: PAXG
-      unit: USDT
-      stream: PAXGUSDT
-    - token: POL
-      unit: USDT
-      stream: POLUSDT
-    - token: SOL
-      unit: USDT
-      stream: SOLUSDT
-coinbase:
-  tokens:
-    - token: ADA
-      unit: USD
-      product_id: ADA-USD
-    - token: BTC
-      unit: USD
-      product_id: BTC-USD
-    - token: POL
-      unit: USD
-      product_id: POL-USD
-    - token: SOL
-      unit: USD
-      product_id: SOL-USD
-    - token: USDT
-      unit: USD
-      product_id: USDT-USD
-crypto_com:
-  tokens:
-    - token: ADA
-      unit: USD
-      stream: ticker.ADA_USD
-    - token: BTC
-      unit: USD
-      stream: ticker.BTC_USD
-    - token: EUR
-      unit: USDT
-      stream: ticker.EUR_USDT
-    - token: PAXG
-      unit: USD
-      stream: ticker.PAXG_USD
-    - token: POL
-      unit: USD
-      stream: ticker.POL_USD
-    - token: SOL
-      unit: USD
-      stream: ticker.SOL_USD
-    - token: USDT
-      unit: USD
-      stream: ticker.USDT_USD
-kucoin:
-  tokens:
-    - token: ADA
-      unit: USDT
-      symbol: ADA-USDT
-    - token: BTC
-      unit: USDT
-      symbol: BTC-USDT
-    - token: PAXG
-      unit: USDT
-      symbol: PAXG-USDT
-    - token: POL
-      unit: USDT
-      symbol: POL-USDT
-    - token: SOL
-      unit: USDT
-      symbol: SOL-USDT
-maestro:
-  tokens:
-    - token: DJED
-      unit: ADA
-      dex: minswap
-    - token: ENCS
-      unit: ADA
-      dex: minswap
-    - token: iUSD
-      unit: ADA
-      dex: minswap
-    - token: LENFI
-      unit: ADA
-      dex: minswap
-    - token: MIN
-      unit: ADA
-      dex: minswap
-    - token: SNEK
-      unit: ADA
-      dex: minswap
-okx:
-  tokens:
-    - token: XAUt
-      unit: USDT
-      index: XAUT-USDT
-kupo:
-  retries: 3
-  timeout_ms: 5000
+    - 6bc39bafc188d1ac97182256d270ef34630525cca26b5e8c33a983a0534e454b # SNEK
+    - 6bc39bafc188d1ac97182256d270ef34630525cca26b5e8c33a983a0414e47454c53 # ANGELS
+    - 6bc39bafc188d1ac97182256d270ef34630525cca26b5e8c33a983a0424f44454741 # BODEGA
+    - 6bc39bafc188d1ac97182256d270ef34630525cca26b5e8c33a983a04353574150 # CSWAP
+    - 6bc39bafc188d1ac97182256d270ef34630525cca26b5e8c33a983a0576f726c644d6f62696c65546f6b656e58 # WMTX
+    - 6bc39bafc188d1ac97182256d270ef34630525cca26b5e8c33a983a0494147 # IAG
+    - 6bc39bafc188d1ac97182256d270ef34630525cca26b5e8c33a983a0535452494b45 # STRIKE
+    - 6bc39bafc188d1ac97182256d270ef34630525cca26b5e8c33a983a05553444d # USDM
+# binance:
+#   tokens:
+#     - token: ADA
+#       unit: USDT
+#       stream: adausdt@ticker
+#     - token: BTC
+#       unit: USDT
+#       stream: btcusdt@ticker
+#     - token: POL
+#       unit: USDT
+#       stream: polusdt@ticker
+#     - token: SOL
+#       unit: USDT
+#       stream: solusdt@ticker
+# bybit:
+#   tokens:
+#     - token: ADA
+#       unit: USDT
+#       stream: ADAUSDT
+#     - token: BTC
+#       unit: USDT
+#       stream: BTCUSDT
+#     - token: PAXG
+#       unit: USDT
+#       stream: PAXGUSDT
+#     - token: POL
+#       unit: USDT
+#       stream: POLUSDT
+#     - token: SOL
+#       unit: USDT
+#       stream: SOLUSDT
+# coinbase:
+#   tokens:
+#     - token: ADA
+#       unit: USD
+#       product_id: ADA-USD
+#     - token: BTC
+#       unit: USD
+#       product_id: BTC-USD
+#     - token: POL
+#       unit: USD
+#       product_id: POL-USD
+#     - token: SOL
+#       unit: USD
+#       product_id: SOL-USD
+#     - token: USDT
+#       unit: USD
+#       product_id: USDT-USD
+# crypto_com:
+#   tokens:
+#     - token: ADA
+#       unit: USD
+#       stream: ticker.ADA_USD
+#     - token: BTC
+#       unit: USD
+#       stream: ticker.BTC_USD
+#     - token: EUR
+#       unit: USDT
+#       stream: ticker.EUR_USDT
+#     - token: PAXG
+#       unit: USD
+#       stream: ticker.PAXG_USD
+#     - token: POL
+#       unit: USD
+#       stream: ticker.POL_USD
+#     - token: SOL
+#       unit: USD
+#       stream: ticker.SOL_USD
+#     - token: USDT
+#       unit: USD
+#       stream: ticker.USDT_USD
+# kucoin:
+#   tokens:
+#     - token: ADA
+#       unit: USDT
+#       symbol: ADA-USDT
+#     - token: BTC
+#       unit: USDT
+#       symbol: BTC-USDT
+#     - token: PAXG
+#       unit: USDT
+#       symbol: PAXG-USDT
+#     - token: POL
+#       unit: USDT
+#       symbol: POL-USDT
+#     - token: SOL
+#       unit: USDT
+#       symbol: SOL-USDT
+# maestro:
+#   tokens:
+#     - token: DJED
+#       unit: ADA
+#       dex: minswap
+#     - token: ENCS
+#       unit: ADA
+#       dex: minswap
+#     - token: iUSD
+#       unit: ADA
+#       dex: minswap
+#     - token: LENFI
+#       unit: ADA
+#       dex: minswap
+#     - token: MIN
+#       unit: ADA
+#       dex: minswap
+#     - token: SNEK
+#       unit: ADA
+#       dex: minswap
+# okx:
+#   tokens:
+#     - token: XAUt
+#       unit: USDT
+#       index: XAUT-USDT
 sundaeswap:
   use_api: false
   policy_id: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b
@@ -306,10 +403,18 @@ sundaeswap:
       unit: ADA
       credential: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b/*
       asset_id: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b.000de140cacb7fd5f5b84bf876d40dc60d4991c72112d78d76132b1fb769e6ad
+    - token: 6bc39bafc188d1ac97182256d270ef34630525cca26b5e8c33a983a0534e454b
+      unit: ADA
+      credential: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b/*
+      asset_id: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b.000de140cacb7fd5f5b84bf876d40dc60d4991c72112d78d76132b1fb769e6ad
     - token: SUNDAE
       unit: ADA
       credential: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b/*
       asset_id: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b.000de1402f36866691fa75a9aab66dec99f7cc2d297ca09e34d9ce68cde04773
+    - token: 6bc39bafc188d1ac97182256d270ef34630525cca26b5e8c33a983a05553444d # USDM
+      unit: iUSD
+      credential: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b/*
+      asset_id: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b.000de1409b16ad48eb1ba1cde2ad55d8c90f8aa83e8daaaae9904d05d98cb8f4
   max_concurrency: 3
 minswap:
   pools:
@@ -362,6 +467,10 @@ minswap:
       unit: ADA
       credential: e1317b152faac13426e6a83e06ff88a4d62cce3c1634ab0a5ec13309/*
       asset_id: 0be55d262b29f564998ff81efe21bdc0022621c12f15af08d0f2ddb1.53225313968e796f2c1e0b57540a13c3b81e06e2ed2637ac1ea9b9f4e27e3dc4
+    - token: 6bc39bafc188d1ac97182256d270ef34630525cca26b5e8c33a983a0534e454b
+      unit: ADA
+      credential: e1317b152faac13426e6a83e06ff88a4d62cce3c1634ab0a5ec13309/*
+      asset_id: 0be55d262b29f564998ff81efe21bdc0022621c12f15af08d0f2ddb1.63f2cbfa5bf8b68828839a2575c8c70f14a32f50ebbfa7c654043269793be896
     - token: SNEK
       unit: ADA
       credential: e1317b152faac13426e6a83e06ff88a4d62cce3c1634ab0a5ec13309/*
@@ -423,7 +532,11 @@ minswap:
       unit: ADA
       credential: ea07b733d932129c378af627436e7cbc2ef0bf96e0036bb51b3bde6b/*
       asset_id: f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.a0f1280da1c9c066652a79f6797b566d8369e059ef0266c33a45d9845cec8580
-    - token: SNEK
+    # - token: 6bc39bafc188d1ac97182256d270ef34630525cca26b5e8c33a983a0534e454b # SNEK
+    #   unit: ADA
+    #   credential: ea07b733d932129c378af627436e7cbc2ef0bf96e0036bb51b3bde6b/*
+    #   asset_id: f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.2ffadbb87144e875749122e0bbb9f535eeaa7f5660c6c4a91bcc4121e477f08d
+    - token: 6bc39bafc188d1ac97182256d270ef34630525cca26b5e8c33a983a0534e454b # SNEK
       unit: ADA
       credential: ea07b733d932129c378af627436e7cbc2ef0bf96e0036bb51b3bde6b/*
       asset_id: f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.2ffadbb87144e875749122e0bbb9f535eeaa7f5660c6c4a91bcc4121e477f08d
@@ -431,6 +544,34 @@ minswap:
       unit: ADA
       credential: ea07b733d932129c378af627436e7cbc2ef0bf96e0036bb51b3bde6b/*
       asset_id: f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.f734af78799c4e857bfd37e8f919678020c0bb3f2aae9328bdb7c557a939a926
+    - token: 6bc39bafc188d1ac97182256d270ef34630525cca26b5e8c33a983a0414e47454c53 #Angels
+      unit: ADA
+      credential: ea07b733d932129c378af627436e7cbc2ef0bf96e0036bb51b3bde6b/*
+      asset_id: f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.af484a0fcc5005058ae66b050f86cb8fc9221fd8b333f3c920c0d9e7ae4e3828
+    - token: 6bc39bafc188d1ac97182256d270ef34630525cca26b5e8c33a983a0424f44454741 #Bodega
+      unit: ADA
+      credential: ea07b733d932129c378af627436e7cbc2ef0bf96e0036bb51b3bde6b/*
+      asset_id: f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.f310d21783a3ae8d2b519e20e2379800390e54c895132f7162a7542ccf834ca5
+    - token: 6bc39bafc188d1ac97182256d270ef34630525cca26b5e8c33a983a04353574150 # CSWAP
+      unit: ADA
+      credential: ea07b733d932129c378af627436e7cbc2ef0bf96e0036bb51b3bde6b/*
+      asset_id: f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.d3685ce30bfecb0149c9e5374afd493cf84020b6bf747ea9f884d3c8defa1298
+    - token: 6bc39bafc188d1ac97182256d270ef34630525cca26b5e8c33a983a0576f726c644d6f62696c65546f6b656e58 # WMTX
+      unit: ADA
+      credential: ea07b733d932129c378af627436e7cbc2ef0bf96e0036bb51b3bde6b/*
+      asset_id: f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.686db0c143a3a2cc19099d8909e315c4ed761a6ac5a3c5998c651d5e9d3cb253
+    - token: 6bc39bafc188d1ac97182256d270ef34630525cca26b5e8c33a983a0494147 # IAG
+      unit: ADA
+      credential: ea07b733d932129c378af627436e7cbc2ef0bf96e0036bb51b3bde6b/*
+      asset_id: f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.7b12f25ce8d6f424e1edbc8b61f0742fb13252605f31dc40373d6a245e8ec1d1
+    - token: 6bc39bafc188d1ac97182256d270ef34630525cca26b5e8c33a983a0535452494b45 # STRIKE
+      unit: ADA
+      credential: ea07b733d932129c378af627436e7cbc2ef0bf96e0036bb51b3bde6b/*
+      asset_id: f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.73e1518e92f367fd5820ac2da1d40ab24fbca1d6cb2c28121ad92f57aff8abce
+    # - token: 6bc39bafc188d1ac97182256d270ef34630525cca26b5e8c33a983a0534e454b # USDM
+    #   unit: ADA
+    #   credential: ea07b733d932129c378af627436e7cbc2ef0bf96e0036bb51b3bde6b/*
+    #   asset_id: f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.b623827076d8b01e7529a77d9f0a9c2fb863dc9aa36416a4ebb12f9d0a6e7f15
   max_concurrency: 3
 splash:
   pools:
@@ -455,6 +596,10 @@ splash:
       unit: ADA
       credential: 6b9c456aa650cb808a9ab54326e039d5235ed69f069c9664a8fe5b69/*
       asset_id: dd6a3921cc3716f65abc66ad0897f142dd6dbee80c642196e9bf3d86.4d494e5f4144415f4e4654
+    - token: 6bc39bafc188d1ac97182256d270ef34630525cca26b5e8c33a983a0534e454b
+      unit: ADA
+      credential: 6b9c456aa650cb808a9ab54326e039d5235ed69f069c9664a8fe5b69/*
+      asset_id: f8fd67ee46f66da669f68dc941090eb753687636b47fc6fd7f5e6254.534e454b5f4144415f4e4654
     - token: SNEK
       unit: ADA
       credential: 6b9c456aa650cb808a9ab54326e039d5235ed69f069c9664a8fe5b69/*
@@ -631,9 +776,9 @@ wingriders:
       credential: af97793b8702f381976cec83e303e9ce17781458c73c4bb16fe02b83/*
       asset_id: 6fdc63a1d71dc2c65502b79baae7fb543185702b12c3c5fb639ed737.a8f20b757dd1d6ba0890db3aa0a5116c331e2f4f224a5a99cf56b0f0edfa5858
   max_concurrency: 3
-fxratesapi:
-  cron: "0 4 * ? * ? *" # Run four minutes past the hour, every hour
-  currencies:
-    - EUR
-    - JPY
-  base: USD
+# fxratesapi:
+#   cron: "0 4 * ? * ? *" # Run four minutes past the hour, every hour
+#   currencies:
+#     - EUR
+#     - JPY
+#   base: USD

@@ -1,0 +1,84 @@
+services:
+  node0:
+    image: sundaeswap/butane-oracle:latest
+    command: ["/bin/sh", "-c", "cat /app/config.base.yaml /app/config.node0.yaml > /app/config.yaml && ./oracles -c /app/config.yaml"]
+    volumes:
+      - ./config.base.yaml:/app/config.base.yaml
+      - ./nodes/config.node0.yaml:/app/config.node0.yaml
+      - ./keys/node0-private.pem:/app/keys/private.pem
+      - ./keys/node0:/app/keys
+      - ./data/node0:/app/data
+    environment:
+      KEYS_DIRECTORY: /app/keys
+      DATA_DIRECTORY: /app/data
+    env_file:
+      - path: .env
+        required: false
+    healthcheck:
+      test: wget --spider http://127.0.0.1:18000/health || exit 1
+      interval: 10s
+      timeout: 10s
+      retries: 1
+    ports:
+      - "31415:31415"
+      - "8080:8080"
+      - "18000:18000"
+    networks:
+      - oracle-network
+    restart: unless-stopped
+
+  node1:
+    image: sundaeswap/butane-oracle:latest
+    command: ["/bin/sh", "-c", "cat /app/config.base.yaml /app/config.node1.yaml > /app/config.yaml && ./oracles -c /app/config.yaml"]
+    volumes:
+      - ./config.base.yaml:/app/config.base.yaml
+      - ./nodes/config.node1.yaml:/app/config.node1.yaml
+      - ./keys/node1-private.pem:/app/keys/private.pem
+      - ./keys/node1:/app/keys
+      - ./data/node1:/app/data
+    environment:
+      KEYS_DIRECTORY: /app/keys
+      DATA_DIRECTORY: /app/data
+    env_file:
+      - path: .env
+        required: false
+    healthcheck:
+      test: wget --spider http://127.0.0.1:18000/health || exit 1
+      interval: 10s
+      timeout: 10s
+      retries: 1
+    ports:
+      - "31416:31415"
+      - "8081:8080"
+      - "18001:18000"
+    networks:
+      - oracle-network
+    restart: unless-stopped
+
+  # Shared services
+  kupo:
+    command: [
+      --node-socket, /Users/rjlacanlaled/.dmtr/tmp/faithful-category-622fa8/mainnet-zuist1.socket,
+      --node-config, /config/config.json,
+      --since, 148027022.9b06accfd37ecbeecd5a1c7bc12c70381cd932e5ae07883f19368d634d584a53,
+      --host, "0.0.0.0",
+      --match, "e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b/*", # sundae
+      --match, "e1317b152faac13426e6a83e06ff88a4d62cce3c1634ab0a5ec13309/*", # minswap
+      --match, "6b9c456aa650cb808a9ab54326e039d5235ed69f069c9664a8fe5b69/*", # spectrum
+      --workdir, /db,
+      --defer-db-indexes,
+      --prune-utxo,
+    ]
+    image: cardanosolutions/kupo
+    expose:
+      - "1442"
+    volumes:
+      - ./mainnet-config:/config
+      - ./volumes/kupo-db:/db
+      - /Users/rjlacanlaled/.dmtr/tmp/faithful-category-622fa8/:/node-ipc
+    networks:
+      - oracle-network
+
+networks:
+  oracle-network:
+    driver: bridge

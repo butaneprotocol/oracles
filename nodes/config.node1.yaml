@@ -1,0 +1,11 @@
+# Node 1 Configuration
+# Inherits from config.base.yaml
+
+# List all peer nodes
+peers:
+  - address: node0:31415
+    label: Node 0
+    public_key: |
+      -----BEGIN PUBLIC KEY-----
+      MCowBQYDK2VwAyEAcy9bHPCRq4fkgB1hBHn/mjBIOAEqZfqN3Mew+A3q0FU=
+      -----END PUBLIC KEY-----
