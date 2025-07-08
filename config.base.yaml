@@ -18,7 +18,7 @@ frost_address: addr1v8eh3vtc30n055hz7cn5us8w3lqgmuzcsrs259q64qsh8uqlzgc6r
   # This is the address of your current FROST public key. The key generation process will print it.
   # Every node must agree on this.
 kupo:
-  kupo_address: https://kupo1ttl6wwyprf2x7rmn0da.mainnet-v2.kupo-m1.demeter.run
+  kupo_address: http://host.docker.internal:1442
   retries: 3
   timeout_ms: 5000
 logs:
