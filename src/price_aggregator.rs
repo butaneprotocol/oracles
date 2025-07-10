@@ -29,6 +29,7 @@ use crate::{
         bybit::ByBitSource,
         coinbase::CoinbaseSource,
         crypto_com::CryptoComSource,
+        cswap::CSwapSource,
         fxratesapi::FxRatesApiSource,
         kucoin::KucoinSource,
         maestro::MaestroSource,
@@ -92,6 +93,7 @@ impl PriceAggregator {
             SourceAdapter::new(MinswapSource::new(&config)?, &config),
             SourceAdapter::new(OkxSource::new(&config)?, &config),
             SourceAdapter::new(SplashSource::new(&config)?, &config),
+            SourceAdapter::new(CSwapSource::new(&config)?, &config),
             SourceAdapter::new(VyFiSource::new(&config)?, &config),
             SourceAdapter::new(WingRidersSource::new(&config)?, &config),
         ];

@@ -51,6 +51,7 @@ struct RawOracleConfig {
     pub sundaeswap: SundaeSwapConfig,
     pub minswap: MinswapConfig,
     pub splash: SplashConfig,
+    pub cswap: CSwapConfig,
     pub vyfi: VyFiConfig,
     pub wingriders: WingRidersConfig,
 }
@@ -90,6 +91,7 @@ pub struct OracleConfig {
     pub sundaeswap: SundaeSwapConfig,
     pub minswap: MinswapConfig,
     pub splash: SplashConfig,
+    pub cswap: CSwapConfig,
     pub vyfi: VyFiConfig,
     pub wingriders: WingRidersConfig,
 }
@@ -231,6 +233,7 @@ impl TryFrom<RawOracleConfig> for OracleConfig {
             sundaeswap: raw.sundaeswap,
             minswap: raw.minswap,
             splash: raw.splash,
+            cswap: raw.cswap,
             vyfi: raw.vyfi,
             wingriders: raw.wingriders,
         })
@@ -470,6 +473,14 @@ pub struct MinswapConfig {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct SplashConfig {
+    #[serde(flatten)]
+    pub kupo: RawKupoConfig,
+    pub pools: Vec<Pool>,
+    pub max_concurrency: usize,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct CSwapConfig {
     #[serde(flatten)]
     pub kupo: RawKupoConfig,
     pub pools: Vec<Pool>,
