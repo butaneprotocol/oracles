@@ -487,6 +487,13 @@ splash:
   max_concurrency: 3
   retries: 3
   timeout_ms: 5000
+cswap:
+  pools:
+    - token: ANGELS
+      unit: ADA
+      credential: ed97e0a1394724bb7cb94f20acf627abc253694c92b88bf8fb4b7f6f/*
+      asset_id: 6f1073916b3a51446ab380304ca42215c8df032c63af66a07cda086a.63
+  max_concurrency: 3
 vyfi:
   pools:
     - token: BTN

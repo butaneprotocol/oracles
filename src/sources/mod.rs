@@ -2,6 +2,7 @@ pub mod binance;
 pub mod bybit;
 pub mod coinbase;
 pub mod crypto_com;
+pub mod cswap;
 pub mod fxratesapi;
 pub mod kucoin;
 pub mod kupo;
