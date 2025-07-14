@@ -16,26 +16,6 @@ logs:
   level: info
 keygen:
   enabled: false
-synthetics:
-  - name: USDb
-    digits: 6
-    backing_currencies:
-      - USD
-    collateral:
-      list:
-        - ADA
-        - BTN
-        - SNEK
-        - MIN
-        - LENFI
-        - ENCS
-  - name: MIDAS
-    digits: 9
-    backing_currencies:
-      - PAXG
-      - XAUt
-    collateral:
-      nft: 00000000000410c2d9e01e8ec78ab1dc6bbc383fae76cbe2689beb02.705f4d49444153
 currencies:
   - name: ADA
     digits: 6
@@ -487,157 +467,157 @@ splash:
   max_concurrency: 3
   retries: 3
   timeout_ms: 5000
-cswap:
-  pools:
-    - token: ANGELS
-      unit: ADA
-      credential: ed97e0a1394724bb7cb94f20acf627abc253694c92b88bf8fb4b7f6f/*
-      asset_id: 6f1073916b3a51446ab380304ca42215c8df032c63af66a07cda086a.63
-  max_concurrency: 3
-vyfi:
-  pools:
-    - token: BTN
-      unit: ADA
-      credential: 2303d158c69aa3ca38657f6d97225f2a35d331608901907f42ffbc47/*
-      asset_id: 4b29b9203fbbf66ff1190668f375b91ac6af0814f17c57d5af3ab495
-    - token: DJED
-      unit: ADA
-      credential: 99a917d3773ff635dacebc6908284ea402656ceab373eb3a5a007df4/*
-      asset_id: 7fe95f7516f5a53f835f80ce1053eec933efba9c1b49fab0f7398bc2
-    - token: ENCS
-      unit: ADA
-      credential: afa8060050463d4a0fddc7c5e1ff6a1bcd5469be269f910f2aa430aa/*
-      asset_id: 88ec2602667e9878ab1a4c87a0820768ec4a1b2e80e5fd7d5bf343d8
-    - token: FLDT
-      unit: ADA
-      credential: 76ac805e3a39c9469627bcb4ada851e9359c544275bc0b6634e5eb50/*
-      asset_id: 4c1a1b6384f7b1e3b3296aee0c871437c213c0aa2db89d2478e1cb23
-    - token: IAG
-      unit: ADA
-      credential: 55126301921898feca9c79517d5464b7e52bc4a7e0e6110a46a27f08/*
-      asset_id: 91273656a81cc90ae6a5403a39052eeae71f17332cc1928be01ec656
-    - token: iETH
-      unit: ADA
-      credential: 4e974d891115a3dcb8059c88524b54385fd116425c99792aa7d1fd31/*
-      asset_id: d86bc07992849859dcfa415b08e756c335d27f57ec0cf4aaf3cc4895
-    - token: iUSD
-      unit: ADA
-      credential: f7c76feffdd3422398178c6ccbc30f3935a07ffcd681df20778c1c10/*
-      asset_id: 9a3eebe6132a6b02a0d09f96ff3988bd0d62d5809c0185076acc31d8
-    - token: LENFI
-      unit: ADA
-      credential: d56c8ca890ffc9b209c691fd184cfb861b51d6a9b0e4e7784348c8e8/*
-      asset_id: 46b0cd4e67ee7e7ea9f11b4723733d490b2d27b41d2b43d63e3448df
-    - token: LQ
-      unit: ADA
-      credential: ed6938f106c4a3bc6c06460c87ddf311cb1889c19b751a4f295491ef/*
-      asset_id: 60d04ebc9b110ba8690fe79204d23ad7e94f060221fa02d037126ffd
-    - token: MIN
-      unit: ADA
-      credential: e93ec0e79a07e6b3f30c8c9f1e6f463e86363848f5a96d66a5c25ba8/*
-      asset_id: 21a6080759a747b9aa826f70c587c0ec480de62f19d58a2fae079c03
-    - token: SHEN
-      unit: ADA
-      credential: c118e8085de87a2b5b40fca831bfc019054876367715dcd3e01d5ca6/*
-      asset_id: e0a17a3caab32b95a86c1f48f2f178c66e79c4d847eb1b1b054480bf
-    - token: SNEK
-      unit: ADA
-      credential: 232c10966ce4d8e67c2eae17bb57c2cf4854a57509a752fbb3c02bd1/*
-      asset_id: 96c31772282e6ae5c629120471c5bbcdef538226b31b97d74c50ca3c
-    - token: SUNDAE
-      unit: ADA
-      credential: 65302bbfb05636b784c9b95abf6dd619931e7a5c3f3c7b6fb08d2faf/*
-      asset_id: daa6903a721fd0ab2e9402304c43dc53b48f73d791882cbdc3abbe0d
-  max_concurrency: 3
-wingriders:
-  pools:
-    # V1
-    - token: BTN
-      unit: ADA
-      credential: e6c90a5923713af5786963dee0fdffd830ca7e0c86a041d9e5833e91/*
-      asset_id: 026a18d04a0c642759bb3d83b12e3344894e5c1c7b2aeb1a2113a570.1261cced24aaad64f07975f3099c3277b2b7bbb93bd7ca6cce8f289409b58490
-    - token: DJED
-      unit: ADA
-      credential: e6c90a5923713af5786963dee0fdffd830ca7e0c86a041d9e5833e91/*
-      asset_id: 026a18d04a0c642759bb3d83b12e3344894e5c1c7b2aeb1a2113a570.a939812d08cfb6066e17d2914a7272c6b8c0197acdf68157d02c73649cc3efc0
-    - token: ENCS
-      unit: ADA
-      credential: e6c90a5923713af5786963dee0fdffd830ca7e0c86a041d9e5833e91/*
-      asset_id: 026a18d04a0c642759bb3d83b12e3344894e5c1c7b2aeb1a2113a570.3344a7c3b63f032a5706307fa3692109d2ea7dbc6d96b560053eb934c0cf28df
-    - token: IAG
-      unit: ADA
-      credential: e6c90a5923713af5786963dee0fdffd830ca7e0c86a041d9e5833e91/*
-      asset_id: 026a18d04a0c642759bb3d83b12e3344894e5c1c7b2aeb1a2113a570.7b12f25ce8d6f424e1edbc8b61f0742fb13252605f31dc40373d6a245e8ec1d1
-    - token: iETH
-      unit: ADA
-      credential: e6c90a5923713af5786963dee0fdffd830ca7e0c86a041d9e5833e91/*
-      asset_id: 026a18d04a0c642759bb3d83b12e3344894e5c1c7b2aeb1a2113a570.562b9ff903fe8d9e1c980120a233051e7b1518cfc75eb9b4227f7710b670b6e9
-    - token: iUSD
-      unit: ADA
-      credential: e6c90a5923713af5786963dee0fdffd830ca7e0c86a041d9e5833e91/*
-      asset_id: 026a18d04a0c642759bb3d83b12e3344894e5c1c7b2aeb1a2113a570.452089abb5bf8cc59b678a2cd7b9ee952346c6c0aa1cf27df324310a70d02fc3
-    - token: LENFI
-      unit: ADA
-      credential: e6c90a5923713af5786963dee0fdffd830ca7e0c86a041d9e5833e91/*
-      asset_id: 026a18d04a0c642759bb3d83b12e3344894e5c1c7b2aeb1a2113a570.d5759e269df87a794b58360ad3be9b375498c28792711294a5e86f2e355d20b7
-    - token: LQ
-      unit: ADA
-      credential: e6c90a5923713af5786963dee0fdffd830ca7e0c86a041d9e5833e91/*
-      asset_id: 026a18d04a0c642759bb3d83b12e3344894e5c1c7b2aeb1a2113a570.6263e0101384dace4d7a8dadf0e6d45c8d43c8872604118ee82e3f2212934917
-    - token: MIN
-      unit: ADA
-      credential: e6c90a5923713af5786963dee0fdffd830ca7e0c86a041d9e5833e91/*
-      asset_id: 026a18d04a0c642759bb3d83b12e3344894e5c1c7b2aeb1a2113a570.82e2b1fd27a7712a1a9cf750dfbea1a5778611b20e06dd6a611df7a643f8cb75
-    - token: SHEN
-      unit: ADA
-      credential: e6c90a5923713af5786963dee0fdffd830ca7e0c86a041d9e5833e91/*
-      asset_id: 026a18d04a0c642759bb3d83b12e3344894e5c1c7b2aeb1a2113a570.a0f1280da1c9c066652a79f6797b566d8369e059ef0266c33a45d9845cec8580
-    - token: SNEK
-      unit: ADA
-      credential: e6c90a5923713af5786963dee0fdffd830ca7e0c86a041d9e5833e91/*
-      asset_id: 026a18d04a0c642759bb3d83b12e3344894e5c1c7b2aeb1a2113a570.2ffadbb87144e875749122e0bbb9f535eeaa7f5660c6c4a91bcc4121e477f08d
-    - token: SUNDAE
-      unit: ADA
-      credential: e6c90a5923713af5786963dee0fdffd830ca7e0c86a041d9e5833e91/*
-      asset_id: 026a18d04a0c642759bb3d83b12e3344894e5c1c7b2aeb1a2113a570.f734af78799c4e857bfd37e8f919678020c0bb3f2aae9328bdb7c557a939a926
-    # V2
-    - token: DJED
-      unit: ADA
-      credential: af97793b8702f381976cec83e303e9ce17781458c73c4bb16fe02b83/*
-      asset_id: 6fdc63a1d71dc2c65502b79baae7fb543185702b12c3c5fb639ed737.c0bccd3384ea1094fcee3cb77d4770647df096517648214fdfaa21ac21c7b7fc
-    - token: IAG
-      unit: ADA
-      credential: af97793b8702f381976cec83e303e9ce17781458c73c4bb16fe02b83/*
-      asset_id: 6fdc63a1d71dc2c65502b79baae7fb543185702b12c3c5fb639ed737.0c5eb41c9d6525aae8a8d6f04045a6acc7e0eacae69da96987cf1d9124f22421
-    - token: iETH
-      unit: ADA
-      credential: af97793b8702f381976cec83e303e9ce17781458c73c4bb16fe02b83/*
-      asset_id: 6fdc63a1d71dc2c65502b79baae7fb543185702b12c3c5fb639ed737.8bee84c3a033f63dc3d773531fb4ad3e0dbc85d34731f9f1e209413062ade402
-    - token: iUSD
-      unit: ADA
-      credential: af97793b8702f381976cec83e303e9ce17781458c73c4bb16fe02b83/*
-      asset_id: 6fdc63a1d71dc2c65502b79baae7fb543185702b12c3c5fb639ed737.90ab8a76fbf5fb75f7c5d367bfebd2400fa2f78d442efb520bb1aa72ea3c381d
-    - token: LENFI
-      unit: ADA
-      credential: af97793b8702f381976cec83e303e9ce17781458c73c4bb16fe02b83/*
-      asset_id: 6fdc63a1d71dc2c65502b79baae7fb543185702b12c3c5fb639ed737.d97727454cade99fd49e0c55edf8bb6808ce70843d470e874491d71cc26e0b84
-    - token: LQ
-      unit: ADA
-      credential: af97793b8702f381976cec83e303e9ce17781458c73c4bb16fe02b83/*
-      asset_id: 6fdc63a1d71dc2c65502b79baae7fb543185702b12c3c5fb639ed737.0bee3eb0b93c2a1e72cb7937b90eac382666bd34dc5971df83f5ee4112a86a16
-    - token: SHEN
-      unit: ADA
-      credential: af97793b8702f381976cec83e303e9ce17781458c73c4bb16fe02b83/*
-      asset_id: 6fdc63a1d71dc2c65502b79baae7fb543185702b12c3c5fb639ed737.aab543dd81fb81f222e29e82bc8e7176d8a036120a0684790270594cb73aba99
-    - token: SNEK
-      unit: ADA
-      credential: af97793b8702f381976cec83e303e9ce17781458c73c4bb16fe02b83/*
-      asset_id: 6fdc63a1d71dc2c65502b79baae7fb543185702b12c3c5fb639ed737.e3b382a85249ef92357e00bd42c088c69c1eac2a736ae2df34dd2b89de11de1a
-    - token: SUNDAE
-      unit: ADA
-      credential: af97793b8702f381976cec83e303e9ce17781458c73c4bb16fe02b83/*
-      asset_id: 6fdc63a1d71dc2c65502b79baae7fb543185702b12c3c5fb639ed737.a8f20b757dd1d6ba0890db3aa0a5116c331e2f4f224a5a99cf56b0f0edfa5858
-  max_concurrency: 3
+# cswap:
+#   pools:
+#     - token: ANGELS
+#       unit: ADA
+#       credential: ed97e0a1394724bb7cb94f20acf627abc253694c92b88bf8fb4b7f6f/*
+#       asset_id: 6f1073916b3a51446ab380304ca42215c8df032c63af66a07cda086a.63
+#   max_concurrency: 3
+# vyfi:
+#   pools:
+#     - token: BTN
+#       unit: ADA
+#       credential: 2303d158c69aa3ca38657f6d97225f2a35d331608901907f42ffbc47/*
+#       asset_id: 4b29b9203fbbf66ff1190668f375b91ac6af0814f17c57d5af3ab495
+#     - token: DJED
+#       unit: ADA
+#       credential: 99a917d3773ff635dacebc6908284ea402656ceab373eb3a5a007df4/*
+#       asset_id: 7fe95f7516f5a53f835f80ce1053eec933efba9c1b49fab0f7398bc2
+#     - token: ENCS
+#       unit: ADA
+#       credential: afa8060050463d4a0fddc7c5e1ff6a1bcd5469be269f910f2aa430aa/*
+#       asset_id: 88ec2602667e9878ab1a4c87a0820768ec4a1b2e80e5fd7d5bf343d8
+#     - token: FLDT
+#       unit: ADA
+#       credential: 76ac805e3a39c9469627bcb4ada851e9359c544275bc0b6634e5eb50/*
+#       asset_id: 4c1a1b6384f7b1e3b3296aee0c871437c213c0aa2db89d2478e1cb23
+#     - token: IAG
+#       unit: ADA
+#       credential: 55126301921898feca9c79517d5464b7e52bc4a7e0e6110a46a27f08/*
+#       asset_id: 91273656a81cc90ae6a5403a39052eeae71f17332cc1928be01ec656
+#     - token: iETH
+#       unit: ADA
+#       credential: 4e974d891115a3dcb8059c88524b54385fd116425c99792aa7d1fd31/*
+#       asset_id: d86bc07992849859dcfa415b08e756c335d27f57ec0cf4aaf3cc4895
+#     - token: iUSD
+#       unit: ADA
+#       credential: f7c76feffdd3422398178c6ccbc30f3935a07ffcd681df20778c1c10/*
+#       asset_id: 9a3eebe6132a6b02a0d09f96ff3988bd0d62d5809c0185076acc31d8
+#     - token: LENFI
+#       unit: ADA
+#       credential: d56c8ca890ffc9b209c691fd184cfb861b51d6a9b0e4e7784348c8e8/*
+#       asset_id: 46b0cd4e67ee7e7ea9f11b4723733d490b2d27b41d2b43d63e3448df
+#     - token: LQ
+#       unit: ADA
+#       credential: ed6938f106c4a3bc6c06460c87ddf311cb1889c19b751a4f295491ef/*
+#       asset_id: 60d04ebc9b110ba8690fe79204d23ad7e94f060221fa02d037126ffd
+#     - token: MIN
+#       unit: ADA
+#       credential: e93ec0e79a07e6b3f30c8c9f1e6f463e86363848f5a96d66a5c25ba8/*
+#       asset_id: 21a6080759a747b9aa826f70c587c0ec480de62f19d58a2fae079c03
+#     - token: SHEN
+#       unit: ADA
+#       credential: c118e8085de87a2b5b40fca831bfc019054876367715dcd3e01d5ca6/*
+#       asset_id: e0a17a3caab32b95a86c1f48f2f178c66e79c4d847eb1b1b054480bf
+#     - token: SNEK
+#       unit: ADA
+#       credential: 232c10966ce4d8e67c2eae17bb57c2cf4854a57509a752fbb3c02bd1/*
+#       asset_id: 96c31772282e6ae5c629120471c5bbcdef538226b31b97d74c50ca3c
+#     - token: SUNDAE
+#       unit: ADA
+#       credential: 65302bbfb05636b784c9b95abf6dd619931e7a5c3f3c7b6fb08d2faf/*
+#       asset_id: daa6903a721fd0ab2e9402304c43dc53b48f73d791882cbdc3abbe0d
+#   max_concurrency: 3
+# # wingriders:
+# #   pools:
+# #     # V1
+# #     - token: BTN
+# #       unit: ADA
+# #       credential: e6c90a5923713af5786963dee0fdffd830ca7e0c86a041d9e5833e91/*
+# #       asset_id: 026a18d04a0c642759bb3d83b12e3344894e5c1c7b2aeb1a2113a570.1261cced24aaad64f07975f3099c3277b2b7bbb93bd7ca6cce8f289409b58490
+#     - token: DJED
+#       unit: ADA
+#       credential: e6c90a5923713af5786963dee0fdffd830ca7e0c86a041d9e5833e91/*
+#       asset_id: 026a18d04a0c642759bb3d83b12e3344894e5c1c7b2aeb1a2113a570.a939812d08cfb6066e17d2914a7272c6b8c0197acdf68157d02c73649cc3efc0
+#     - token: ENCS
+#       unit: ADA
+#       credential: e6c90a5923713af5786963dee0fdffd830ca7e0c86a041d9e5833e91/*
+#       asset_id: 026a18d04a0c642759bb3d83b12e3344894e5c1c7b2aeb1a2113a570.3344a7c3b63f032a5706307fa3692109d2ea7dbc6d96b560053eb934c0cf28df
+#     - token: IAG
+#       unit: ADA
+#       credential: e6c90a5923713af5786963dee0fdffd830ca7e0c86a041d9e5833e91/*
+#       asset_id: 026a18d04a0c642759bb3d83b12e3344894e5c1c7b2aeb1a2113a570.7b12f25ce8d6f424e1edbc8b61f0742fb13252605f31dc40373d6a245e8ec1d1
+#     - token: iETH
+#       unit: ADA
+#       credential: e6c90a5923713af5786963dee0fdffd830ca7e0c86a041d9e5833e91/*
+#       asset_id: 026a18d04a0c642759bb3d83b12e3344894e5c1c7b2aeb1a2113a570.562b9ff903fe8d9e1c980120a233051e7b1518cfc75eb9b4227f7710b670b6e9
+#     - token: iUSD
+#       unit: ADA
+#       credential: e6c90a5923713af5786963dee0fdffd830ca7e0c86a041d9e5833e91/*
+#       asset_id: 026a18d04a0c642759bb3d83b12e3344894e5c1c7b2aeb1a2113a570.452089abb5bf8cc59b678a2cd7b9ee952346c6c0aa1cf27df324310a70d02fc3
+#     - token: LENFI
+#       unit: ADA
+#       credential: e6c90a5923713af5786963dee0fdffd830ca7e0c86a041d9e5833e91/*
+#       asset_id: 026a18d04a0c642759bb3d83b12e3344894e5c1c7b2aeb1a2113a570.d5759e269df87a794b58360ad3be9b375498c28792711294a5e86f2e355d20b7
+#     - token: LQ
+#       unit: ADA
+#       credential: e6c90a5923713af5786963dee0fdffd830ca7e0c86a041d9e5833e91/*
+#       asset_id: 026a18d04a0c642759bb3d83b12e3344894e5c1c7b2aeb1a2113a570.6263e0101384dace4d7a8dadf0e6d45c8d43c8872604118ee82e3f2212934917
+#     - token: MIN
+#       unit: ADA
+#       credential: e6c90a5923713af5786963dee0fdffd830ca7e0c86a041d9e5833e91/*
+#       asset_id: 026a18d04a0c642759bb3d83b12e3344894e5c1c7b2aeb1a2113a570.82e2b1fd27a7712a1a9cf750dfbea1a5778611b20e06dd6a611df7a643f8cb75
+#     - token: SHEN
+#       unit: ADA
+#       credential: e6c90a5923713af5786963dee0fdffd830ca7e0c86a041d9e5833e91/*
+#       asset_id: 026a18d04a0c642759bb3d83b12e3344894e5c1c7b2aeb1a2113a570.a0f1280da1c9c066652a79f6797b566d8369e059ef0266c33a45d9845cec8580
+#     - token: SNEK
+#       unit: ADA
+#       credential: e6c90a5923713af5786963dee0fdffd830ca7e0c86a041d9e5833e91/*
+#       asset_id: 026a18d04a0c642759bb3d83b12e3344894e5c1c7b2aeb1a2113a570.2ffadbb87144e875749122e0bbb9f535eeaa7f5660c6c4a91bcc4121e477f08d
+#     - token: SUNDAE
+#       unit: ADA
+#       credential: e6c90a5923713af5786963dee0fdffd830ca7e0c86a041d9e5833e91/*
+#       asset_id: 026a18d04a0c642759bb3d83b12e3344894e5c1c7b2aeb1a2113a570.f734af78799c4e857bfd37e8f919678020c0bb3f2aae9328bdb7c557a939a926
+#     # V2
+#     - token: DJED
+#       unit: ADA
+#       credential: af97793b8702f381976cec83e303e9ce17781458c73c4bb16fe02b83/*
+#       asset_id: 6fdc63a1d71dc2c65502b79baae7fb543185702b12c3c5fb639ed737.c0bccd3384ea1094fcee3cb77d4770647df096517648214fdfaa21ac21c7b7fc
+#     - token: IAG
+#       unit: ADA
+#       credential: af97793b8702f381976cec83e303e9ce17781458c73c4bb16fe02b83/*
+#       asset_id: 6fdc63a1d71dc2c65502b79baae7fb543185702b12c3c5fb639ed737.0c5eb41c9d6525aae8a8d6f04045a6acc7e0eacae69da96987cf1d9124f22421
+#     - token: iETH
+#       unit: ADA
+#       credential: af97793b8702f381976cec83e303e9ce17781458c73c4bb16fe02b83/*
+#       asset_id: 6fdc63a1d71dc2c65502b79baae7fb543185702b12c3c5fb639ed737.8bee84c3a033f63dc3d773531fb4ad3e0dbc85d34731f9f1e209413062ade402
+#     - token: iUSD
+#       unit: ADA
+#       credential: af97793b8702f381976cec83e303e9ce17781458c73c4bb16fe02b83/*
+#       asset_id: 6fdc63a1d71dc2c65502b79baae7fb543185702b12c3c5fb639ed737.90ab8a76fbf5fb75f7c5d367bfebd2400fa2f78d442efb520bb1aa72ea3c381d
+#     - token: LENFI
+#       unit: ADA
+#       credential: af97793b8702f381976cec83e303e9ce17781458c73c4bb16fe02b83/*
+#       asset_id: 6fdc63a1d71dc2c65502b79baae7fb543185702b12c3c5fb639ed737.d97727454cade99fd49e0c55edf8bb6808ce70843d470e874491d71cc26e0b84
+#     - token: LQ
+#       unit: ADA
+#       credential: af97793b8702f381976cec83e303e9ce17781458c73c4bb16fe02b83/*
+#       asset_id: 6fdc63a1d71dc2c65502b79baae7fb543185702b12c3c5fb639ed737.0bee3eb0b93c2a1e72cb7937b90eac382666bd34dc5971df83f5ee4112a86a16
+#     - token: SHEN
+#       unit: ADA
+#       credential: af97793b8702f381976cec83e303e9ce17781458c73c4bb16fe02b83/*
+#       asset_id: 6fdc63a1d71dc2c65502b79baae7fb543185702b12c3c5fb639ed737.aab543dd81fb81f222e29e82bc8e7176d8a036120a0684790270594cb73aba99
+#     - token: SNEK
+#       unit: ADA
+#       credential: af97793b8702f381976cec83e303e9ce17781458c73c4bb16fe02b83/*
+#       asset_id: 6fdc63a1d71dc2c65502b79baae7fb543185702b12c3c5fb639ed737.e3b382a85249ef92357e00bd42c088c69c1eac2a736ae2df34dd2b89de11de1a
+#     - token: SUNDAE
+#       unit: ADA
+#       credential: af97793b8702f381976cec83e303e9ce17781458c73c4bb16fe02b83/*
+#       asset_id: 6fdc63a1d71dc2c65502b79baae7fb543185702b12c3c5fb639ed737.a8f20b757dd1d6ba0890db3aa0a5116c331e2f4f224a5a99cf56b0f0edfa5858
+#   max_concurrency: 3
 fxratesapi:
   cron: "0 4 * ? * ? *" # Run four minutes past the hour, every hour
   currencies:

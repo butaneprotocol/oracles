@@ -36,6 +36,9 @@ struct RawOracleConfig {
     pub logs: RawLogConfig,
     pub frost_address: Option<String>,
     pub keygen: KeygenConfig,
+    #[serde(default)]
+    pub enable_synthetics: bool,
+    #[serde(default)]
     pub synthetics: Vec<SyntheticConfig>,
     pub currencies: Vec<CurrencyConfig>,
     pub feeds: FeedConfig,
@@ -48,12 +51,12 @@ struct RawOracleConfig {
     pub kucoin: KucoinConfig,
     pub maestro: MaestroConfig,
     pub okx: OkxConfig,
-    pub sundaeswap: SundaeSwapConfig,
-    pub minswap: MinswapConfig,
-    pub splash: SplashConfig,
-    pub cswap: CSwapConfig,
-    pub vyfi: VyFiConfig,
-    pub wingriders: WingRidersConfig,
+    pub sundaeswap: Option<SundaeSwapConfig>,
+    pub minswap: Option<MinswapConfig>,
+    pub splash: Option<SplashConfig>,
+    pub cswap: Option<CSwapConfig>,
+    pub vyfi: Option<VyFiConfig>,
+    pub wingriders: Option<WingRidersConfig>,
 }
 
 pub struct OracleConfig {
@@ -76,6 +79,7 @@ pub struct OracleConfig {
     pub logs: LogConfig,
     pub frost_address: Option<String>,
     pub keygen: KeygenConfig,
+    pub enable_synthetics: bool,
     pub synthetics: Vec<SyntheticConfig>,
     pub currencies: Vec<CurrencyConfig>,
     pub feeds: FeedConfig,
@@ -88,12 +92,12 @@ pub struct OracleConfig {
     pub kucoin: KucoinConfig,
     pub maestro: MaestroConfig,
     pub okx: OkxConfig,
-    pub sundaeswap: SundaeSwapConfig,
-    pub minswap: MinswapConfig,
-    pub splash: SplashConfig,
-    pub cswap: CSwapConfig,
-    pub vyfi: VyFiConfig,
-    pub wingriders: WingRidersConfig,
+    pub sundaeswap: Option<SundaeSwapConfig>,
+    pub minswap: Option<MinswapConfig>,
+    pub splash: Option<SplashConfig>,
+    pub cswap: Option<CSwapConfig>,
+    pub vyfi: Option<VyFiConfig>,
+    pub wingriders: Option<WingRidersConfig>,
 }
 
 impl OracleConfig {
@@ -218,6 +222,7 @@ impl TryFrom<RawOracleConfig> for OracleConfig {
             logs,
             frost_address: raw.frost_address,
             keygen: raw.keygen,
+            enable_synthetics: raw.enable_synthetics,
             synthetics: raw.synthetics,
             currencies: raw.currencies,
             feeds: raw.feeds,

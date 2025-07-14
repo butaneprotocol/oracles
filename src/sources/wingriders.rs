@@ -35,7 +35,8 @@ impl Source for WingRidersSource {
 
 impl WingRidersSource {
     pub fn new(config: &OracleConfig) -> Result<Self> {
-        let wingriders_config = &config.wingriders;
+        let wingriders_config = config.wingriders.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("WingRiders configuration not found"))?;
         let client = config
             .kupo_with_overrides(&wingriders_config.kupo)
             .new_client()?;

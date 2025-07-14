@@ -69,7 +69,7 @@ pub struct PriceAggregator {
     audit_sink: watch::Sender<Vec<TokenPrice>>,
     payload_source: watch::Receiver<Payload>,
     price_sources: Option<Vec<SourceAdapter>>,
-    synth_config_source: SyntheticConfigSource,
+    synth_config_source: Option<SyntheticConfigSource>,
     previous_synth_prices: BTreeMap<String, PreviousSyntheticPrices>,
     previous_prices: BTreeMap<String, PreviousPrice>,
     persistence: TokenPricePersistence,
@@ -90,13 +90,25 @@ impl PriceAggregator {
             SourceAdapter::new(CoinbaseSource::new(&config), &config),
             SourceAdapter::new(CryptoComSource::new(&config), &config),
             SourceAdapter::new(KucoinSource::new(&config), &config),
-            SourceAdapter::new(MinswapSource::new(&config)?, &config),
             SourceAdapter::new(OkxSource::new(&config)?, &config),
-            SourceAdapter::new(SplashSource::new(&config)?, &config),
-            SourceAdapter::new(CSwapSource::new(&config)?, &config),
-            SourceAdapter::new(VyFiSource::new(&config)?, &config),
-            SourceAdapter::new(WingRidersSource::new(&config)?, &config),
         ];
+        
+        // Add DEX sources only if configured
+        if config.minswap.is_some() {
+            sources.push(SourceAdapter::new(MinswapSource::new(&config)?, &config));
+        }
+        if config.splash.is_some() {
+            sources.push(SourceAdapter::new(SplashSource::new(&config)?, &config));
+        }
+        if config.cswap.is_some() {
+            sources.push(SourceAdapter::new(CSwapSource::new(&config)?, &config));
+        }
+        if config.vyfi.is_some() {
+            sources.push(SourceAdapter::new(VyFiSource::new(&config)?, &config));
+        }
+        if config.wingriders.is_some() {
+            sources.push(SourceAdapter::new(WingRidersSource::new(&config)?, &config));
+        }
         match MaestroSource::new(&config)? {
             Some(maestro_source) => {
                 sources.push(SourceAdapter::new(maestro_source, &config));
@@ -113,20 +125,26 @@ impl PriceAggregator {
                 warn!("Not querying FXRatesAPI, because no FXRATESAPI_API_KEY was provided");
             }
         }
-        if config.sundaeswap.use_api {
-            sources.push(SourceAdapter::new(SundaeSwapSource::new(&config)?, &config));
-        } else {
-            sources.push(SourceAdapter::new(
-                SundaeSwapKupoSource::new(&config)?,
-                &config,
-            ));
+        if let Some(sundaeswap_config) = &config.sundaeswap {
+            if sundaeswap_config.use_api {
+                sources.push(SourceAdapter::new(SundaeSwapSource::new(&config)?, &config));
+            } else {
+                sources.push(SourceAdapter::new(
+                    SundaeSwapKupoSource::new(&config)?,
+                    &config,
+                ));
+            }
         }
         Ok(Self {
             price_sink,
             audit_sink,
             payload_source,
             price_sources: Some(sources),
-            synth_config_source: SyntheticConfigSource::new(&config)?,
+            synth_config_source: if config.enable_synthetics {
+                Some(SyntheticConfigSource::new(&config)?)
+            } else {
+                None
+            },
             previous_synth_prices: BTreeMap::new(),
             previous_prices: BTreeMap::new(),
             persistence: TokenPricePersistence::new(&config),
@@ -152,7 +170,9 @@ impl PriceAggregator {
         set.spawn(async move {
             loop {
                 self.update_previous_prices();
-                self.synth_config_source.refresh(&health).await;
+                if let Some(ref mut synth_config_source) = self.synth_config_source {
+                    synth_config_source.refresh(&health).await;
+                }
                 self.report(&reporter.latest_source_prices(), &health).await;
                 sleep(Duration::from_secs(1)).await;
             }
@@ -287,7 +307,10 @@ impl PriceAggregator {
         let Some(synth_price) = converter.value_in_usd(&synth.name) else {
             bail!("could not compute synthetic price");
         };
-        let Some(collateral) = self.synth_config_source.synthetic_collateral(&synth.name) else {
+        let Some(ref synth_config_source) = self.synth_config_source else {
+            bail!("synthetics are not enabled");
+        };
+        let Some(collateral) = synth_config_source.synthetic_collateral(&synth.name) else {
             bail!("could not retrieve synthetic config");
         };
 

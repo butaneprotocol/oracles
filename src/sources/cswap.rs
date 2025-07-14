@@ -35,7 +35,8 @@ impl Source for CSwapSource {
 
 impl CSwapSource {
     pub fn new(config: &OracleConfig) -> Result<Self> {
-        let cswap_config = &config.cswap;
+        let cswap_config = config.cswap.as_ref()
+            .ok_or_else(|| anyhow!("CSwap configuration not found"))?;
         let client = config
             .kupo_with_overrides(&cswap_config.kupo)
             .new_client()?;

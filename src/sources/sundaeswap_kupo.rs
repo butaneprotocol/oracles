@@ -40,7 +40,8 @@ impl Source for SundaeSwapKupoSource {
 
 impl SundaeSwapKupoSource {
     pub fn new(config: &OracleConfig) -> Result<Self> {
-        let sundae_config = &config.sundaeswap;
+        let sundae_config = config.sundaeswap.as_ref()
+            .ok_or_else(|| anyhow!("SundaeSwap configuration not found"))?;
         let client = config
             .kupo_with_overrides(&sundae_config.kupo)
             .new_client()?;

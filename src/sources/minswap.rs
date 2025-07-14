@@ -35,7 +35,8 @@ impl Source for MinswapSource {
 
 impl MinswapSource {
     pub fn new(config: &OracleConfig) -> Result<Self> {
-        let minswap_config = &config.minswap;
+        let minswap_config = config.minswap.as_ref()
+            .ok_or_else(|| anyhow!("Minswap configuration not found"))?;
         let client = config
             .kupo_with_overrides(&minswap_config.kupo)
             .new_client()?;

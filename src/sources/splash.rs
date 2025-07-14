@@ -35,7 +35,8 @@ impl Source for SplashSource {
 
 impl SplashSource {
     pub fn new(config: &OracleConfig) -> Result<Self> {
-        let splash_config = &config.splash;
+        let splash_config = config.splash.as_ref()
+            .ok_or_else(|| anyhow!("Splash configuration not found"))?;
         let client = config
             .kupo_with_overrides(&splash_config.kupo)
             .new_client()?;

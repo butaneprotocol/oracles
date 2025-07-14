@@ -35,7 +35,8 @@ impl Source for VyFiSource {
 
 impl VyFiSource {
     pub fn new(config: &OracleConfig) -> Result<Self> {
-        let vyfi_config = &config.vyfi;
+        let vyfi_config = config.vyfi.as_ref()
+            .ok_or_else(|| anyhow!("VyFi configuration not found"))?;
         let client = config.kupo_with_overrides(&vyfi_config.kupo).new_client()?;
         Ok(Self {
             client: Arc::new(client),

@@ -65,14 +65,15 @@ query ButaneOracleQuery($ids: [ID!]!) {
 
 impl SundaeSwapSource {
     pub fn new(config: &OracleConfig) -> Result<Self> {
+        let sundaeswap_config = config.sundaeswap.as_ref()
+            .ok_or_else(|| anyhow!("SundaeSwap configuration not found"))?;
         let client = Client::builder().build()?;
-        let pools = config
-            .sundaeswap
+        let pools = sundaeswap_config
             .pools
             .iter()
             .map(|p| {
                 // the id of a pool in sundaeswap's API is the asset name (minus a four-byte prefix)
-                let prefix_len = config.sundaeswap.policy_id.len() + ".000de140".len();
+                let prefix_len = sundaeswap_config.policy_id.len() + ".000de140".len();
                 let id = &p.asset_id[prefix_len..];
                 SundaeSwapPool {
                     token: p.token.clone(),
