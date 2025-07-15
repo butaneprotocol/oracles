@@ -101,7 +101,15 @@ impl PriceAggregator {
             sources.push(SourceAdapter::new(SplashSource::new(&config)?, &config));
         }
         if config.cswap.is_some() {
-            sources.push(SourceAdapter::new(CSwapSource::new(&config)?, &config));
+            match CSwapSource::new(&config) {
+                Ok(cswap) => {
+                    warn!("CSwap source initialized successfully");
+                    sources.push(SourceAdapter::new(cswap, &config));
+                }
+                Err(e) => {
+                    warn!("Failed to initialize CSwap source: {}", e);
+                }
+            }
         }
         if config.vyfi.is_some() {
             sources.push(SourceAdapter::new(VyFiSource::new(&config)?, &config));
