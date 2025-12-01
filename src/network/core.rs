@@ -225,8 +225,7 @@ impl Core {
 
         let (outgoing_peers, incoming_peers): (Vec<_>, Vec<_>) = self
             .peers
-            .iter()
-            .map(|(_, peer)| peer)
+            .values()
             .partition(|p| self.id.should_initiate_connection_to(&p.id));
 
         // For each peer that we should connect to, spawn a task to connect to them
@@ -863,7 +862,7 @@ async fn handle_ping(
 }
 
 #[tracing::instrument]
-pub(super) async fn try_send_disconnect(them: &str, sink: &mut EncodeSink, reason: String) {
+async fn try_send_disconnect(them: &str, sink: &mut EncodeSink, reason: String) {
     match sink
         .write_with_timeout(Duration::from_secs(3), Message::Disconnect(reason))
         .await

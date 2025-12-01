@@ -176,16 +176,16 @@ fn receive_message<T>(
         data,
         span: span.clone(),
     };
-    if let Some(sender) = sender {
-        if let Err(error) = sender.try_send(message) {
-            span.in_scope(|| {
-                warn!(
-                    "error processing {} message from {}: {}",
-                    type_name::<T>(),
-                    from,
-                    error
-                );
-            });
-        }
+    if let Some(sender) = sender
+        && let Err(error) = sender.try_send(message)
+    {
+        span.in_scope(|| {
+            warn!(
+                "error processing {} message from {}: {}",
+                type_name::<T>(),
+                from,
+                error
+            );
+        });
     }
 }
