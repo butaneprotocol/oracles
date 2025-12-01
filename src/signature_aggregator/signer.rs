@@ -328,6 +328,7 @@ impl Signer {
             }
             SignerEvent::RoundStarted(round) => {
                 if matches!(self.state, SignerState::Leader(_)) {
+                    self.finish_round_early().await?;
                     self.begin_round(round).await?;
                 }
             }
@@ -361,6 +362,18 @@ impl Signer {
             },
         }
         Ok(())
+    }
+
+    async fn finish_round_early(&mut self) -> Result<()> {
+        let round = match &self.state {
+            SignerState::Leader(LeaderState::CollectingCommitments { round, .. }) => round,
+            SignerState::Leader(LeaderState::CollectingSignatures { round, .. }) => round,
+            _ => { return Ok(()) }
+        };
+        info!(round, "Finishing round before collecting enough signatures");
+        let now = SystemTime::now();
+        let payload = SignedEntries { timestamp: now, synthetics: vec![], generics: vec![] };
+        self.publish(self.id.clone(), payload).await
     }
 
     async fn begin_round(&mut self, round: String) -> Result<()> {
@@ -1506,6 +1519,36 @@ mod tests {
 
         let signed_entries = assert_round_complete(&mut payload_source)?;
         assert_eq!(signed_entries.synthetics.len(), 2);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn should_end_round_early_when_new_round_begins() -> Result<()> {
+        let leader_prices = PriceData {
+            synthetics: vec![
+                synthetic_data("FIRST", 3.50, &["A"], &[2], 1),
+                synthetic_data("SECOND", 3.50, &["A"], &[2], 1),
+            ],
+            generics: vec![],
+        };
+        let follower_prices = leader_prices.clone();
+        let (mut signers, mut _network, mut payload_source) =
+            construct_signers(2, vec![leader_prices, follower_prices]).await?;
+
+        assign_roles(&mut signers).await;
+
+        signers[0]
+            .process(SignerEvent::RoundStarted("round1".into()))
+            .await;
+
+        signers[0]
+            .process(SignerEvent::RoundStarted("round2".into()))
+            .await;
+
+        let signed_entries = assert_round_complete(&mut payload_source)?;
+        assert_eq!(signed_entries.synthetics.len(), 0);
+        assert_eq!(signed_entries.generics.len(), 0);
 
         Ok(())
     }
