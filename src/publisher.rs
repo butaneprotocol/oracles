@@ -83,7 +83,7 @@ impl Publisher {
         if let Some(url) = &self.publish_synthetic_url {
             info!(butane_payload, "publishing payload");
 
-            match make_request(url, &self.client, butane_payload).await {
+            match make_request(url, &self.client, &self.id, butane_payload).await {
                 Ok(res) => trace!("Payload published! {}", res),
                 Err(err) => warn!("Could not publish payload: {}", err),
             }
@@ -102,7 +102,7 @@ impl Publisher {
                 let client = self.client.clone();
                 publish_tasks.push(async move {
                     info!(feed_payload, name, "publishing feed payload");
-                    match make_request(&full_url, &client, feed_payload).await {
+                    match make_request(&full_url, &client, &self.id, feed_payload).await {
                         Ok(res) => trace!(name, "Payload published! {}", res),
                         Err(err) => warn!(name, "Could not publish payload: {}", err),
                     }
@@ -130,10 +130,11 @@ struct FeedEntry {
     pub payload: Signed<GenericPriceFeed>,
 }
 
-async fn make_request(url: &str, client: &Client, payload: String) -> Result<String> {
+async fn make_request(url: &str, client: &Client, id: &NodeId, payload: String) -> Result<String> {
     let response = client
         .post(url)
         .header("Content-Type", "application/json")
+        .header("x-leader-node-id", id.to_string())
         .body(payload)
         .timeout(Duration::from_secs(5))
         .send()

@@ -41,6 +41,8 @@ pub struct SignatureAggregator {
     signed_entries_source: mpsc::Receiver<(NodeId, SignedEntries)>,
     payload_sink: watch::Sender<Payload>,
 }
+
+#[allow(clippy::large_enum_variant)]
 enum SignatureAggregatorImplementation {
     Single(SingleSignatureAggregator),
     Consensus(ConsensusSignatureAggregator),
@@ -157,15 +159,15 @@ impl SignatureAggregator {
                     } else {
                         0
                     };
-                    if let Ok(age) = SystemTime::now().duration_since(last_updated) {
-                        if let Ok(age_in_millis) = u64::try_from(age.as_millis()) {
-                            debug!(
-                                histogram.price_feed_age = age_in_millis,
-                                histogram.price_feed_is_valid = is_valid,
-                                synthetic,
-                                "price feed metrics"
-                            );
-                        }
+                    if let Ok(age) = SystemTime::now().duration_since(last_updated)
+                        && let Ok(age_in_millis) = u64::try_from(age.as_millis())
+                    {
+                        debug!(
+                            histogram.price_feed_age = age_in_millis,
+                            histogram.price_feed_is_valid = is_valid,
+                            synthetic,
+                            "price feed metrics"
+                        );
                     }
                 }
                 sleep(Duration::from_secs(1)).await;

@@ -167,12 +167,12 @@ fn is_validity_close_enough(leader_validity: &Validity, my_validity: &Validity) 
 }
 
 fn are_bounds_close_enough(leader_bound: &IntervalBound, my_bound: &IntervalBound) -> bool {
-    if let IntervalBoundType::Finite(leader_moment) = leader_bound.bound_type {
-        if let IntervalBoundType::Finite(my_moment) = my_bound.bound_type {
-            let difference = leader_moment.max(my_moment) - leader_moment.min(my_moment);
-            // allow up to 61 seconds difference between bounds
-            return difference < 1000 * 61;
-        }
+    if let IntervalBoundType::Finite(leader_moment) = leader_bound.bound_type
+        && let IntervalBoundType::Finite(my_moment) = my_bound.bound_type
+    {
+        let difference = leader_moment.max(my_moment) - leader_moment.min(my_moment);
+        // allow up to 61 seconds difference between bounds
+        return difference < 1000 * 61;
     }
     leader_bound == my_bound
 }

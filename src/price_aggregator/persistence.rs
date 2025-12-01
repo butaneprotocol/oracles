@@ -43,10 +43,10 @@ impl TokenPricePersistence {
             Err(VarError::NotUnicode(path)) => path.into(),
             Err(VarError::NotPresent) => "data".into(),
         };
-        if filename.is_relative() {
-            if let Ok(pwd) = env::current_dir() {
-                filename = pwd.join(filename);
-            }
+        if filename.is_relative()
+            && let Ok(pwd) = env::current_dir()
+        {
+            filename = pwd.join(filename);
         }
         let _ = std::fs::create_dir_all(&filename);
         filename.push("prices.cbor");
@@ -93,11 +93,11 @@ impl TokenPricePersistence {
         };
         let mut bytes = vec![];
         minicbor::encode(data, &mut bytes).expect("infallible");
-        if let Err(error) = tokio::fs::write(&self.filename, bytes).await {
-            if !self.warned_about_fs_error {
-                warn!("Could not save price data to disk: {:#}", error);
-                self.warned_about_fs_error = true;
-            }
+        if let Err(error) = tokio::fs::write(&self.filename, bytes).await
+            && !self.warned_about_fs_error
+        {
+            warn!("Could not save price data to disk: {:#}", error);
+            self.warned_about_fs_error = true;
         }
     }
 

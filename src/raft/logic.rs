@@ -183,6 +183,12 @@ impl RaftState {
             RaftMessage::Heartbeat { term } => {
                 let current_leader = self.leader();
                 if *term >= self.term {
+                    self.warned_about_quorum = false;
+                    self.last_event = timestamp;
+                }
+                let from_new_leader =
+                    (*term == self.term && current_leader.is_none()) || *term > self.term;
+                if from_new_leader {
                     self.term = *term;
                     self.set_status(RaftStatus::Follower {
                         leader: Some(from.clone()),
@@ -191,8 +197,6 @@ impl RaftState {
                     if Some(from.clone()) != current_leader {
                         info!(term = term, leader = %from, "New leader");
                     }
-                    self.warned_about_quorum = false;
-                    self.last_event = timestamp;
                 }
                 vec![]
             }
@@ -209,7 +213,17 @@ impl RaftState {
                     match &self.status {
                         RaftStatus::Leader { .. } => (false, "Already elected self"),
                         RaftStatus::Follower {
-                            leader: _,
+                            leader: Some(leader),
+                            voted_for: _,
+                        } => {
+                            if leader == &from {
+                                (true, "This candidate already won")
+                            } else {
+                                (false, "This candidate already lost")
+                            }
+                        }
+                        RaftStatus::Follower {
+                            leader: None,
                             voted_for: Some(candidate),
                         } => {
                             if candidate == &from {
@@ -219,7 +233,7 @@ impl RaftState {
                             }
                         }
                         RaftStatus::Follower {
-                            leader: _,
+                            leader: None,
                             voted_for: None,
                         } => (true, "First candidate of term"),
                         RaftStatus::Candidate { .. } => (false, "Already voted for self"),

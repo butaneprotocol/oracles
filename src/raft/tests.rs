@@ -178,6 +178,41 @@ async fn should_not_vote_twice_in_one_term() {
 }
 
 #[tokio::test]
+async fn should_not_vote_in_current_term_if_leader_is_chosen() {
+    let start_time = Instant::now();
+    let heartbeat_freq = Duration::from_millis(1000);
+    let timeout_freq = Duration::from_millis(2000);
+
+    let (mut state, [other_id1, other_id2], leader_source) =
+        generate_state(start_time, heartbeat_freq, timeout_freq);
+    assert_eq!(state.receive(&other_id1, RaftMessage::Connect), vec![]);
+    assert_eq!(state.receive(&other_id2, RaftMessage::Connect), vec![]);
+
+    // If one peer sends a heartbeat from a higher term...
+    assert_eq!(
+        state.receive(&other_id1, RaftMessage::Heartbeat { term: 1 }),
+        vec![]
+    );
+    // we acknowledge them as leader
+    assert_eq!(
+        leader_source.borrow().clone(),
+        RaftLeader::Other(other_id1.clone())
+    );
+
+    // If another node starts an election in this term, we DON'T vote for them
+    assert_eq!(
+        state.receive(&other_id2, RaftMessage::RequestVote { term: 1 }),
+        vec![(
+            other_id2.clone(),
+            RaftMessage::RequestVoteResponse {
+                term: 1,
+                vote: false
+            }
+        )]
+    );
+}
+
+#[tokio::test]
 async fn should_vote_again_for_second_term() {
     let start_time = Instant::now();
     let heartbeat_freq = Duration::from_millis(1000);
@@ -375,6 +410,51 @@ async fn should_consider_other_node_leader_when_heartbeat_received() {
 
     assert_eq!(
         state.receive(&other_id1, RaftMessage::Heartbeat { term: 1 }),
+        vec![]
+    );
+    assert_eq!(leader_source.borrow().clone(), RaftLeader::Other(other_id1));
+}
+
+#[tokio::test]
+async fn should_consider_other_node_leader_when_heartbeat_received_in_current_term() {
+    let start_time = Instant::now();
+    let heartbeat_freq = Duration::from_millis(1000);
+    let timeout_freq = Duration::from_millis(2000);
+
+    let (mut state, [other_id1, other_id2], leader_source) =
+        generate_state(start_time, heartbeat_freq, timeout_freq);
+    assert_eq!(state.receive(&other_id1, RaftMessage::Connect), vec![]);
+    assert_eq!(state.receive(&other_id2, RaftMessage::Connect), vec![]);
+
+    assert_eq!(
+        state.receive(&other_id1, RaftMessage::Heartbeat { term: 0 }),
+        vec![]
+    );
+    assert_eq!(leader_source.borrow().clone(), RaftLeader::Other(other_id1));
+}
+
+#[tokio::test]
+async fn should_not_acknowledge_multiple_leaders_in_same_term() {
+    let start_time = Instant::now();
+    let heartbeat_freq = Duration::from_millis(1000);
+    let timeout_freq = Duration::from_millis(2000);
+
+    let (mut state, [other_id1, other_id2], leader_source) =
+        generate_state(start_time, heartbeat_freq, timeout_freq);
+    assert_eq!(state.receive(&other_id1, RaftMessage::Connect), vec![]);
+    assert_eq!(state.receive(&other_id2, RaftMessage::Connect), vec![]);
+
+    assert_eq!(
+        state.receive(&other_id1, RaftMessage::Heartbeat { term: 1 }),
+        vec![]
+    );
+    assert_eq!(
+        leader_source.borrow().clone(),
+        RaftLeader::Other(other_id1.clone())
+    );
+
+    assert_eq!(
+        state.receive(&other_id2, RaftMessage::Heartbeat { term: 1 }),
         vec![]
     );
     assert_eq!(leader_source.borrow().clone(), RaftLeader::Other(other_id1));
