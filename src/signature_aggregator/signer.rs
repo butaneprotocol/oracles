@@ -368,11 +368,15 @@ impl Signer {
         let round = match &self.state {
             SignerState::Leader(LeaderState::CollectingCommitments { round, .. }) => round,
             SignerState::Leader(LeaderState::CollectingSignatures { round, .. }) => round,
-            _ => { return Ok(()) }
+            _ => return Ok(()),
         };
         info!(round, "Finishing round before collecting enough signatures");
         let now = SystemTime::now();
-        let payload = SignedEntries { timestamp: now, synthetics: vec![], generics: vec![] };
+        let payload = SignedEntries {
+            timestamp: now,
+            synthetics: vec![],
+            generics: vec![],
+        };
         self.publish(self.id.clone(), payload).await
     }
 
