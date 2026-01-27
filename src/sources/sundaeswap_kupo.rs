@@ -13,7 +13,7 @@ use crate::{
 };
 
 use super::{
-    kupo::{MaxConcurrencyFutureSet, get_asset_value_minus_tx_fee, wait_for_sync},
+    kupo::{MaxConcurrencyFutureSet, find_match, get_asset_value_minus_tx_fee, wait_for_sync},
     source::{PriceSink, Source},
 };
 
@@ -69,14 +69,8 @@ impl SundaeSwapKupoSource {
             let options = pool.pool.kupo_query();
 
             set.push(async move {
-                let mut result = client.matches(&options).await?;
-                if result.is_empty() {
-                    return Err(anyhow!("pool not found for {}", pool.pool.token));
-                }
-                if result.len() > 1 {
-                    return Err(anyhow!("more than one pool found for {}", pool.pool.token));
-                }
-                let matc = result.remove(0);
+                let result = client.matches(&options).await?;
+                let matc = find_match(result, &pool)?;
                 let Some(hash) = &matc.datum else {
                     return Err(anyhow!("no datum attached to result"));
                 };
