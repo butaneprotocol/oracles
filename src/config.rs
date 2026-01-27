@@ -1,4 +1,8 @@
-use std::{collections::HashMap, str::FromStr, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    str::FromStr,
+    time::Duration,
+};
 
 use anyhow::{Result, bail};
 use config::{Config, Environment, File, FileFormat};
@@ -10,6 +14,10 @@ use serde::Deserialize;
 use tracing::Level;
 
 use crate::{keys, network::NodeId};
+
+const fn default_enabled() -> bool {
+    true
+}
 
 #[derive(Deserialize)]
 struct RawOracleConfig {
@@ -53,6 +61,8 @@ struct RawOracleConfig {
     pub splash: SplashConfig,
     pub vyfi: VyFiConfig,
     pub wingriders: WingRidersConfig,
+    #[serde(default)]
+    pub sources: HashSet<String>,
 }
 
 pub struct OracleConfig {
@@ -149,7 +159,7 @@ impl OracleConfig {
 impl TryFrom<RawOracleConfig> for OracleConfig {
     type Error = anyhow::Error;
 
-    fn try_from(raw: RawOracleConfig) -> Result<Self, Self::Error> {
+    fn try_from(mut raw: RawOracleConfig) -> Result<Self, Self::Error> {
         let private_key = keys::read_private_key()?;
 
         let id = compute_node_id(&private_key.verifying_key());
@@ -195,6 +205,22 @@ impl TryFrom<RawOracleConfig> for OracleConfig {
             retries: raw.kupo.retries,
             timeout: raw.kupo.timeout_ms.map(Duration::from_millis),
         };
+
+        if !raw.sources.is_empty() {
+            raw.binance.enabled = raw.sources.contains("binance");
+            raw.bybit.enabled = raw.sources.contains("bybit");
+            raw.coinbase.enabled = raw.sources.contains("coinbase");
+            raw.crypto_com.enabled = raw.sources.contains("crypto.com");
+            raw.fxratesapi.enabled = raw.sources.contains("fxratesapi");
+            raw.kucoin.enabled = raw.sources.contains("kucoin");
+            raw.maestro.enabled = raw.sources.contains("maestro");
+            raw.okx.enabled = raw.sources.contains("okx");
+            raw.sundaeswap.enabled = raw.sources.contains("sundaeswap");
+            raw.minswap.enabled = raw.sources.contains("minswap");
+            raw.splash.enabled = raw.sources.contains("splash");
+            raw.vyfi.enabled = raw.sources.contains("vyfi");
+            raw.wingriders.enabled = raw.sources.contains("wingriders");
+        }
 
         Ok(Self {
             id,
@@ -361,6 +387,8 @@ impl KupoConfig {
 
 #[derive(Debug, Deserialize)]
 pub struct BinanceConfig {
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
     pub tokens: Vec<BinanceTokenConfig>,
 }
 
@@ -373,6 +401,8 @@ pub struct BinanceTokenConfig {
 
 #[derive(Debug, Deserialize)]
 pub struct ByBitConfig {
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
     pub tokens: Vec<ByBitTokenConfig>,
 }
 
@@ -385,6 +415,8 @@ pub struct ByBitTokenConfig {
 
 #[derive(Debug, Deserialize)]
 pub struct CoinbaseConfig {
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
     pub tokens: Vec<CoinbaseTokenConfig>,
 }
 
@@ -397,6 +429,8 @@ pub struct CoinbaseTokenConfig {
 
 #[derive(Debug, Deserialize)]
 pub struct CryptoComConfig {
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
     pub tokens: Vec<CryptoComTokenConfig>,
 }
 
@@ -409,6 +443,8 @@ pub struct CryptoComTokenConfig {
 
 #[derive(Debug, Deserialize)]
 pub struct FxRatesApiConfig {
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
     pub cron: String,
     pub currencies: Vec<String>,
     pub base: String,
@@ -416,6 +452,8 @@ pub struct FxRatesApiConfig {
 
 #[derive(Debug, Deserialize)]
 pub struct KucoinConfig {
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
     pub tokens: Vec<KucoinTokenConfig>,
 }
 
@@ -428,6 +466,8 @@ pub struct KucoinTokenConfig {
 
 #[derive(Debug, Deserialize)]
 pub struct MaestroConfig {
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
     pub tokens: Vec<MaestroTokenConfig>,
 }
 
@@ -440,6 +480,8 @@ pub struct MaestroTokenConfig {
 
 #[derive(Debug, Deserialize)]
 pub struct OkxConfig {
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
     pub tokens: Vec<OkxTokenConfig>,
 }
 
@@ -452,6 +494,8 @@ pub struct OkxTokenConfig {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct SundaeSwapConfig {
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
     pub use_api: bool,
     #[serde(flatten)]
     pub kupo: RawKupoConfig,
@@ -462,6 +506,8 @@ pub struct SundaeSwapConfig {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct MinswapConfig {
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
     #[serde(flatten)]
     pub kupo: RawKupoConfig,
     pub pools: Vec<Pool>,
@@ -470,6 +516,8 @@ pub struct MinswapConfig {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct SplashConfig {
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
     #[serde(flatten)]
     pub kupo: RawKupoConfig,
     pub pools: Vec<Pool>,
@@ -478,6 +526,8 @@ pub struct SplashConfig {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct VyFiConfig {
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
     #[serde(flatten)]
     pub kupo: RawKupoConfig,
     pub pools: Vec<Pool>,
@@ -486,6 +536,8 @@ pub struct VyFiConfig {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct WingRidersConfig {
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
     #[serde(flatten)]
     pub kupo: RawKupoConfig,
     pub pools: Vec<Pool>,
