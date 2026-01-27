@@ -300,21 +300,30 @@ mod tests {
                 backing_currencies: vec!["USD".into()],
                 invert: false,
                 digits: 6,
-                collateral: CollateralConfig::List(vec![]),
+                collateral: CollateralConfig {
+                    list: vec![],
+                    nft: None,
+                },
             },
             SyntheticConfig {
                 name: "BTCb".into(),
                 backing_currencies: vec!["BTC".into()],
                 invert: false,
                 digits: 8,
-                collateral: CollateralConfig::List(vec![]),
+                collateral: CollateralConfig {
+                    list: vec![],
+                    nft: None,
+                },
             },
             SyntheticConfig {
                 name: "SOLp".into(),
                 backing_currencies: vec!["SOL".into()],
                 invert: true,
                 digits: 9,
-                collateral: CollateralConfig::List(vec![]),
+                collateral: CollateralConfig {
+                    list: vec![],
+                    nft: None,
+                },
             },
             SyntheticConfig {
                 name: "MULTI".into(),
@@ -323,7 +332,10 @@ mod tests {
                     .collect(),
                 invert: false,
                 digits: 6,
-                collateral: CollateralConfig::List(vec![]),
+                collateral: CollateralConfig {
+                    list: vec![],
+                    nft: None,
+                },
             },
         ]
     }

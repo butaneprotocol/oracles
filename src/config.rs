@@ -29,6 +29,7 @@ struct RawOracleConfig {
     pub api_port: u16,
     pub network_timeout_ms: u64,
     pub consensus: bool,
+    pub test_network: bool,
     #[serde(default)]
     pub peers: Vec<RawPeerConfig>,
     pub heartbeat_ms: u64,
@@ -72,6 +73,7 @@ pub struct OracleConfig {
     pub health_port: u16,
     pub api_port: u16,
     pub consensus: bool,
+    pub test_network: bool,
     pub heartbeat: Duration,
     pub timeout: Duration,
     pub round_duration: Duration,
@@ -229,6 +231,7 @@ impl TryFrom<RawOracleConfig> for OracleConfig {
             health_port: raw.health_port,
             api_port: raw.api_port,
             consensus: raw.consensus,
+            test_network: raw.test_network,
             heartbeat: Duration::from_millis(raw.heartbeat_ms),
             timeout: Duration::from_millis(raw.timeout_ms),
             round_duration: Duration::from_millis(raw.round_duration_ms),
@@ -339,9 +342,11 @@ pub struct SyntheticConfig {
 
 #[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
-pub enum CollateralConfig {
-    List(Vec<String>),
-    Nft(String),
+pub struct CollateralConfig {
+    #[serde(default)]
+    pub list: Vec<String>,
+    #[serde(default)]
+    pub nft: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

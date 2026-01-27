@@ -11,6 +11,7 @@ max_source_price_age_ms: 120000 # How long should we trust the price reported by
 use_persisted_prices: false     # If true, use price data from older rounds when newer data is unavailable.
 max_price_divergence: 0.1       # If a price is backed by more than one source, how dramatically can the prices differ?
 consensus: true
+test_network: false
 logs:
   json: true
   level: info
@@ -29,6 +30,7 @@ synthetics:
         - MIN
         - LENFI
         - ENCS
+      nft: 00000000000410c2d9e01e8ec78ab1dc6bbc383fae76cbe2689beb02.705f55534462
   - name: MIDAS
     digits: 9
     backing_currencies:
@@ -44,6 +46,7 @@ synthetics:
       list:
         - ADA
         - BTN
+      nft: 00000000000410c2d9e01e8ec78ab1dc6bbc383fae76cbe2689beb02.705f4e4947485462
   - name: ADAb
     digits: 6
     backing_currencies:
@@ -52,6 +55,7 @@ synthetics:
       list:
         - ADA
         - BTN
+      nft: 00000000000410c2d9e01e8ec78ab1dc6bbc383fae76cbe2689beb02.705f41444162
 currencies:
   - name: ADA
     digits: 6
