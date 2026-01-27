@@ -44,6 +44,14 @@ synthetics:
       list:
         - ADA
         - BTN
+  - name: ADAb
+    digits: 6
+    backing_currencies:
+      - ADA
+    collateral:
+      list:
+        - ADA
+        - BTN
 currencies:
   - name: ADA
     digits: 6
