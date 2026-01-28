@@ -49,7 +49,7 @@ impl SyntheticConfigSource {
             asset_names,
             collateral_config,
             collateral,
-            test_network: config.test_network,
+            test_network: config.network.test_network,
             client,
             next_refresh,
         })

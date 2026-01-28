@@ -73,7 +73,6 @@ pub struct OracleConfig {
     pub health_port: u16,
     pub api_port: u16,
     pub consensus: bool,
-    pub test_network: bool,
     pub heartbeat: Duration,
     pub timeout: Duration,
     pub round_duration: Duration,
@@ -183,6 +182,7 @@ impl TryFrom<RawOracleConfig> for OracleConfig {
             private_key,
             peers,
             timeout: Duration::from_millis(raw.network_timeout_ms),
+            test_network: raw.test_network,
         };
 
         let logs = LogConfig {
@@ -231,7 +231,6 @@ impl TryFrom<RawOracleConfig> for OracleConfig {
             health_port: raw.health_port,
             api_port: raw.api_port,
             consensus: raw.consensus,
-            test_network: raw.test_network,
             heartbeat: Duration::from_millis(raw.heartbeat_ms),
             timeout: Duration::from_millis(raw.timeout_ms),
             round_duration: Duration::from_millis(raw.round_duration_ms),
@@ -272,6 +271,7 @@ pub struct NetworkConfig {
     pub port: u16,
     pub peers: Vec<Peer>,
     pub timeout: Duration,
+    pub test_network: bool,
 }
 
 #[derive(Deserialize)]

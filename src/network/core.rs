@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use chacha20poly1305::{AeadCore, Key, KeyInit, XChaCha20Poly1305, aead::Aead};
 use dashmap::DashMap;
 use ed25519::{Signature, signature::Signer};
@@ -56,6 +56,10 @@ struct OpenConnectionMessage {
     /// The ecdh_public_key, signed with the other node's private key
     #[n(3)]
     signature: CborSignature,
+    /// Whether we expect to connect to a test network
+    #[n(4)]
+    #[cbor(default)]
+    test_network: bool,
 }
 
 #[derive(Decode, Encode, Clone, Debug)]
@@ -69,6 +73,10 @@ struct ConfirmConnectionMessage {
     /// The ecdh_public_key we sent, signed with the other node's private key
     #[n(2)]
     signature: CborSignature,
+    /// Whether the other node expects to connect to a test network
+    #[n(3)]
+    #[cbor(default)]
+    test_network: bool,
 }
 
 #[derive(Decode, Encode, Clone, Debug)]
@@ -191,6 +199,7 @@ pub struct Core {
     outgoing_rx: Arc<Mutex<OutgoingMessageReceiver>>,
     incoming_tx: Arc<IncomingMessageSender>,
     timeout: Duration,
+    test_network: bool,
 }
 
 impl Core {
@@ -215,6 +224,7 @@ impl Core {
             outgoing_rx: Arc::new(Mutex::new(outgoing_rx)),
             incoming_tx: Arc::new(incoming_tx),
             timeout: config.timeout,
+            test_network: config.test_network,
         }
     }
 
@@ -418,13 +428,13 @@ impl Core {
         let message = match stream.read().await.context("error waiting for handshake")? {
             Some(Message::OpenConnection(message)) => message,
             Some(Message::Disconnect(reason)) => {
-                return Err(anyhow!("other party disconnected immediately: {}", reason));
+                bail!("other party disconnected immediately: {}", reason);
             }
             Some(other) => {
-                return Err(anyhow!("expected OpenConnection, got {:?}", other));
+                bail!("expected OpenConnection, got {:?}", other);
             }
             None => {
-                return Err(anyhow!("expected OpenConnection, got empty message"));
+                bail!("expected OpenConnection, got empty message");
             }
         };
         debug!(them, "OpenConnection message received");
@@ -436,7 +446,7 @@ impl Core {
         let id_public_key = message.id_public_key.into();
         let peer_id = compute_node_id(&id_public_key);
         let Some(peer) = self.peers.get(&peer_id) else {
-            return Err(anyhow!("Unrecognized peer {}", peer_id));
+            bail!("Unrecognized peer {}", peer_id);
         };
 
         their_id.replace(peer_id.clone());
@@ -448,6 +458,13 @@ impl Core {
                 "Other node is running a different oracle version"
             )
         }
+        if message.test_network != self.test_network {
+            bail!(
+                "Mismatched test_network values (us: {}, them: {})",
+                self.test_network,
+                message.test_network
+            );
+        }
         let peer_version = message.version;
 
         // Confirm that they are who they say they are; they should have signed the ecdh nonce with their private key
@@ -458,9 +475,7 @@ impl Core {
 
         // Confirm that we expect this node to reach out to us, instead of vice versa
         if !&peer_id.should_initiate_connection_to(&self.id) {
-            return Err(anyhow!(
-                "did not expect peer to initiate connection with us"
-            ));
+            bail!("did not expect peer to initiate connection with us");
         }
 
         // Generate our own ECDH secret
@@ -477,6 +492,7 @@ impl Core {
             version: ORACLE_VERSION.to_string(),
             ecdh_public_key: ecdh_public_key.into(),
             signature: signature.into(),
+            test_network: self.test_network,
         };
         sink.write(Message::ConfirmConnection(message))
             .await
@@ -591,6 +607,7 @@ impl Core {
             id_public_key: id_public_key.into(),
             ecdh_public_key: ecdh_public_key.into(),
             signature: signature.into(),
+            test_network: self.test_network,
         };
         sink.write(Message::OpenConnection(Box::new(message)))
             .await
@@ -608,13 +625,13 @@ impl Core {
         {
             Some(Message::ConfirmConnection(message)) => message,
             Some(Message::Disconnect(reason)) => {
-                return Err(anyhow!("Other side disconnected: {}", reason));
+                bail!("Other side disconnected: {}", reason);
             }
             Some(other) => {
-                return Err(anyhow!("Expected ConfirmConnection, got {:?}", other));
+                bail!("Expected ConfirmConnection, got {:?}", other);
             }
             None => {
-                return Err(anyhow!("Expected ConfirmConnection, got empty message"));
+                bail!("Expected ConfirmConnection, got empty message");
             }
         };
         debug!(them, "ConfirmConnection message received");
@@ -624,6 +641,13 @@ impl Core {
                 other_version = message.version,
                 "Other node is running a different oracle version"
             )
+        }
+        if message.test_network != self.test_network {
+            bail!(
+                "Mismatched test_network values (us: {}, them: {})",
+                self.test_network,
+                message.test_network
+            );
         }
 
         // They've sent us a signed nonce, let's confirm they are who they say they are
