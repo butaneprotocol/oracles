@@ -1,9 +1,12 @@
 use std::time::Duration;
 
+use anyhow::{Result, bail};
 use futures::{Future, StreamExt, stream::FuturesUnordered};
 use kupon::{AssetId, Client, HealthStatus, Match};
 use tokio::time::sleep;
 use tracing::{debug, warn};
+
+use crate::config::HydratedPool;
 
 pub async fn wait_for_sync(client: &Client) {
     let mut last_status = None;
@@ -50,6 +53,35 @@ pub async fn wait_for_sync(client: &Client) {
                 sleep(Duration::from_secs(10)).await;
             }
         }
+    }
+}
+
+pub fn find_match(matches: Vec<Match>, pool: &HydratedPool) -> Result<Match> {
+    let mut best_match = None;
+    for m in matches {
+        if pool
+            .token_asset_id
+            .as_ref()
+            .is_some_and(|id| !m.value.assets.contains_key(id))
+        {
+            continue;
+        }
+        if pool
+            .unit_asset_id
+            .as_ref()
+            .is_some_and(|id| !m.value.assets.contains_key(id))
+        {
+            continue;
+        }
+        if best_match.is_none() {
+            best_match = Some(m)
+        } else {
+            bail!("more than one pool found for {}", pool.pool.token);
+        }
+    }
+    match best_match {
+        Some(m) => Ok(m),
+        None => bail!("pool not found for {}", pool.pool.token),
     }
 }
 

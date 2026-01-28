@@ -83,41 +83,66 @@ impl PriceAggregator {
         payload_source: watch::Receiver<Payload>,
         config: Arc<OracleConfig>,
     ) -> Result<Self> {
-        let mut sources = vec![
-            SourceAdapter::new(BinanceSource::new(&config), &config),
-            SourceAdapter::new(ByBitSource::new(&config), &config),
-            SourceAdapter::new(CoinbaseSource::new(&config), &config),
-            SourceAdapter::new(CryptoComSource::new(&config), &config),
-            SourceAdapter::new(KucoinSource::new(&config), &config),
-            SourceAdapter::new(MinswapSource::new(&config)?, &config),
-            SourceAdapter::new(OkxSource::new(&config)?, &config),
-            SourceAdapter::new(SplashSource::new(&config)?, &config),
-            SourceAdapter::new(VyFiSource::new(&config)?, &config),
-            SourceAdapter::new(WingRidersSource::new(&config)?, &config),
-        ];
-        match MaestroSource::new(&config)? {
-            Some(maestro_source) => {
-                sources.push(SourceAdapter::new(maestro_source, &config));
-            }
-            _ => {
-                warn!("Not querying maestro, because no MAESTRO_API_KEY was provided");
+        let mut sources = vec![];
+        if config.binance.enabled {
+            sources.push(SourceAdapter::new(BinanceSource::new(&config), &config));
+        }
+        if config.bybit.enabled {
+            sources.push(SourceAdapter::new(ByBitSource::new(&config), &config));
+        }
+        if config.coinbase.enabled {
+            sources.push(SourceAdapter::new(CoinbaseSource::new(&config), &config));
+        }
+        if config.crypto_com.enabled {
+            sources.push(SourceAdapter::new(CryptoComSource::new(&config), &config));
+        }
+        if config.fxratesapi.enabled {
+            match FxRatesApiSource::new(&config)? {
+                Some(fxratesapi_source) => {
+                    sources.push(SourceAdapter::new(fxratesapi_source, &config));
+                }
+                _ => {
+                    warn!("Not querying FXRatesAPI, because no FXRATESAPI_API_KEY was provided");
+                }
             }
         }
-        match FxRatesApiSource::new(&config)? {
-            Some(fxratesapi_source) => {
-                sources.push(SourceAdapter::new(fxratesapi_source, &config));
-            }
-            _ => {
-                warn!("Not querying FXRatesAPI, because no FXRATESAPI_API_KEY was provided");
+        if config.kucoin.enabled {
+            sources.push(SourceAdapter::new(KucoinSource::new(&config), &config));
+        }
+        if config.maestro.enabled {
+            match MaestroSource::new(&config)? {
+                Some(maestro_source) => {
+                    sources.push(SourceAdapter::new(maestro_source, &config));
+                }
+                _ => {
+                    warn!("Not querying maestro, because no MAESTRO_API_KEY was provided");
+                }
             }
         }
-        if config.sundaeswap.use_api {
-            sources.push(SourceAdapter::new(SundaeSwapSource::new(&config)?, &config));
-        } else {
-            sources.push(SourceAdapter::new(
-                SundaeSwapKupoSource::new(&config)?,
-                &config,
-            ));
+        if config.minswap.enabled {
+            sources.push(SourceAdapter::new(MinswapSource::new(&config)?, &config));
+        }
+        if config.okx.enabled {
+            sources.push(SourceAdapter::new(OkxSource::new(&config)?, &config));
+        }
+        if config.splash.enabled {
+            sources.push(SourceAdapter::new(SplashSource::new(&config)?, &config));
+        }
+        if config.sundaeswap.enabled {
+            if config.sundaeswap.use_api {
+                sources.push(SourceAdapter::new(SundaeSwapSource::new(&config)?, &config));
+            } else {
+                sources.push(SourceAdapter::new(
+                    SundaeSwapKupoSource::new(&config)?,
+                    &config,
+                ));
+            }
+        }
+        if config.vyfi.enabled {
+            sources.push(SourceAdapter::new(VyFiSource::new(&config)?, &config));
+        }
+        if config.wingriders.enabled {
+            sources.push(SourceAdapter::new(WingRidersSource::new(&config)?, &config));
         }
         Ok(Self {
             price_sink,
@@ -253,7 +278,7 @@ impl PriceAggregator {
         let token_values = converter.token_prices();
         self.audit_sink.send_replace(token_values);
 
-        self.persistence.save_prices(&converter).await;
+        self.persistence.save_prices(converter).await;
     }
 
     fn compute_synthetic_payload(

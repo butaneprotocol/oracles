@@ -72,7 +72,7 @@ impl TokenPricePersistence {
         }
     }
 
-    pub async fn save_prices(&mut self, converter: &TokenPriceConverter<'_>) {
+    pub async fn save_prices(&mut self, converter: TokenPriceConverter<'_>) {
         self.prices = self
             .currencies
             .iter()

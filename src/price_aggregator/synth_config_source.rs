@@ -15,8 +15,9 @@ use tracing::warn;
 
 pub struct SyntheticConfigSource {
     asset_names: HashMap<String, String>,
-    nfts: HashMap<String, String>,
+    collateral_config: HashMap<String, CollateralConfig>,
     collateral: HashMap<String, Vec<String>>,
+    test_network: bool,
     client: kupon::Client,
     next_refresh: Instant,
 }
@@ -34,26 +35,21 @@ impl SyntheticConfigSource {
             asset_names.insert(asset_id.clone(), name.clone());
         }
 
-        let mut nfts = HashMap::new();
         let mut collateral = HashMap::new();
+        let mut collateral_config = HashMap::new();
         for synth in &config.synthetics {
-            match &synth.collateral {
-                CollateralConfig::List(tokens) => {
-                    let mut tokens = tokens.clone();
-                    tokens.sort_by_cached_key(|c| asset_ids.get(c));
-                    collateral.insert(synth.name.clone(), tokens);
-                }
-                CollateralConfig::Nft(nft) => {
-                    nfts.insert(synth.name.clone(), nft.clone());
-                }
+            collateral_config.insert(synth.name.clone(), synth.collateral.clone());
+            if !synth.collateral.list.is_empty() {
+                collateral.insert(synth.name.clone(), synth.collateral.list.clone());
             }
         }
         let client = config.kupo.new_client()?;
         let next_refresh = Instant::now();
         Ok(Self {
             asset_names,
-            nfts,
+            collateral_config,
             collateral,
+            test_network: config.network.test_network,
             client,
             next_refresh,
         })
@@ -66,9 +62,12 @@ impl SyntheticConfigSource {
         }
 
         let mut futures = FuturesUnordered::new();
-        for (synthetic, nft) in &self.nfts {
+        for (synthetic, config) in &self.collateral_config {
             let asset_names = &self.asset_names;
             let client = &self.client;
+            let Some(nft) = config.nft.as_ref() else {
+                continue;
+            };
             futures.push(async move {
                 /// Convenient macro for returning an error,
                 /// plus whether or not we should clear older config for the synthetic.
@@ -156,6 +155,11 @@ impl SyntheticConfigSource {
                     );
                 }
                 Err(error) => {
+                    if self.test_network {
+                        // On test networks, we don't care if we couldn't fetch an NFT.
+                        // It may not even have launched yet.
+                        continue;
+                    }
                     if error.clear {
                         self.collateral.remove(error.synthetic);
                     }

@@ -170,7 +170,7 @@ fn receive_message<T>(
     sender: &Option<mpsc::Sender<IncomingMessage<T>>>,
 ) {
     let span = Span::current();
-    span.set_parent(context);
+    let _ = span.set_parent(context);
     let message = IncomingMessage {
         from: from.clone(),
         data,

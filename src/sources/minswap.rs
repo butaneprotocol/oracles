@@ -9,7 +9,7 @@ use tracing::{Level, warn};
 use crate::config::{HydratedPool, OracleConfig};
 
 use super::{
-    kupo::{MaxConcurrencyFutureSet, get_asset_value, wait_for_sync},
+    kupo::{MaxConcurrencyFutureSet, find_match, get_asset_value, wait_for_sync},
     source::{PriceInfo, PriceSink, Source},
 };
 
@@ -64,14 +64,8 @@ impl MinswapSource {
             let options = pool.pool.kupo_query();
 
             set.push(async move {
-                let mut result = client.matches(&options).await?;
-                if result.is_empty() {
-                    return Err(anyhow!("pool not found for {}", pool.pool.token));
-                }
-                if result.len() > 1 {
-                    return Err(anyhow!("more than one pool found for {}", pool.pool.token));
-                }
-                let matc = result.remove(0);
+                let result = client.matches(&options).await?;
+                let matc = find_match(result, &pool)?;
                 let Some(token_value) = get_asset_value(&matc, &pool.token_asset_id) else {
                     return Err(anyhow!(
                         "no value found for asset {:?}",

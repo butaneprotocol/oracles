@@ -11,6 +11,7 @@ max_source_price_age_ms: 120000 # How long should we trust the price reported by
 use_persisted_prices: false     # If true, use price data from older rounds when newer data is unavailable.
 max_price_divergence: 0.1       # If a price is backed by more than one source, how dramatically can the prices differ?
 consensus: true
+test_network: false
 logs:
   json: true
   level: info
@@ -29,6 +30,7 @@ synthetics:
         - MIN
         - LENFI
         - ENCS
+      nft: 00000000000410c2d9e01e8ec78ab1dc6bbc383fae76cbe2689beb02.705f55534462
   - name: MIDAS
     digits: 9
     backing_currencies:
@@ -36,6 +38,24 @@ synthetics:
       - XAUt
     collateral:
       nft: 00000000000410c2d9e01e8ec78ab1dc6bbc383fae76cbe2689beb02.705f4d49444153
+  - name: NIGHTb
+    digits: 6
+    backing_currencies:
+      - NIGHT
+    collateral:
+      list:
+        - ADA
+        - BTN
+      nft: 00000000000410c2d9e01e8ec78ab1dc6bbc383fae76cbe2689beb02.705f4e4947485462
+  - name: ADAb
+    digits: 6
+    backing_currencies:
+      - ADA
+    collateral:
+      list:
+        - ADA
+        - BTN
+      nft: 00000000000410c2d9e01e8ec78ab1dc6bbc383fae76cbe2689beb02.705f41444162
 currencies:
   - name: ADA
     digits: 6
@@ -89,6 +109,10 @@ currencies:
     asset_id: 92776616f1f32c65a173392e4410a3d8c39dcf6ef768c73af164779c.4d79555344
     digits: 6
     min_tvl: 20_000_000
+  - name: NIGHT
+    asset_id: 0691b2fecca1ac4f53cb6dfb00b7013e561d1f34403b957cbb5af1fa.4e49474854
+    digits: 6
+    min_tvl: 20_000_000
   - name: PAXG
     digits: 4
   - name: POL
@@ -138,6 +162,9 @@ bybit:
     - token: BTC
       unit: USDT
       stream: BTCUSDT
+    - token: NIGHT
+      unit: USDT
+      stream: NIGHTUSDT
     - token: PAXG
       unit: USDT
       stream: PAXGUSDT
@@ -195,6 +222,9 @@ kucoin:
     - token: BTC
       unit: USDT
       symbol: BTC-USDT
+    - token: NIGHT
+      unit: USDT
+      symbol: NIGHT-USDT
     - token: PAXG
       unit: USDT
       symbol: PAXG-USDT
@@ -226,6 +256,12 @@ maestro:
       dex: minswap
 okx:
   tokens:
+    - token: NIGHT
+      unit: USD
+      index: NIGHT-USD
+    - token: NIGHT
+      unit: USDT
+      index: NIGHT-USDT
     - token: XAUt
       unit: USDT
       index: XAUT-USDT
@@ -241,10 +277,6 @@ sundaeswap:
       unit: ADA
       credential: 4020e7fc2de75a0729c3cc3af715b34d98381e0cdbcfa99c950bc3ac/*
       asset_id: 0029cb7c88c7567b63d1a512c0ed626aa169688ec980730c0473b913.7020f803
-    - token: ENCS
-      unit: ADA
-      credential: 4020e7fc2de75a0729c3cc3af715b34d98381e0cdbcfa99c950bc3ac/*
-      asset_id: 0029cb7c88c7567b63d1a512c0ed626aa169688ec980730c0473b913.70200d04
     - token: LENFI
       unit: ADA
       credential: 4020e7fc2de75a0729c3cc3af715b34d98381e0cdbcfa99c950bc3ac/*
@@ -257,7 +289,7 @@ sundaeswap:
       unit: ADA
       credential: 4020e7fc2de75a0729c3cc3af715b34d98381e0cdbcfa99c950bc3ac/*
       asset_id: 0029cb7c88c7567b63d1a512c0ed626aa169688ec980730c0473b913.70201f04
-    # V2
+    # V3
     - token: BTN
       unit: ADA
       credential: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b/*
@@ -265,7 +297,7 @@ sundaeswap:
     - token: DJED
       unit: ADA
       credential: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b/*
-      asset_id: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b.000de140d1796f9ae86bab5cba32798ffc0ff58e88979f69df61ebd575d49659
+      asset_id: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b.000de14073d8b3fb8109a7d573662f5967eb49f35635635682bfe8faae3f901a
     - token: ENCS
       unit: ADA
       credential: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b/*
@@ -298,6 +330,10 @@ sundaeswap:
       unit: ADA
       credential: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b/*
       asset_id: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b.000de140129627c250a35b7db2e11f6b0e0370515ffa99452b549ef586753907
+    - token: NIGHT
+      unit: ADA
+      credential: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b/*
+      asset_id: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b.000de1405b5d1f9da977498b5faf3efb83693b0442ed5f49d00d9b986a409c0b
     - token: SHEN
       unit: ADA
       credential: e0302560ced2fdcbfcb2602697df970cd0d6a38f94b32703f51c312b/*
@@ -419,6 +455,10 @@ minswap:
       unit: ADA
       credential: ea07b733d932129c378af627436e7cbc2ef0bf96e0036bb51b3bde6b/*
       asset_id: f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.ec557838bea7c6df770debfc8c7c45bdeeaeefc1757d3586045d59c962b632c5
+    - token: NIGHT
+      unit: ADA
+      credential: ea07b733d932129c378af627436e7cbc2ef0bf96e0036bb51b3bde6b/*
+      asset_id: f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.e74c52975908a612d5ce68327040d449aae99f8b463bb6de046a1b23c5713169
     - token: SHEN
       unit: ADA
       credential: ea07b733d932129c378af627436e7cbc2ef0bf96e0036bb51b3bde6b/*
@@ -618,6 +658,10 @@ wingriders:
       unit: ADA
       credential: af97793b8702f381976cec83e303e9ce17781458c73c4bb16fe02b83/*
       asset_id: 6fdc63a1d71dc2c65502b79baae7fb543185702b12c3c5fb639ed737.0bee3eb0b93c2a1e72cb7937b90eac382666bd34dc5971df83f5ee4112a86a16
+    - token: NIGHT
+      unit: ADA
+      credential: af97793b8702f381976cec83e303e9ce17781458c73c4bb16fe02b83/*
+      asset_id: 6fdc63a1d71dc2c65502b79baae7fb543185702b12c3c5fb639ed737.9098d8f2a436c6637776c82b3efa5a1eaa1517bec1077b7d86b4b04a96cec27f
     - token: SHEN
       unit: ADA
       credential: af97793b8702f381976cec83e303e9ce17781458c73c4bb16fe02b83/*
