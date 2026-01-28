@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{cell::RefCell, collections::BTreeMap};
 
 use itertools::Itertools;
 use num_bigint::BigInt;
@@ -40,6 +40,7 @@ pub struct TokenPriceConverter<'a> {
     synthetics: BTreeMap<&'a str, &'a SyntheticConfig>,
     min_tvls: BTreeMap<&'a str, BigRational>,
     threshold: BigRational,
+    cache: RefCell<BTreeMap<String, Option<BigRational>>>,
 }
 
 impl<'a> TokenPriceConverter<'a> {
@@ -96,10 +97,22 @@ impl<'a> TokenPriceConverter<'a> {
             synthetics,
             min_tvls,
             threshold: max_price_divergence,
+            cache: RefCell::new(BTreeMap::new()),
         }
     }
 
     pub fn value_in_usd(&self, token: &str) -> Option<BigRational> {
+        if let Some(value) = self.cache.borrow().get(token) {
+            return value.clone();
+        }
+        let value = self.compute_value_in_usd(token);
+        self.cache
+            .borrow_mut()
+            .insert(token.to_string(), value.clone());
+        value
+    }
+
+    fn compute_value_in_usd(&self, token: &str) -> Option<BigRational> {
         if token == "USD" {
             return Some(BigRational::one());
         }
@@ -109,12 +122,12 @@ impl<'a> TokenPriceConverter<'a> {
             return self.synthetic_value_in_usd(synthetic);
         }
 
-        let prices = self.prices.get(token).into_iter().flat_map(|p| p.iter());
-
         let min_tvl = self
             .min_tvls
             .get(token)
             .unwrap_or_else(|| panic!("Unrecognized currency {token}"));
+
+        let prices = self.prices.get(token).into_iter().flat_map(|p| p.iter());
 
         let mut candidate_prices = vec![];
         for price in prices {

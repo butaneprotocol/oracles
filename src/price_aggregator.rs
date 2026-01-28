@@ -278,7 +278,7 @@ impl PriceAggregator {
         let token_values = converter.token_prices();
         self.audit_sink.send_replace(token_values);
 
-        self.persistence.save_prices(&converter).await;
+        self.persistence.save_prices(converter).await;
     }
 
     fn compute_synthetic_payload(
