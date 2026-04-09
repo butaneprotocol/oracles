@@ -1,9 +1,10 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use futures::future::join_all;
 use opentelemetry::{KeyValue, global, trace::TracerProvider};
 use opentelemetry_otlp::{MetricExporter, SpanExporter, WithExportConfig, WithTonicConfig};
-use opentelemetry_sdk::{Resource, metrics, trace};
+use opentelemetry_sdk::{Resource, error::OTelSdkResult, metrics, trace};
 use tonic::{metadata::MetadataMap, transport::ClientTlsConfig};
 use tracing::{Dispatch, Level, Subscriber};
 use tracing_subscriber::{
@@ -11,7 +12,10 @@ use tracing_subscriber::{
     util::SubscriberInitExt,
 };
 
-use crate::{config::LogConfig, network::NodeId};
+use crate::{
+    config::{LogConfig, OtlpEndpoint},
+    network::NodeId,
+};
 
 pub enum OtelGuard {
     Enabled(trace::SdkTracerProvider, metrics::SdkMeterProvider),
@@ -45,26 +49,22 @@ fn init_opentelemetry<S>(config: &LogConfig, subscriber: S) -> Result<OtelGuard>
 where
     S: Subscriber + for<'span> LookupSpan<'span> + Send + Sync,
 {
-    match config.otlp_endpoint.as_ref() {
-        Some(endpoint) => {
-            let uptrace_dsn = config.uptrace_dsn.as_ref();
-            let (tracer_provider, meter_provider) =
-                init_providers(&config.id, &config.label, endpoint, uptrace_dsn)?;
+    if !config.otlp.is_empty() {
+        let (tracer_provider, meter_provider) =
+            init_providers(&config.id, &config.label, &config.otlp)?;
 
-            let tracer = tracer_provider.tracer("oracle");
-            let tracer_layer = tracing_opentelemetry::layer()
-                .with_tracer(tracer)
-                .with_filter(get_filter(Level::DEBUG));
+        let tracer = tracer_provider.tracer("oracle");
+        let tracer_layer = tracing_opentelemetry::layer()
+            .with_tracer(tracer)
+            .with_filter(get_filter(Level::DEBUG));
 
-            let metrics_layer = tracing_opentelemetry::MetricsLayer::new(meter_provider.clone());
+        let metrics_layer = tracing_opentelemetry::MetricsLayer::new(meter_provider.clone());
 
-            Dispatch::new(subscriber.with(metrics_layer).with(tracer_layer)).init();
-            Ok(OtelGuard::Enabled(tracer_provider, meter_provider))
-        }
-        None => {
-            Dispatch::new(subscriber).init();
-            Ok(OtelGuard::Disabled)
-        }
+        Dispatch::new(subscriber.with(metrics_layer).with(tracer_layer)).init();
+        Ok(OtelGuard::Enabled(tracer_provider, meter_provider))
+    } else {
+        Dispatch::new(subscriber).init();
+        Ok(OtelGuard::Disabled)
     }
 }
 
@@ -77,8 +77,7 @@ fn get_filter(level: Level) -> Targets {
 fn init_providers(
     id: &NodeId,
     name: &str,
-    endpoint: &str,
-    uptrace_dsn: Option<&String>,
+    endpoints: &[OtlpEndpoint],
 ) -> Result<(trace::SdkTracerProvider, metrics::SdkMeterProvider)> {
     let resource = Resource::builder()
         .with_attributes([
@@ -89,7 +88,7 @@ fn init_providers(
         ])
         .build();
 
-    let exporter_provider = ExporterProvider::new(endpoint, uptrace_dsn)?;
+    let exporter_provider = MultiplexingExporterProvider::new(endpoints)?;
 
     let tracer_provider = init_tracer_provider(resource.clone(), &exporter_provider)?;
     let meter_provider = init_meter_provider(resource, &exporter_provider)?;
@@ -99,12 +98,12 @@ fn init_providers(
 
 fn init_tracer_provider(
     resource: Resource,
-    exporter_provider: &ExporterProvider,
+    exporter_provider: &MultiplexingExporterProvider,
 ) -> Result<trace::SdkTracerProvider> {
     let exporter = exporter_provider.span()?;
     let processor = trace::BatchSpanProcessor::builder(exporter)
         .with_batch_config(
-            opentelemetry_sdk::trace::BatchConfigBuilder::default()
+            trace::BatchConfigBuilder::default()
                 .with_max_queue_size(30000)
                 .with_max_export_batch_size(10000)
                 .with_scheduled_delay(Duration::from_millis(5000))
@@ -124,7 +123,7 @@ fn init_tracer_provider(
 
 fn init_meter_provider(
     resource: Resource,
-    exporter_provider: &ExporterProvider,
+    exporter_provider: &MultiplexingExporterProvider,
 ) -> Result<metrics::SdkMeterProvider> {
     let exporter = exporter_provider.metric()?;
     let provider = metrics::SdkMeterProvider::builder()
@@ -137,18 +136,88 @@ fn init_meter_provider(
     Ok(provider)
 }
 
+struct MultiplexingExporterProvider {
+    exporters: Vec<ExporterProvider>,
+}
+impl MultiplexingExporterProvider {
+    fn new(endpoints: &[OtlpEndpoint]) -> Result<Self> {
+        let mut exporters = vec![];
+        for endpoint in endpoints {
+            exporters.push(ExporterProvider::new(endpoint)?);
+        }
+        Ok(Self { exporters })
+    }
+
+    fn span(&self) -> Result<MultiplexingSpanExporter> {
+        let mut span_exporters = vec![];
+        for exporter in &self.exporters {
+            span_exporters.push(exporter.span()?);
+        }
+        Ok(MultiplexingSpanExporter(span_exporters))
+    }
+
+    fn metric(&self) -> Result<MultiplexingMetricExporter> {
+        let mut metric_exporters = vec![];
+        for exporter in &self.exporters {
+            metric_exporters.push(exporter.metric()?);
+        }
+        Ok(MultiplexingMetricExporter(metric_exporters))
+    }
+}
+
+#[derive(Debug)]
+struct MultiplexingSpanExporter(Vec<SpanExporter>);
+impl trace::SpanExporter for MultiplexingSpanExporter {
+    async fn export(&self, batch: Vec<trace::SpanData>) -> OTelSdkResult {
+        let results = join_all(self.0.iter().map(|e| e.export(batch.clone()))).await;
+        for result in results {
+            result?;
+        }
+        Ok(())
+    }
+}
+
+struct MultiplexingMetricExporter(Vec<MetricExporter>);
+impl metrics::exporter::PushMetricExporter for MultiplexingMetricExporter {
+    async fn export(&self, metrics: &metrics::data::ResourceMetrics) -> OTelSdkResult {
+        let results = join_all(self.0.iter().map(|e| e.export(metrics))).await;
+        for result in results {
+            result?;
+        }
+        Ok(())
+    }
+
+    fn force_flush(&self) -> OTelSdkResult {
+        for exporter in &self.0 {
+            exporter.force_flush()?
+        }
+        Ok(())
+    }
+
+    fn shutdown_with_timeout(&self, timeout: Duration) -> OTelSdkResult {
+        for exporter in &self.0 {
+            exporter.shutdown_with_timeout(timeout)?
+        }
+        Ok(())
+    }
+
+    fn temporality(&self) -> metrics::Temporality {
+        self.0.first().unwrap().temporality()
+    }
+}
+
 struct ExporterProvider {
     endpoint: String,
     metadata: MetadataMap,
 }
 impl ExporterProvider {
-    fn new(endpoint: &str, uptrace_dsn: Option<&String>) -> Result<Self> {
+    fn new(endpoint: &OtlpEndpoint) -> Result<Self> {
         let mut metadata = MetadataMap::with_capacity(1);
-        if let Some(dsn) = uptrace_dsn {
+        if let Some(dsn) = &endpoint.uptrace_dsn {
             metadata.insert("uptrace-dsn", dsn.parse()?);
         };
         Ok(Self {
-            endpoint: endpoint.to_string(),
+            endpoint: endpoint.endpoint.clone(),
             metadata,
         })
     }

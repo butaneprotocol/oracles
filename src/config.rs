@@ -185,13 +185,20 @@ impl TryFrom<RawOracleConfig> for OracleConfig {
             test_network: raw.test_network,
         };
 
+        let mut otlp = raw.logs.otlp;
+        if let Some(endpoint) = raw.logs.otlp_endpoint {
+            otlp.push(OtlpEndpoint {
+                endpoint,
+                uptrace_dsn: raw.logs.uptrace_dsn,
+            });
+        }
+
         let logs = LogConfig {
             id: id.clone(),
             label: label.clone(),
             json: raw.logs.json,
             level: Level::from_str(&raw.logs.level)?,
-            otlp_endpoint: raw.logs.otlp_endpoint,
-            uptrace_dsn: raw.logs.uptrace_dsn,
+            otlp,
         };
 
         let publish_feed_base_url = raw.publish_feed_base_url.or_else(|| {
@@ -280,6 +287,8 @@ struct RawLogConfig {
     pub level: String,
     pub otlp_endpoint: Option<String>,
     pub uptrace_dsn: Option<String>,
+    #[serde(default)]
+    pub otlp: Vec<OtlpEndpoint>,
 }
 
 pub struct LogConfig {
@@ -287,7 +296,12 @@ pub struct LogConfig {
     pub label: String,
     pub json: bool,
     pub level: Level,
-    pub otlp_endpoint: Option<String>,
+    pub otlp: Vec<OtlpEndpoint>,
+}
+
+#[derive(Deserialize)]
+pub struct OtlpEndpoint {
+    pub endpoint: String,
     pub uptrace_dsn: Option<String>,
 }
 
