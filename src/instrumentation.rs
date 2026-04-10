@@ -5,7 +5,10 @@ use futures::future::join_all;
 use opentelemetry::{KeyValue, global, trace::TracerProvider};
 use opentelemetry_otlp::{MetricExporter, SpanExporter, WithExportConfig, WithTonicConfig};
 use opentelemetry_sdk::{Resource, error::OTelSdkResult, metrics, trace};
-use tonic::{metadata::MetadataMap, transport::ClientTlsConfig};
+use tonic::{
+    metadata::{MetadataKey, MetadataMap},
+    transport::ClientTlsConfig,
+};
 use tracing::{Dispatch, Level, Subscriber};
 use tracing_subscriber::{
     Layer, Registry, filter::Targets, fmt, layer::SubscriberExt, registry::LookupSpan,
@@ -213,9 +216,10 @@ struct ExporterProvider {
 impl ExporterProvider {
     fn new(endpoint: &OtlpEndpoint) -> Result<Self> {
         let mut metadata = MetadataMap::with_capacity(1);
-        if let Some(dsn) = &endpoint.uptrace_dsn {
-            metadata.insert("uptrace-dsn", dsn.parse()?);
-        };
+        for (key, value) in &endpoint.metadata {
+            let header = MetadataKey::from_bytes(key.as_bytes())?;
+            metadata.insert(header, value.parse()?);
+        }
         Ok(Self {
             endpoint: endpoint.endpoint.clone(),
             metadata,
