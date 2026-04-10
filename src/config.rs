@@ -185,11 +185,13 @@ impl TryFrom<RawOracleConfig> for OracleConfig {
             test_network: raw.test_network,
         };
 
-        let mut otlp = raw.logs.otlp;
+        let mut raw_otlp = raw.logs.otlp;
         if let Some(endpoint) = raw.logs.otlp_endpoint {
-            otlp.push(OtlpEndpoint {
+            raw_otlp.push(RawOtlpEndpoint {
                 endpoint,
                 uptrace_dsn: raw.logs.uptrace_dsn,
+                authorization: None,
+                metadata: HashMap::new(),
             });
         }
 
@@ -198,7 +200,7 @@ impl TryFrom<RawOracleConfig> for OracleConfig {
             label: label.clone(),
             json: raw.logs.json,
             level: Level::from_str(&raw.logs.level)?,
-            otlp,
+            otlp: raw_otlp.into_iter().map(|o| o.into()).collect(),
         };
 
         let publish_feed_base_url = raw.publish_feed_base_url.or_else(|| {
@@ -288,7 +290,16 @@ struct RawLogConfig {
     pub otlp_endpoint: Option<String>,
     pub uptrace_dsn: Option<String>,
     #[serde(default)]
-    pub otlp: Vec<OtlpEndpoint>,
+    pub otlp: Vec<RawOtlpEndpoint>,
+}
+
+#[derive(Deserialize)]
+struct RawOtlpEndpoint {
+    endpoint: String,
+    uptrace_dsn: Option<String>,
+    authorization: Option<String>,
+    #[serde(default)]
+    metadata: HashMap<String, String>,
 }
 
 pub struct LogConfig {
@@ -299,10 +310,25 @@ pub struct LogConfig {
     pub otlp: Vec<OtlpEndpoint>,
 }
 
-#[derive(Deserialize)]
 pub struct OtlpEndpoint {
     pub endpoint: String,
-    pub uptrace_dsn: Option<String>,
+    pub metadata: HashMap<String, String>,
+}
+
+impl From<RawOtlpEndpoint> for OtlpEndpoint {
+    fn from(value: RawOtlpEndpoint) -> Self {
+        let mut metadata = value.metadata;
+        if let Some(uptrace_dsn) = value.uptrace_dsn {
+            metadata.insert("uptrace-dsn".to_string(), uptrace_dsn);
+        }
+        if let Some(authorization) = value.authorization {
+            metadata.insert("authorization".to_string(), authorization);
+        }
+        Self {
+            endpoint: value.endpoint,
+            metadata,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
