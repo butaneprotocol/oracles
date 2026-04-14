@@ -2,11 +2,13 @@ use std::{sync::Arc, time::Duration};
 
 use anyhow::{Result, anyhow};
 use futures::{FutureExt, future::BoxFuture};
+use kupon::AssetId;
+use pallas_primitives::PlutusData;
 use rust_decimal::Decimal;
 use tokio::time::sleep;
 use tracing::{Level, warn};
 
-use crate::config::{HydratedPool, OracleConfig};
+use crate::config::{Asset, HydratedPool, OracleConfig};
 
 use super::{
     kupo::{MaxConcurrencyFutureSet, find_match, get_asset_value, wait_for_sync},
@@ -65,7 +67,19 @@ impl MinswapSource {
 
             set.push(async move {
                 let result = client.matches(&options).await?;
-                let matc = find_match(result, &pool)?;
+                let mut matches = vec![];
+                for m in result {
+                    let Some(hash) = &m.datum else {
+                        continue;
+                    };
+                    let Some(data) = client.datum(&hash.hash).await? else {
+                        continue;
+                    };
+                    if is_for_assets(&data, &pool) {
+                        matches.push(m);
+                    }
+                }
+                let matc = find_match(matches, &pool)?;
                 let Some(token_value) = get_asset_value(&matc, &pool.token_asset_id) else {
                     return Err(anyhow!(
                         "no value found for asset {:?}",
@@ -117,5 +131,57 @@ impl MinswapSource {
         }
 
         Ok(())
+    }
+}
+
+fn is_for_assets(data: &str, pool: &HydratedPool) -> bool {
+    let v1 = pool
+        .pool
+        .credential
+        .as_ref()
+        .is_some_and(|c| c == "e1317b152faac13426e6a83e06ff88a4d62cce3c1634ab0a5ec13309/*");
+    let Some((a, b)) = extract_assets(data, v1) else {
+        return false;
+    };
+    (a == pool.token_asset_id && b == pool.unit_asset_id)
+        || (a == pool.unit_asset_id && b == pool.token_asset_id)
+}
+
+fn extract_assets(data: &str, v1: bool) -> Option<(Asset, Asset)> {
+    let bytes = hex::decode(data).ok()?;
+    let decoded: PlutusData = minicbor::decode(&bytes).ok()?;
+    let PlutusData::Constr(constr) = decoded else {
+        return None;
+    };
+    let (a_index, b_index) = if v1 { (0, 1) } else { (1, 2) };
+    Some((
+        extract_asset(constr.fields.get(a_index)?)?,
+        extract_asset(constr.fields.get(b_index)?)?,
+    ))
+}
+
+fn extract_asset(asset: &PlutusData) -> Option<Asset> {
+    let PlutusData::Constr(constr) = asset else {
+        return None;
+    };
+    if constr.fields.len() > 2 {
+        return None;
+    }
+    let (PlutusData::BoundedBytes(policy_id), PlutusData::BoundedBytes(asset_name)) =
+        (constr.fields.first()?, constr.fields.get(1)?)
+    else {
+        return None;
+    };
+    if policy_id.is_empty() && asset_name.is_empty() {
+        Some(Asset::Ada)
+    } else {
+        Some(Asset::Native(AssetId {
+            policy_id: policy_id.to_string(),
+            asset_name: if asset_name.is_empty() {
+                None
+            } else {
+                Some(asset_name.to_string())
+            },
+        }))
     }
 }

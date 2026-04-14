@@ -15,6 +15,12 @@ use tracing::Level;
 
 use crate::{keys, network::NodeId};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Asset {
+    Ada,
+    Native(AssetId),
+}
+
 const fn default_enabled() -> bool {
     true
 }
@@ -145,15 +151,15 @@ impl OracleConfig {
         self.currencies.iter().map(|c| (&c.name, c)).collect()
     }
 
-    fn find_asset_id(asset: &CurrencyConfig) -> Option<AssetId> {
+    fn find_asset_id(asset: &CurrencyConfig) -> Asset {
         if asset.name == "ADA" {
-            return None;
+            return Asset::Ada;
         }
         let asset_id = asset
             .asset_id
             .as_ref()
             .unwrap_or_else(|| panic!("Token {} has no asset id", asset.name));
-        Some(AssetId::from_hex(asset_id))
+        Asset::Native(AssetId::from_hex(asset_id))
     }
 }
 
@@ -610,9 +616,9 @@ impl Pool {
 #[derive(Debug, Clone)]
 pub struct HydratedPool {
     pub pool: Pool,
-    pub token_asset_id: Option<AssetId>,
+    pub token_asset_id: Asset,
     pub token_digits: u32,
-    pub unit_asset_id: Option<AssetId>,
+    pub unit_asset_id: Asset,
     pub unit_digits: u32,
 }
 
