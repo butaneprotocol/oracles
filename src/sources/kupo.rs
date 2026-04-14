@@ -2,11 +2,11 @@ use std::time::Duration;
 
 use anyhow::{Result, bail};
 use futures::{Future, StreamExt, stream::FuturesUnordered};
-use kupon::{AssetId, Client, HealthStatus, Match};
+use kupon::{Client, HealthStatus, Match};
 use tokio::time::sleep;
 use tracing::{debug, warn};
 
-use crate::config::HydratedPool;
+use crate::config::{Asset, HydratedPool};
 
 pub async fn wait_for_sync(client: &Client) {
     let mut last_status = None;
@@ -59,17 +59,13 @@ pub async fn wait_for_sync(client: &Client) {
 pub fn find_match(matches: Vec<Match>, pool: &HydratedPool) -> Result<Match> {
     let mut best_match = None;
     for m in matches {
-        if pool
-            .token_asset_id
-            .as_ref()
-            .is_some_and(|id| !m.value.assets.contains_key(id))
+        if let Asset::Native(id) = &pool.token_asset_id
+            && !m.value.assets.contains_key(id)
         {
             continue;
         }
-        if pool
-            .unit_asset_id
-            .as_ref()
-            .is_some_and(|id| !m.value.assets.contains_key(id))
+        if let Asset::Native(id) = &pool.unit_asset_id
+            && !m.value.assets.contains_key(id)
         {
             continue;
         }
@@ -85,18 +81,14 @@ pub fn find_match(matches: Vec<Match>, pool: &HydratedPool) -> Result<Match> {
     }
 }
 
-pub fn get_asset_value(matc: &Match, asset_id: &Option<AssetId>) -> Option<u64> {
+pub fn get_asset_value(matc: &Match, asset_id: &Asset) -> Option<u64> {
     get_asset_value_minus_tx_fee(matc, asset_id, 0)
 }
 
-pub fn get_asset_value_minus_tx_fee(
-    matc: &Match,
-    asset_id: &Option<AssetId>,
-    tx_fee: u64,
-) -> Option<u64> {
+pub fn get_asset_value_minus_tx_fee(matc: &Match, asset_id: &Asset, tx_fee: u64) -> Option<u64> {
     match asset_id {
-        Some(token) => matc.value.assets.get(token).copied(),
-        None => matc.value.coins.checked_sub(tx_fee),
+        Asset::Ada => matc.value.coins.checked_sub(tx_fee),
+        Asset::Native(token) => matc.value.assets.get(token).copied(),
     }
 }
 
