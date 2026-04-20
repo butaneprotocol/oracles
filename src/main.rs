@@ -192,6 +192,11 @@ where
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    if rustls::crypto::CryptoProvider::install_default(rustls::crypto::ring::default_provider())
+        .is_err()
+    {
+        warn!("Could not configure CryptoProvider");
+    }
     let args = Args::parse();
 
     let debug = args.debug;

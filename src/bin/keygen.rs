@@ -5,6 +5,7 @@ use clap::Parser;
 use frost_ed25519::keys::{self as frost_keys, IdentifierList, KeyPackage};
 use oracles::keys;
 use rand::thread_rng;
+use tracing::warn;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -16,6 +17,11 @@ struct Args {
 }
 
 pub fn main() -> Result<()> {
+    if rustls::crypto::CryptoProvider::install_default(rustls::crypto::ring::default_provider())
+        .is_err()
+    {
+        warn!("Could not configure CryptoProvider");
+    }
     let args = Args::parse();
 
     let rng = thread_rng();
