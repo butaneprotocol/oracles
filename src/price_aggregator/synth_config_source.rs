@@ -11,13 +11,15 @@ use anyhow::{Result, bail};
 use futures::{StreamExt, stream::FuturesUnordered};
 use kupon::MatchOptions;
 use pallas_primitives::{Constr, PlutusData};
-use tracing::warn;
+
+struct CollateralState {
+    config: CollateralConfig,
+    collateral: Option<Vec<String>>,
+}
 
 pub struct SyntheticConfigSource {
     asset_names: HashMap<String, String>,
-    collateral_config: HashMap<String, CollateralConfig>,
-    collateral: HashMap<String, Vec<String>>,
-    test_network: bool,
+    collateral: HashMap<String, CollateralState>,
     client: kupon::Client,
     next_refresh: Instant,
 }
@@ -36,20 +38,21 @@ impl SyntheticConfigSource {
         }
 
         let mut collateral = HashMap::new();
-        let mut collateral_config = HashMap::new();
         for synth in &config.synthetics {
-            collateral_config.insert(synth.name.clone(), synth.collateral.clone());
-            if !synth.collateral.list.is_empty() {
-                collateral.insert(synth.name.clone(), synth.collateral.list.clone());
-            }
+            collateral.insert(
+                synth.name.clone(),
+                CollateralState {
+                    config: synth.collateral.clone(),
+                    collateral: None,
+                },
+            );
         }
+
         let client = config.kupo.new_client()?;
         let next_refresh = Instant::now();
         Ok(Self {
             asset_names,
-            collateral_config,
             collateral,
-            test_network: config.network.test_network,
             client,
             next_refresh,
         })
@@ -62,10 +65,11 @@ impl SyntheticConfigSource {
         }
 
         let mut futures = FuturesUnordered::new();
-        for (synthetic, config) in &self.collateral_config {
+        for (synthetic, state) in &self.collateral {
             let asset_names = &self.asset_names;
             let client = &self.client;
-            let Some(nft) = config.nft.as_ref() else {
+            let synthetic = synthetic.clone();
+            let Some(nft) = state.config.nft.clone() else {
                 continue;
             };
             futures.push(async move {
@@ -89,7 +93,7 @@ impl SyntheticConfigSource {
                         })
                     };
                 }
-                let query = MatchOptions::default().asset_id(nft).only_unspent();
+                let query = MatchOptions::default().asset_id(&nft).only_unspent();
                 let mut matches = match client.matches(&query).await {
                     Ok(matches) => matches,
                     Err(error) => fail!(false, "could not fetch owner for NFT {nft}: {error}"),
@@ -148,25 +152,19 @@ impl SyntheticConfigSource {
         while let Some(result) = futures.next().await {
             match result {
                 Ok((synthetic, collateral)) => {
-                    self.collateral.insert(synthetic.clone(), collateral);
+                    self.collateral.get_mut(&synthetic).unwrap().collateral = Some(collateral);
                     health.update(
                         Origin::SyntheticConfig(synthetic.clone()),
                         HealthStatus::Healthy,
                     );
                 }
                 Err(error) => {
-                    if self.test_network {
-                        // On test networks, we don't care if we couldn't fetch an NFT.
-                        // It may not even have launched yet.
-                        continue;
-                    }
                     if error.clear {
-                        self.collateral.remove(error.synthetic);
+                        self.collateral
+                            .get_mut(&error.synthetic)
+                            .unwrap()
+                            .collateral = None;
                     }
-                    warn!(
-                        "could not update parameters for {}: {}",
-                        error.synthetic, error.error
-                    );
                     health.update(
                         Origin::SyntheticConfig(error.synthetic.to_string()),
                         HealthStatus::Unhealthy(error.error.to_string()),
@@ -179,7 +177,14 @@ impl SyntheticConfigSource {
     }
 
     pub fn synthetic_collateral(&self, name: &str) -> Option<Vec<String>> {
-        Some(self.collateral.get(name)?.clone())
+        let state = self.collateral.get(name)?;
+        if let Some(collateral) = &state.collateral {
+            Some(collateral.clone())
+        } else if !state.config.list.is_empty() {
+            Some(state.config.list.clone())
+        } else {
+            None
+        }
     }
 }
 
@@ -235,8 +240,8 @@ fn decode_struct<const N: usize>(datum: PlutusData, variant: u64) -> Result<[Plu
         })
 }
 
-struct UpdateConfigError<'a> {
-    synthetic: &'a str,
+struct UpdateConfigError {
+    synthetic: String,
     error: anyhow::Error,
     clear: bool,
 }
