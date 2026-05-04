@@ -1,8 +1,8 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
 use axum::{
     Json, Router,
-    extract::State,
+    extract::{ConnectInfo, State},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
@@ -177,7 +177,12 @@ impl HealthServer {
                     return;
                 }
             };
-            if let Err(error) = axum::serve(listener, app).await {
+            if let Err(error) = axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .await
+            {
                 warn!("Health server stopped: {}", error);
             }
         });
@@ -292,8 +297,17 @@ struct RunElectionRequest {
 
 async fn force_election(
     State(state): State<HealthState>,
+    ConnectInfo(remote_addr): ConnectInfo<SocketAddr>,
     Json(req): Json<RunElectionRequest>,
 ) -> impl IntoResponse {
+    if !remote_addr.ip().is_loopback() {
+        warn!(
+            remote_addr = %remote_addr,
+            "Rejected remote force-election request from non-loopback address"
+        );
+        return StatusCode::FORBIDDEN;
+    }
+
     state.raft_client.assume_leadership(req.term);
     StatusCode::ACCEPTED
 }
