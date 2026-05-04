@@ -170,7 +170,6 @@ enum LeaderState {
         price_data: PriceData,
         signatures: Vec<Signature>,
         packages: BTreeMap<String, SigningPackage>,
-        waiting_for: BTreeSet<NodeId>,
     },
 }
 impl Display for LeaderState {
@@ -193,7 +192,6 @@ impl Display for LeaderState {
                 round,
                 signatures,
                 packages,
-                waiting_for,
                 ..
             } => {
                 let committed: BTreeSet<_> = packages
@@ -201,7 +199,7 @@ impl Display for LeaderState {
                     .flat_map(|p| p.signing_commitments().keys())
                     .collect();
                 let signed: BTreeSet<_> = signatures.iter().map(|s| s.identifier).collect();
-                f.write_fmt(format_args!("{{role=Leader,state=CollectingSignatures,round={},committed={:?},signed={:?},waiting_for={:?}}}", round, committed, signed, waiting_for))
+                f.write_fmt(format_args!("{{role=Leader,state=CollectingSignatures,round={},committed={:?},signed={:?}}}", round, committed, signed))
             }
         }
     }
@@ -672,7 +670,6 @@ impl Signer {
             price_data,
             signatures: vec![my_signature],
             packages,
-            waiting_for: recipients.into_iter().collect(),
         });
 
         Ok(())
@@ -810,7 +807,7 @@ impl Signer {
     async fn process_signature(
         &mut self,
         round: String,
-        from: NodeId,
+        _from: NodeId,
         signature: Signature,
     ) -> Result<()> {
         let SignerState::Leader(LeaderState::CollectingSignatures {
@@ -819,7 +816,6 @@ impl Signer {
             price_data,
             signatures,
             packages,
-            waiting_for,
         }) = &mut self.state
         else {
             // We're not a leader, or we're not waiting for signatures
@@ -838,15 +834,19 @@ impl Signer {
             return Ok(());
         }
         signatures.push(signature);
-        waiting_for.remove(&from);
 
-        if !waiting_for.is_empty() {
+        if signatures.len() < (*self.key.min_signers() as usize) {
             // still collecting
             return Ok(());
         }
 
-        round_span
-            .in_scope(|| info!("Collected all signatures, signing and completing this round"));
+        round_span.in_scope(|| {
+            info!(
+                signatures_collected = signatures.len(),
+                min_signers = *self.key.min_signers(),
+                "Collected enough signatures, signing and completing this round"
+            )
+        });
 
         // We've finally collected all the signatures we need! Now just aggregate them
         let mut signature_maps = BTreeMap::new();
@@ -1514,7 +1514,7 @@ mod tests {
         };
 
         // Follower #1 agrees with the leader on one price, follower #2 on another.
-        // We can only sign two payloads if we wait for both of them to finish.
+        // We finish once we have quorum signatures, so only one payload is guaranteed.
         let (mut signers, mut network, mut payload_source) =
             construct_signers(2, vec![leader_prices, follower1_prices, follower2_prices]).await?;
 
@@ -1522,7 +1522,7 @@ mod tests {
         run_round(&mut signers, &mut network).await;
 
         let signed_entries = assert_round_complete(&mut payload_source)?;
-        assert_eq!(signed_entries.synthetics.len(), 2);
+        assert_eq!(signed_entries.synthetics.len(), 1);
 
         Ok(())
     }
