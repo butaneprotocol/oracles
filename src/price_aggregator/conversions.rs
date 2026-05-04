@@ -148,7 +148,7 @@ impl<'a> TokenPriceConverter<'a> {
         }
 
         // Find the weighted median of all prices being considered
-        let total_weight: BigRational = candidate_prices.iter().map(|(_, _, weight)| weight).sum();
+        let total_sources = candidate_prices.len();
         let median_price = find_weighted_median(&candidate_prices)?;
 
         // Filter out "outlier" prices which are too distant from the median
@@ -168,10 +168,8 @@ impl<'a> TokenPriceConverter<'a> {
             }
         });
 
-        // if more than half of our prices by weight are outliers, these prices are too unstable to use
-        let remaining_weight: BigRational =
-            candidate_prices.iter().map(|(_, _, weight)| weight).sum();
-        if remaining_weight < total_weight / BigRational::new(BigInt::from(2), BigInt::one()) {
+        // if half or more of our sources are outliers, these prices are too unstable to use
+        if candidate_prices.len() < 1 + total_sources / 2 {
             return None;
         }
 
@@ -965,6 +963,52 @@ mod tests {
             converter.value_in_usd("LENFI"),
             Some(decimal_rational(100, 0))
         );
+    }
+
+
+    #[test]
+    fn value_in_usd_should_not_allow_single_dominant_weight_source_after_outlier_filtering() {
+        let source_prices = vec![
+            (
+                "dominant source".into(),
+                PriceInfo {
+                    token: "LENFI".into(),
+                    unit: "USD".into(),
+                    value: Decimal::new(200, 0),
+                    reliability: Decimal::new(1000, 0),
+                },
+            ),
+            (
+                "honest source 1".into(),
+                PriceInfo {
+                    token: "LENFI".into(),
+                    unit: "USD".into(),
+                    value: Decimal::new(100, 0),
+                    reliability: Decimal::new(100, 0),
+                },
+            ),
+            (
+                "honest source 2".into(),
+                PriceInfo {
+                    token: "LENFI".into(),
+                    unit: "USD".into(),
+                    value: Decimal::new(101, 0),
+                    reliability: Decimal::new(100, 0),
+                },
+            ),
+        ];
+        let default_prices = vec![];
+        let synthetics = make_synthetics();
+        let currencies = make_currencies();
+        let converter = TokenPriceConverter::new(
+            &source_prices,
+            &default_prices,
+            &synthetics,
+            &currencies,
+            default_threshold(),
+        );
+
+        assert_eq!(converter.value_in_usd("LENFI"), None);
     }
 
     #[test]
