@@ -170,6 +170,7 @@ enum LeaderState {
         price_data: PriceData,
         signatures: Vec<Signature>,
         packages: BTreeMap<String, SigningPackage>,
+        waiting_for: BTreeSet<NodeId>,
     },
 }
 impl Display for LeaderState {
@@ -363,19 +364,26 @@ impl Signer {
     }
 
     async fn finish_round_early(&mut self) -> Result<()> {
-        let round = match &self.state {
-            SignerState::Leader(LeaderState::CollectingCommitments { round, .. }) => round,
-            SignerState::Leader(LeaderState::CollectingSignatures { round, .. }) => round,
-            _ => return Ok(()),
-        };
-        info!(round, "Finishing round before collecting enough signatures");
-        let now = SystemTime::now();
-        let payload = SignedEntries {
-            timestamp: now,
-            synthetics: vec![],
-            generics: vec![],
-        };
-        self.publish(self.id.clone(), payload).await
+        match &self.state {
+            SignerState::Leader(LeaderState::CollectingCommitments { round, .. }) => {
+                info!(
+                    round,
+                    "Finishing round before collecting enough commitments; publishing empty payload"
+                );
+                let now = SystemTime::now();
+                let payload = SignedEntries {
+                    timestamp: now,
+                    synthetics: vec![],
+                    generics: vec![],
+                };
+                self.publish(self.id.clone(), payload).await
+            }
+            SignerState::Leader(LeaderState::CollectingSignatures { round, .. }) => {
+                info!(round, "Finishing round before collecting enough signatures");
+                self.complete_round().await
+            }
+            _ => Ok(()),
+        }
     }
 
     async fn begin_round(&mut self, round: String) -> Result<()> {
@@ -670,6 +678,7 @@ impl Signer {
             price_data,
             signatures: vec![my_signature],
             packages,
+            waiting_for: recipients.into_iter().collect(),
         });
 
         Ok(())
@@ -807,15 +816,15 @@ impl Signer {
     async fn process_signature(
         &mut self,
         round: String,
-        _from: NodeId,
+        from: NodeId,
         signature: Signature,
     ) -> Result<()> {
         let SignerState::Leader(LeaderState::CollectingSignatures {
             round: curr_round,
             round_span,
-            price_data,
             signatures,
-            packages,
+            waiting_for,
+            ..
         }) = &mut self.state
         else {
             // We're not a leader, or we're not waiting for signatures
@@ -834,19 +843,32 @@ impl Signer {
             return Ok(());
         }
         signatures.push(signature);
+        waiting_for.remove(&from);
 
-        if signatures.len() < (*self.key.min_signers() as usize) {
+        if !waiting_for.is_empty() {
             // still collecting
             return Ok(());
         }
 
-        round_span.in_scope(|| {
-            info!(
-                signatures_collected = signatures.len(),
-                min_signers = *self.key.min_signers(),
-                "Collected enough signatures, signing and completing this round"
-            )
-        });
+        round_span
+            .in_scope(|| info!("Collected all signatures, signing and completing this round"));
+
+        self.complete_round().await
+    }
+
+    async fn complete_round(&mut self) -> Result<()> {
+        let SignerState::Leader(LeaderState::CollectingSignatures {
+            round,
+            price_data,
+            signatures,
+            packages,
+            ..
+        }) = &mut self.state
+        else {
+            // We're not a leader, or we're not waiting for signatures
+            return Ok(());
+        };
+        let round = round.clone();
 
         // We've finally collected all the signatures we need! Now just aggregate them
         let mut signature_maps = BTreeMap::new();
@@ -1055,7 +1077,10 @@ mod tests {
     use num_rational::BigRational;
     use num_traits::FromPrimitive as _;
     use rand::thread_rng;
-    use tokio::sync::{mpsc, watch};
+    use tokio::sync::{
+        mpsc::{self, error::TryRecvError},
+        watch,
+    };
     use tracing::{Instrument, Span};
 
     use crate::{
@@ -1065,7 +1090,7 @@ mod tests {
             Validity,
         },
         raft::RaftLeader,
-        signature_aggregator::signer::SignerMessage,
+        signature_aggregator::signer::{SignerMessage, SignerMessageData},
     };
 
     use super::{Signer, SignerEvent};
@@ -1074,6 +1099,7 @@ mod tests {
         id: NodeId,
         signer: Signer,
         receiver: NetworkReceiver<SignerMessage>,
+        withhold_signature: bool,
     }
 
     impl SignerOrchestrator {
@@ -1082,6 +1108,11 @@ mod tests {
         }
         async fn process_incoming_messages(&mut self) {
             while let Some(message) = self.receiver.try_recv().await {
+                if self.withhold_signature
+                    && let SignerMessageData::RequestSignature { .. } = &message.data.data
+                {
+                    continue;
+                }
                 self.signer
                     .process(SignerEvent::Message(
                         message.from,
@@ -1129,6 +1160,7 @@ mod tests {
                     id,
                     signer,
                     receiver,
+                    withhold_signature: false,
                 }
             })
             .collect();
@@ -1175,12 +1207,34 @@ mod tests {
         }
     }
 
+    async fn start_second_round(
+        signers: &mut [SignerOrchestrator],
+        network: &mut TestNetwork<SignerMessage>,
+    ) {
+        signers[0]
+            .process(SignerEvent::RoundStarted("round2".into()))
+            .await;
+        while network.drain().await {
+            for signer in signers.iter_mut() {
+                signer.process_incoming_messages().await;
+            }
+        }
+    }
+
     fn assert_round_complete(
         payload_source: &mut mpsc::Receiver<(NodeId, SignedEntries)>,
     ) -> Result<SignedEntries> {
         match payload_source.try_recv() {
             Ok((_, entries)) => Ok(entries),
             Err(x) => Err(x.into()),
+        }
+    }
+
+    fn assert_round_incomplete(payload_source: &mut mpsc::Receiver<(NodeId, SignedEntries)>) {
+        match payload_source.try_recv() {
+            Ok(_) => panic!("round unexpectedly completed"),
+            Err(TryRecvError::Disconnected) => panic!("network unexpected shut down"),
+            Err(TryRecvError::Empty) => {}
         }
     }
 
@@ -1514,13 +1568,57 @@ mod tests {
         };
 
         // Follower #1 agrees with the leader on one price, follower #2 on another.
-        // We finish once we have quorum signatures, so only one payload is guaranteed.
+        // We can only sign two payloads if we wait for both of them to finish.
         let (mut signers, mut network, mut payload_source) =
             construct_signers(2, vec![leader_prices, follower1_prices, follower2_prices]).await?;
 
         assign_roles(&mut signers).await;
         run_round(&mut signers, &mut network).await;
 
+        let signed_entries = assert_round_complete(&mut payload_source)?;
+        assert_eq!(signed_entries.synthetics.len(), 2);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn should_take_what_we_can_get_when_round_ends() -> Result<()> {
+        let leader_prices = PriceData {
+            synthetics: vec![
+                synthetic_data("FIRST", 3.50, &["A"], &[2], 1),
+                synthetic_data("SECOND", 3.50, &["A"], &[2], 1),
+            ],
+            generics: vec![],
+        };
+        let follower1_prices = PriceData {
+            synthetics: vec![
+                synthetic_data("FIRST", 3.50, &["A"], &[2], 1),
+                synthetic_data("SECOND", 3.50, &["A"], &[3], 2),
+            ],
+            generics: vec![],
+        };
+        let follower2_prices = PriceData {
+            synthetics: vec![
+                synthetic_data("FIRST", 3.50, &["A"], &[3], 2),
+                synthetic_data("SECOND", 3.50, &["A"], &[2], 1),
+            ],
+            generics: vec![],
+        };
+
+        // Follower #1 agrees with the leader on one price, follower #2 on another.
+        // Follower #2 is nefarious and will not actually send a signature when asked.
+        // it does what it can with the signatures it has.
+        let (mut signers, mut network, mut payload_source) =
+            construct_signers(2, vec![leader_prices, follower1_prices, follower2_prices]).await?;
+        signers[2].withhold_signature = true;
+
+        // The leader waits as long as it can for follower #2...
+        assign_roles(&mut signers).await;
+        run_round(&mut signers, &mut network).await;
+        assert_round_incomplete(&mut payload_source);
+
+        // But when the round ends, it publishes the one payload it can.
+        start_second_round(&mut signers, &mut network).await;
         let signed_entries = assert_round_complete(&mut payload_source)?;
         assert_eq!(signed_entries.synthetics.len(), 1);
 
