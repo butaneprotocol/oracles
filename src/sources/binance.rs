@@ -85,12 +85,13 @@ impl BinanceSource {
         };
         let token = &stream.token;
         let value = Decimal::from_str(&message.data.price)?;
+        let volume = Decimal::from_str(&message.data.volume_base)?;
 
         sink.send(PriceInfo {
             token: token.to_string(),
             unit: stream.unit.to_string(),
             value,
-            reliability: Decimal::ONE,
+            reliability: volume,
         })?;
 
         Ok(())
@@ -106,4 +107,6 @@ struct BinanceMarkPriceMessage {
 struct BinanceMarkPriceMessageData {
     #[serde(rename(deserialize = "c"))]
     price: String,
+    #[serde(rename(deserialize = "v"))]
+    volume_base: String,
 }
