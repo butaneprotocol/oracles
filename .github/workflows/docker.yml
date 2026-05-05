@@ -56,11 +56,16 @@ jobs:
           echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
           echo "CC=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
 
-      - name: Rust Cache
+      - name: Cargo Cache
         id: cache
-        uses: Swatinem/rust-cache@v2
+        uses: actions/cache@v4
         with:
-          prefix-key: ${{ matrix.rust_target }}
+          path: |
+            cargo-registry-cache
+            sccache-cache
+          key: ${{ matrix.rust_target }}-cargo-cache-${{ github.sha }}
+          restore-keys: |
+            ${{ matrix.rust_target }}-cargo-cache
 
       - name: Compile
         run: cargo build --release --target ${{ matrix.rust_target }}
