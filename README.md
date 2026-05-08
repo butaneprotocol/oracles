@@ -116,14 +116,6 @@ cargo run --bin keygen -- --min-signers 2 --max-signers 3
 
 These will be saved in subdirectories of `KEYS_DIRECTORY`.
 
-### Set up Maestro
-
-Querying prices from Maestro requires an API key. To query Maestro, create a `.env` file with your API key like so:
-```sh
-MAESTRO_API_KEY=[key goes here]
-```
-If you don't pass an API key, the oracle will still run, but it won't include maestro pricing data.
-
 ### Set up FXRatesAPI
 
 FXRatesAPI needs an API key as well. To get a key for this API, visit https://fxratesapi.com/auth/signup and create an account. The free tier is fine.

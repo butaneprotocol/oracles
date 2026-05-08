@@ -234,26 +234,6 @@ kucoin:
     - token: SOL
       unit: USDT
       symbol: SOL-USDT
-maestro:
-  tokens:
-    - token: DJED
-      unit: ADA
-      dex: minswap
-    - token: ENCS
-      unit: ADA
-      dex: minswap
-    - token: iUSD
-      unit: ADA
-      dex: minswap
-    - token: LENFI
-      unit: ADA
-      dex: minswap
-    - token: MIN
-      unit: ADA
-      dex: minswap
-    - token: SNEK
-      unit: ADA
-      dex: minswap
 okx:
   tokens:
     - token: NIGHT
