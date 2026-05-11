@@ -5,7 +5,6 @@ pub mod crypto_com;
 pub mod fxratesapi;
 pub mod kucoin;
 pub mod kupo;
-pub mod maestro;
 pub mod minswap;
 pub mod okx;
 pub mod source;

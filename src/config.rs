@@ -61,7 +61,6 @@ struct RawOracleConfig {
     pub crypto_com: CryptoComConfig,
     pub fxratesapi: FxRatesApiConfig,
     pub kucoin: KucoinConfig,
-    pub maestro: MaestroConfig,
     pub okx: OkxConfig,
     pub sundaeswap: SundaeSwapConfig,
     pub minswap: MinswapConfig,
@@ -102,7 +101,6 @@ pub struct OracleConfig {
     pub crypto_com: CryptoComConfig,
     pub fxratesapi: FxRatesApiConfig,
     pub kucoin: KucoinConfig,
-    pub maestro: MaestroConfig,
     pub okx: OkxConfig,
     pub sundaeswap: SundaeSwapConfig,
     pub minswap: MinswapConfig,
@@ -230,7 +228,6 @@ impl TryFrom<RawOracleConfig> for OracleConfig {
             raw.crypto_com.enabled = raw.sources.contains("crypto.com");
             raw.fxratesapi.enabled = raw.sources.contains("fxratesapi");
             raw.kucoin.enabled = raw.sources.contains("kucoin");
-            raw.maestro.enabled = raw.sources.contains("maestro");
             raw.okx.enabled = raw.sources.contains("okx");
             raw.sundaeswap.enabled = raw.sources.contains("sundaeswap");
             raw.minswap.enabled = raw.sources.contains("minswap");
@@ -269,7 +266,6 @@ impl TryFrom<RawOracleConfig> for OracleConfig {
             crypto_com: raw.crypto_com,
             fxratesapi: raw.fxratesapi,
             kucoin: raw.kucoin,
-            maestro: raw.maestro,
             okx: raw.okx,
             sundaeswap: raw.sundaeswap,
             minswap: raw.minswap,
@@ -513,20 +509,6 @@ pub struct KucoinTokenConfig {
     pub token: String,
     pub unit: String,
     pub symbol: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct MaestroConfig {
-    #[serde(default = "default_enabled")]
-    pub enabled: bool,
-    pub tokens: Vec<MaestroTokenConfig>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-pub struct MaestroTokenConfig {
-    pub token: String,
-    pub unit: String,
-    pub dex: String,
 }
 
 #[derive(Debug, Deserialize)]

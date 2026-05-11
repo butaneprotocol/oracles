@@ -31,7 +31,6 @@ use crate::{
         crypto_com::CryptoComSource,
         fxratesapi::FxRatesApiSource,
         kucoin::KucoinSource,
-        maestro::MaestroSource,
         minswap::MinswapSource,
         okx::OkxSource,
         source::{PriceInfo, PriceInfoSnapshot},
@@ -108,16 +107,6 @@ impl PriceAggregator {
         }
         if config.kucoin.enabled {
             sources.push(SourceAdapter::new(KucoinSource::new(&config), &config));
-        }
-        if config.maestro.enabled {
-            match MaestroSource::new(&config)? {
-                Some(maestro_source) => {
-                    sources.push(SourceAdapter::new(maestro_source, &config));
-                }
-                _ => {
-                    warn!("Not querying maestro, because no MAESTRO_API_KEY was provided");
-                }
-            }
         }
         if config.minswap.enabled {
             sources.push(SourceAdapter::new(MinswapSource::new(&config)?, &config));
