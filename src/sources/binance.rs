@@ -15,7 +15,7 @@ use crate::{
 
 use super::source::Source;
 
-const BASE_URL: &str = "wss://fstream.binance.com/stream";
+const BASE_URL: &str = "wss://fstream.binance.com/market/stream";
 
 pub struct BinanceSource {
     streams: BTreeMap<String, BinanceTokenConfig>,
