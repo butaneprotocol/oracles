@@ -5,7 +5,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, anyhow, bail};
-use chacha20poly1305::{AeadCore, Key, KeyInit, XChaCha20Poly1305, aead::Aead};
+use chacha20poly1305::{Key, KeyInit, XChaCha20Poly1305, aead::{Aead, Generate}};
 use dashmap::DashMap;
 use ed25519::{Signature, signature::Signer};
 use ed25519_dalek::{SigningKey as PrivateKey, Verifier};
@@ -30,7 +30,7 @@ use tracing::{Instrument, Level, debug, error, info, info_span, trace, warn};
 use uuid::Uuid;
 use x25519_dalek::{self as ecdh, SharedSecret};
 
-type Nonce = chacha20poly1305::aead::generic_array::GenericArray<u8, chacha20poly1305::consts::U24>;
+type Nonce = chacha20poly1305::aead::array::Array<u8, chacha20poly1305::consts::U24>;
 
 use crate::{
     cbor::{CborEcdhPublicKey, CborSignature, CborVerifyingKey},
@@ -95,10 +95,7 @@ impl ApplicationMessage {
         text_map: HashMap<String, String>,
         cipher: &XChaCha20Poly1305,
     ) -> Self {
-        let nonce: Nonce = {
-            let mut rng = thread_rng();
-            XChaCha20Poly1305::generate_nonce(&mut rng)
-        };
+        let nonce = Nonce::generate();
         let payload: Vec<u8> = {
             let mut encoder = Encoder::new(vec![]);
             encoder.encode(&message).expect("infallible");
@@ -114,9 +111,9 @@ impl ApplicationMessage {
     }
 
     pub fn decrypt(self, cipher: &XChaCha20Poly1305) -> Result<AppMessage> {
-        let nonce = Nonce::from_slice(&self.nonce);
+        let nonce = Nonce::try_from(self.nonce.as_slice())?;
         let decrypted_bytes: Vec<u8> = cipher
-            .decrypt(nonce, self.payload.as_slice())
+            .decrypt(&nonce, self.payload.as_slice())
             .map_err(|_| anyhow!("could not decipher message"))?;
         Decoder::new(&decrypted_bytes)
             .decode()
