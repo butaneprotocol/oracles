@@ -1142,7 +1142,7 @@ mod tests {
 
         let signers: Vec<SignerOrchestrator> = shares
             .into_values()
-            .zip(prices.into_iter())
+            .zip(prices)
             .map(|(share, price_data)| {
                 let key = KeyPackage::try_from(share).unwrap();
                 let (_, price_source) = watch::channel(price_data);

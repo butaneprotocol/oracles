@@ -5,7 +5,10 @@ use std::{
 };
 
 use anyhow::{Context, Result, anyhow, bail};
-use chacha20poly1305::{Key, KeyInit, XChaCha20Poly1305, aead::{Aead, Generate}};
+use chacha20poly1305::{
+    Key, KeyInit, XChaCha20Poly1305,
+    aead::{Aead, Generate},
+};
 use dashmap::DashMap;
 use ed25519::{Signature, signature::Signer};
 use ed25519_dalek::{SigningKey as PrivateKey, Verifier};
