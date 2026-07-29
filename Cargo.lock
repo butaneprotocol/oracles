@@ -1578,7 +1578,7 @@ dependencies = [
 [[package]]
 name = "kupon"
 version = "0.1.0"
-source = "git+https://github.com/SundaeSwap-finance/kupon?rev=a580134#a58013433aa4730746099e6caf6d57493f93eb4d"
+source = "git+https://github.com/SundaeSwap-finance/kupon?rev=918c2d7#918c2d708be85cadb39ae15b63066ddc8996ce09"
 dependencies = [
  "rand 0.10.2",
  "reqwest",
