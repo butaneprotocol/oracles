@@ -12,6 +12,11 @@ pub struct PriceInfo {
     pub token: String,
     pub unit: String,
     pub value: Decimal,
+    /// How much weight this price should carry relative to other sources.
+    /// Sources which can measure liquidity (i.e. DEX pools) report the TVL of
+    /// the pool, denominated in whole `unit` tokens (not the smallest
+    /// denomination), so that multiplying by the price of `unit` in USD yields
+    /// a TVL in whole USD. Sources with no notion of liquidity report 1.
     pub reliability: Decimal,
 }
 

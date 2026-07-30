@@ -36,8 +36,9 @@ num-traits = "0.2"
 opentelemetry = "0.32"
 opentelemetry-otlp = { version = "0.32", features = ["grpc-tonic", "gzip-tonic", "tls", "tls-webpki-roots"] }
 opentelemetry_sdk = { version = "0.32", features = ["rt-tokio"] }
-pallas-crypto = "1.0.0-alpha.3"
-pallas-primitives = "1.0.0-alpha.3"
+pallas-crypto = "1"
+pallas-primitives = "1"
+plutus-parser = { git = "https://github.com/SundaeSwap-finance/plutus-parser", rev = "cb27b9e", features = ["derive"] }
 rand = "0.8.5"
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider", "query"] }
 rust_decimal = "1"

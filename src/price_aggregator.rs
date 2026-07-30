@@ -305,9 +305,12 @@ impl PriceAggregator {
 
         let mut prices = vec![];
         for collateral in &collateral {
-            let collateral_digits = self.get_digits(collateral);
-            let Some(p) = converter.value_in_usd(collateral) else {
-                bail!("could not compute price for collateral {collateral}");
+            if !collateral.enabled {
+                prices.push(BigRational::new(BigInt::ZERO, BigInt::ONE));
+            }
+            let collateral_digits = self.get_digits(&collateral.name);
+            let Some(p) = converter.value_in_usd(&collateral.name) else {
+                bail!("could not compute price for collateral {}", collateral.name);
             };
             let p_scaled = p * BigInt::from(10i64.pow(synth_digits))
                 / BigInt::from(10i64.pow(collateral_digits));
@@ -315,10 +318,10 @@ impl PriceAggregator {
         }
 
         // track prices before smoothing, to measure the effect of smoothing
-        for (collateral_name, collateral_price) in collateral.iter().zip(prices.iter()) {
+        for (collateral, collateral_price) in collateral.iter().zip(prices.iter()) {
             let price = collateral_price.to_f64().expect("infallible");
             debug!(
-                collateral_name,
+                collateral_name = collateral.name,
                 synthetic_name = synth.name,
                 histogram.raw_collateral_price = price,
                 "pre-smoothing price metrics",
@@ -329,10 +332,10 @@ impl PriceAggregator {
         let prices = self.apply_synth_gema(&synth.name, prices);
 
         // track metrics for the different prices
-        for (collateral_name, collateral_price) in collateral.iter().zip(prices.iter()) {
+        for (collateral, collateral_price) in collateral.iter().zip(prices.iter()) {
             let price = collateral_price.to_f64().expect("infallible");
             debug!(
-                collateral_name,
+                collateral_name = collateral.name,
                 synthetic_name = synth.name,
                 histogram.collateral_price = price,
                 "price metrics",
@@ -346,7 +349,7 @@ impl PriceAggregator {
         Ok(SyntheticPriceData {
             price: synth_price,
             feed: SyntheticPriceFeed {
-                collateral_names: Some(collateral),
+                collateral_names: Some(collateral.iter().map(|c| c.name.clone()).collect()),
                 collateral_prices,
                 synthetic: synth.name.clone(),
                 denominator,
