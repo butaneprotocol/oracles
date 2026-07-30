@@ -5,7 +5,7 @@ use num_bigint::BigInt;
 use num_rational::BigRational;
 use num_traits::{Inv, One, Signed, ToPrimitive, Zero};
 use serde::Serialize;
-use tracing::warn;
+use tracing::debug;
 
 use crate::{
     config::{CurrencyConfig, SyntheticConfig},
@@ -158,7 +158,7 @@ impl<'a> TokenPriceConverter<'a> {
             if divergence > max_divergence {
                 let median_price = median_price.to_f64().expect("infallible");
                 let source_price = price.to_f64().expect("infallible");
-                warn!(
+                debug!(
                     token,
                     source, median_price, source_price, "Ignoring outlier price"
                 );

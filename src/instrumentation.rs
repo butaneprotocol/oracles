@@ -4,7 +4,11 @@ use anyhow::{Context, Result};
 use futures::future::join_all;
 use opentelemetry::{KeyValue, global, trace::TracerProvider};
 use opentelemetry_otlp::{MetricExporter, SpanExporter, WithExportConfig, WithTonicConfig};
-use opentelemetry_sdk::{Resource, error::OTelSdkResult, metrics, trace};
+use opentelemetry_sdk::{
+    Resource,
+    error::{OTelSdkError, OTelSdkResult},
+    metrics, trace,
+};
 use tonic::{
     metadata::{MetadataKey, MetadataMap},
     transport::ClientTlsConfig,
@@ -168,15 +172,47 @@ impl MultiplexingExporterProvider {
     }
 }
 
+fn combine_results(results: impl IntoIterator<Item = OTelSdkResult>) -> OTelSdkResult {
+    let mut result = Ok(());
+    for r in results {
+        match (&result, &r) {
+            (Ok(()), _) => result = r,
+            (Err(OTelSdkError::AlreadyShutdown), Err(_)) => result = r,
+            (
+                Err(OTelSdkError::Timeout(_)),
+                Err(OTelSdkError::Timeout(_) | OTelSdkError::InternalFailure(_)),
+            ) => result = r,
+            (Err(OTelSdkError::InternalFailure(_)), Err(OTelSdkError::InternalFailure(_))) => {
+                result = r
+            }
+            _ => {}
+        }
+    }
+    result
+}
+
 #[derive(Debug)]
 struct MultiplexingSpanExporter(Vec<SpanExporter>);
 impl trace::SpanExporter for MultiplexingSpanExporter {
     async fn export(&self, batch: Vec<trace::SpanData>) -> OTelSdkResult {
         let results = join_all(self.0.iter().map(|e| e.export(batch.clone()))).await;
-        for result in results {
-            result?;
+        combine_results(results)
+    }
+
+    fn shutdown_with_timeout(&self, timeout: Duration) -> OTelSdkResult {
+        let results = self.0.iter().map(|e| e.shutdown_with_timeout(timeout));
+        combine_results(results)
+    }
+
+    fn force_flush(&self) -> OTelSdkResult {
+        let results = self.0.iter().map(|e| e.force_flush());
+        combine_results(results)
+    }
+
+    fn set_resource(&mut self, resource: &Resource) {
+        for exporter in &mut self.0 {
+            exporter.set_resource(resource);
         }
-        Ok(())
     }
 }
 

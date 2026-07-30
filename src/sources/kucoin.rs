@@ -111,9 +111,11 @@ impl KucoinSource {
 
     async fn connect(&self) -> Result<(WebSocketStream<MaybeTlsStream<TcpStream>>, Duration)> {
         let res = self.client.post(REQUEST_TOKEN_URL).send().await?;
-        let parsed: RequestTokenResponse = res.json().await?;
-        let Some(server) = parsed
-            .data
+        let data = match res.json().await? {
+            RequestTokenResponse::Success { data } => data,
+            RequestTokenResponse::Failure { msg, code } => bail!("{code}: {msg}"),
+        };
+        let Some(server) = data
             .instance_servers
             .iter()
             .find(|s| s.protocol == "websocket")
@@ -123,7 +125,7 @@ impl KucoinSource {
         let ping_interval = Duration::from_millis(server.ping_interval);
         let (ws, _) = timeout(
             CONNECT_TIMEOUT,
-            connect_async(format!("{}?token={}", server.endpoint, parsed.data.token)),
+            connect_async(format!("{}?token={}", server.endpoint, data.token)),
         )
         .await??;
         Ok((ws, ping_interval))
@@ -166,8 +168,10 @@ struct KucoinResponseData {
 }
 
 #[derive(Deserialize)]
-struct RequestTokenResponse {
-    data: RequestTokenResponseData,
+#[serde(untagged)]
+enum RequestTokenResponse {
+    Success { data: RequestTokenResponseData },
+    Failure { msg: String, code: String },
 }
 
 #[derive(Deserialize)]

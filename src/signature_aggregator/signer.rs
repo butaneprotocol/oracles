@@ -16,7 +16,7 @@ use minicbor::{Decode, Encode};
 use rand::thread_rng;
 use rust_decimal::prelude::ToPrimitive;
 use tokio::sync::{mpsc, watch};
-use tracing::{Instrument, Span, info, info_span, instrument, warn};
+use tracing::{Instrument, Span, debug, info, info_span, instrument, warn};
 
 use crate::{
     cbor::{CborIdentifier, CborSignatureShare, CborSigningCommitments, CborSigningPackage},
@@ -473,40 +473,46 @@ impl Signer {
         for (synthetic, result) in
             choose_synth_feeds_to_sign(&request.synthetic_feeds, &my_synthetic_feeds)
         {
-            match result {
+            round_span.in_scope(|| match result {
                 ComparisonResult::Sign => {
                     feeds_to_sign.push(synthetic.to_string());
+                    debug!(
+                        histogram.sent_commitment = 1,
+                        synthetic, "commitment metrics"
+                    );
                 }
                 ComparisonResult::DoNotSign(reason) => {
-                    round_span.in_scope(|| {
-                        warn!(
-                            synthetic,
-                            error = reason,
-                            "Not sending commitment for this synthetic in this round"
-                        )
-                    });
+                    warn!(
+                        synthetic,
+                        error = reason,
+                        "Not sending commitment for this synthetic in this round"
+                    );
+                    debug!(
+                        histogram.sent_commitment = 0,
+                        synthetic, "commitment metrics"
+                    );
                 }
-            }
+            });
         }
 
         let my_generic_feeds = price_data.generics.clone();
         for (feed, result) in
             choose_generic_feeds_to_sign(&request.generic_feeds, &my_generic_feeds)
         {
-            match result {
+            round_span.in_scope(|| match result {
                 ComparisonResult::Sign => {
                     feeds_to_sign.push(feed.to_string());
+                    debug!(histogram.sent_commitment = 1, feed, "commitment metrics");
                 }
                 ComparisonResult::DoNotSign(reason) => {
-                    round_span.in_scope(|| {
-                        warn!(
-                            feed,
-                            error = reason,
-                            "Not sending commitment for this feed in this round"
-                        )
-                    });
+                    warn!(
+                        feed,
+                        error = reason,
+                        "Not sending commitment for this feed in this round"
+                    );
+                    debug!(histogram.sent_commitment = 0, feed, "commitment metrics");
                 }
-            }
+            });
         }
 
         // Send our commitment
@@ -758,6 +764,7 @@ impl Signer {
                 ComparisonResult::Sign => {
                     let package = synthetic_packages.remove(synthetic).unwrap();
                     packages.insert(synthetic.to_string(), package);
+                    debug!(histogram.sent_signature = 1, synthetic, "signature metrics");
                 }
                 ComparisonResult::DoNotSign(reason) => {
                     warn!(
@@ -765,6 +772,7 @@ impl Signer {
                         error = reason,
                         "Not signing this synthetic in this round"
                     );
+                    debug!(histogram.sent_signature = 0, synthetic, "signature metrics");
                 }
             }
         }
@@ -777,9 +785,11 @@ impl Signer {
                 ComparisonResult::Sign => {
                     let package = generic_packages.remove(feed).unwrap();
                     packages.insert(feed.to_string(), package);
+                    debug!(histogram.sent_signature = 0, feed, "signature metrics");
                 }
                 ComparisonResult::DoNotSign(reason) => {
                     warn!(feed, error = reason, "Not signing this feed in this round");
+                    debug!(histogram.sent_signature = 0, feed, "signature metrics");
                 }
             }
         }
@@ -1142,7 +1152,7 @@ mod tests {
 
         let signers: Vec<SignerOrchestrator> = shares
             .into_values()
-            .zip(prices.into_iter())
+            .zip(prices)
             .map(|(share, price_data)| {
                 let key = KeyPackage::try_from(share).unwrap();
                 let (_, price_source) = watch::channel(price_data);
