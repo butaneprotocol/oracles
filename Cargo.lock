@@ -1882,6 +1882,7 @@ dependencies = [
  "opentelemetry_sdk",
  "pallas-crypto",
  "pallas-primitives",
+ "plutus-parser",
  "rand 0.8.7",
  "reqwest",
  "rust_decimal",
@@ -2112,6 +2113,29 @@ checksum = "451913da69c775a56034ea8d9003d27ee8948e12443eae7c038ba100a4f21cb7"
 dependencies = [
  "der",
  "spki",
+]
+
+[[package]]
+name = "plutus-parser"
+version = "1.0.0"
+source = "git+https://github.com/SundaeSwap-finance/plutus-parser?rev=cb27b9e#cb27b9ec28ff5d47f877fdd32fd5e2025d4dba43"
+dependencies = [
+ "hex",
+ "indexmap",
+ "minicbor",
+ "pallas-primitives",
+ "plutus-parser-derive",
+ "thiserror",
+]
+
+[[package]]
+name = "plutus-parser-derive"
+version = "1.0.0"
+source = "git+https://github.com/SundaeSwap-finance/plutus-parser?rev=cb27b9e#cb27b9ec28ff5d47f877fdd32fd5e2025d4dba43"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.3",
 ]
 
 [[package]]
