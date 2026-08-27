@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use num_bigint::BigUint;
 use num_rational::{BigRational, Ratio};
-use num_traits::One;
+use num_traits::{One, Zero};
 
 pub struct GemaCalculator {
     periods: usize,
@@ -52,6 +52,10 @@ impl GemaCalculator {
                     // Reflect downturns immediately
                     return price;
                 }
+                if prev_price.is_zero() {
+                    // Price could only be zero if this currency was disabled, don't try smoothing after reenabling it
+                    return price;
+                }
                 (price * &curr_price_weight) + (prev_price * &prev_price_weight)
             })
             .collect()
@@ -96,6 +100,10 @@ impl GemaCalculator {
             // Reflect downturns immediately
             return price;
         }
+        if prev_price.is_zero() {
+            // Price could only be zero if this currency was disabled, don't try smoothing after reenabling it
+            return price;
+        }
         (price * curr_numer / curr_denom) + (prev_price * prev_numer / prev_denom)
     }
 }
@@ -124,6 +132,19 @@ mod tests {
 
         let prices = calculator.smooth_synthetic_price(round_duration, &prev_prices, curr_prices);
         assert_eq!(prices, vec![rational(3, 2), rational(1, 2)]);
+    }
+
+    #[test]
+    fn should_not_smooth_reenabled_prices() {
+        let periods = 2;
+        let round_duration = Duration::from_secs(5);
+        let calculator = GemaCalculator::new(periods, round_duration);
+
+        let prev_prices = vec![rational(0, 1), rational(1, 1)];
+        let curr_prices = vec![rational(2, 1), rational(1, 2)];
+
+        let prices = calculator.smooth_synthetic_price(round_duration, &prev_prices, curr_prices);
+        assert_eq!(prices, vec![rational(2, 1), rational(1, 2)]);
     }
 
     #[test]
