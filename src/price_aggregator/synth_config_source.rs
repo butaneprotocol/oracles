@@ -138,7 +138,11 @@ impl SyntheticConfigSource {
                         });
                         continue;
                     }
-                    let asset_id = format!("{}.{}", ac.policy_id, ac.asset_name);
+                    let asset_id = format!(
+                        "{}.{}",
+                        hex::encode(ac.policy_id),
+                        hex::encode(ac.asset_name)
+                    );
                     let Some(name) = asset_names.get(&asset_id) else {
                         fail!(true, "unrecognized asset id {asset_id}");
                     };
@@ -252,14 +256,119 @@ struct UpdateConfigError {
     clear: bool,
 }
 
-#[derive(AsPlutus)]
+#[derive(AsPlutus, PartialEq, Eq, Debug)]
 struct AssetClass {
-    policy_id: String,
-    asset_name: String,
+    policy_id: Vec<u8>,
+    asset_name: Vec<u8>,
 }
 
 #[derive(Clone)]
 pub struct Collateral {
     pub name: String,
     pub enabled: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn asset_class(policy_id: &str, asset_name: &str) -> AssetClass {
+        AssetClass {
+            policy_id: hex::decode(policy_id).unwrap(),
+            asset_name: hex::decode(asset_name).unwrap(),
+        }
+    }
+
+    #[test]
+    fn should_parse_nft() {
+        let midas_nft_hex = "d8799fd8799fd8799f9fd8799f4040ffd8799f581c016be5325fd988fea98ad422fcfd53e5352cacfced5c106a932a35a44342544effd8799f581c279c909f348e533da5808898f87f9a14bb2c3dfbbacccd631d927a3f44534e454bffd8799f581c29d222ce763455e3d7a09a665ce554f00ac89d2e99a1a83d267170c6434d494effd8799f581c577f0b1342f8f8f4aed3388b80a8535812950c7a892495c0ecdf0f1e480014df10464c4454ffd8799f581c5d16cc1a177b5d9ba9cfa9793b07e60f1fb70fea1f8aef064415d11443494147ffd8799f581c8db269c3ec630e06ae29f74bc39edd1f87c819f1056206e879a1cd614c5368656e4d6963726f555344ffd8799f581c8fef2d34078659493ce161a6c7fba4b56afefa8535296a5743f695874441414441ffd8799f581c9a9693a9a37912a5097918f97918d15240c92ab729a0b7c4aa144d774653554e444145ffd8799f581c9abf0afd2f236a19f2842d502d0450cbcd9c79f123a9708f96fd9b9644454e4353ffd8799f581cda8c30857834c6ae7203935b89278c532b3995245295456f993e1d24424c51ffd8799f581cf66d78b4a3cb3d37afa0ec36461e51ecbde00f26c8f0a68f94b698804469455448ffff9f0c0f0f0f120f0c120f12120dff0a1a02625a009f9f3b000001952830e967190384ff9f00190384ffff9f192710191388191388191388190bb8191388191f400119138801191388190bb8ff193a98190fa01926de1913889f9f3b000001952830e9671901f4ffffffffff";
+        let midas_nft_bytes = hex::decode(midas_nft_hex).unwrap();
+        let midas_nft_datum: PlutusData =
+            minicbor::Decoder::new(&midas_nft_bytes).decode().unwrap();
+
+        let assets = extract_collateral_assets(midas_nft_datum).unwrap();
+        assert_eq!(
+            assets,
+            vec![
+                (asset_class("", ""), true),
+                (
+                    asset_class(
+                        "016be5325fd988fea98ad422fcfd53e5352cacfced5c106a932a35a4",
+                        "42544e"
+                    ),
+                    true
+                ),
+                (
+                    asset_class(
+                        "279c909f348e533da5808898f87f9a14bb2c3dfbbacccd631d927a3f",
+                        "534e454b"
+                    ),
+                    true
+                ),
+                (
+                    asset_class(
+                        "29d222ce763455e3d7a09a665ce554f00ac89d2e99a1a83d267170c6",
+                        "4d494e"
+                    ),
+                    true
+                ),
+                (
+                    asset_class(
+                        "577f0b1342f8f8f4aed3388b80a8535812950c7a892495c0ecdf0f1e",
+                        "0014df10464c4454"
+                    ),
+                    true
+                ),
+                (
+                    asset_class(
+                        "5d16cc1a177b5d9ba9cfa9793b07e60f1fb70fea1f8aef064415d114",
+                        "494147"
+                    ),
+                    true
+                ),
+                (
+                    asset_class(
+                        "8db269c3ec630e06ae29f74bc39edd1f87c819f1056206e879a1cd61",
+                        "5368656e4d6963726f555344"
+                    ),
+                    true
+                ),
+                (
+                    asset_class(
+                        "8fef2d34078659493ce161a6c7fba4b56afefa8535296a5743f69587",
+                        "41414441"
+                    ),
+                    true
+                ),
+                (
+                    asset_class(
+                        "9a9693a9a37912a5097918f97918d15240c92ab729a0b7c4aa144d77",
+                        "53554e444145"
+                    ),
+                    true
+                ),
+                (
+                    asset_class(
+                        "9abf0afd2f236a19f2842d502d0450cbcd9c79f123a9708f96fd9b96",
+                        "454e4353"
+                    ),
+                    true
+                ),
+                (
+                    asset_class(
+                        "da8c30857834c6ae7203935b89278c532b3995245295456f993e1d24",
+                        "4c51"
+                    ),
+                    true
+                ),
+                (
+                    asset_class(
+                        "f66d78b4a3cb3d37afa0ec36461e51ecbde00f26c8f0a68f94b69880",
+                        "69455448"
+                    ),
+                    true
+                ),
+            ]
+        );
+    }
 }
