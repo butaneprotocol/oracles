@@ -183,7 +183,6 @@ impl SyntheticConfigSource {
         self.next_refresh = now + Duration::from_secs(30);
     }
 
-    // TODO: report "disabled" collateral entries, make the node just report their prices as 0
     pub fn synthetic_collateral(&self, name: &str) -> Option<Vec<Collateral>> {
         let state = self.collateral.get(name)?;
         if let Some(collateral) = &state.collateral {
