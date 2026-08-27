@@ -19,6 +19,7 @@ use tracing::{debug, error, warn};
 use crate::{
     config::{OracleConfig, SyntheticConfig},
     health::{HealthSink, HealthStatus, Origin},
+    price_aggregator::synth_config_source::Collateral,
     price_feed::{
         GenericPriceFeed, IntervalBound, PriceData, SyntheticPriceData, SyntheticPriceFeed,
         Validity,
@@ -305,16 +306,12 @@ impl PriceAggregator {
 
         let mut prices = vec![];
         for collateral in &collateral {
-            if !collateral.enabled {
-                prices.push(BigRational::new(BigInt::ZERO, BigInt::ONE));
-            }
-            let collateral_digits = self.get_digits(&collateral.name);
-            let Some(p) = converter.value_in_usd(&collateral.name) else {
-                bail!("could not compute price for collateral {}", collateral.name);
-            };
-            let p_scaled = p * BigInt::from(10i64.pow(synth_digits))
-                / BigInt::from(10i64.pow(collateral_digits));
-            prices.push(p_scaled / &synth_price);
+            prices.push(self.compute_collateral_price(
+                collateral,
+                converter,
+                synth_digits,
+                &synth_price,
+            )?);
         }
 
         // track prices before smoothing, to measure the effect of smoothing
@@ -359,6 +356,25 @@ impl PriceAggregator {
                 },
             },
         })
+    }
+
+    fn compute_collateral_price(
+        &self,
+        collateral: &Collateral,
+        converter: &TokenPriceConverter,
+        synth_digits: u32,
+        synth_price: &BigRational,
+    ) -> Result<BigRational> {
+        if !collateral.enabled {
+            return Ok(BigRational::new(BigInt::ZERO, BigInt::ONE));
+        }
+        let collateral_digits = self.get_digits(&collateral.name);
+        let Some(p) = converter.value_in_usd(&collateral.name) else {
+            bail!("could not compute price for collateral {}", collateral.name);
+        };
+        let p_scaled =
+            p * BigInt::from(10i64.pow(synth_digits)) / BigInt::from(10i64.pow(collateral_digits));
+        Ok(p_scaled / synth_price)
     }
 
     fn compute_generic_payload(
@@ -523,7 +539,7 @@ impl SourcePriceReporter {
 }
 
 fn normalize(prices: &[BigRational], max_bits: u64) -> (Vec<BigUint>, BigUint) {
-    assert!(prices.iter().all(|p| p.is_positive()));
+    assert!(prices.iter().all(|p| !p.is_negative()));
     let denominator = prices.iter().fold(BigInt::one(), |acc, p| acc * p.denom());
     let normalized_numerators: Vec<_> = prices
         .iter()
@@ -634,6 +650,26 @@ mod tests {
                 vec![BigUint::one(), BigUint::one(), 2u128.into()],
                 BigUint::one() << 1023,
             ),
+            (collateral_prices, denominator),
+        );
+    }
+
+    #[test]
+    fn normalize_should_allow_zero_values() {
+        let prices = [decimal_rational(100, 0), decimal_rational(0, 0)];
+        let (collateral_prices, denominator) = normalize(&prices, 1024);
+        assert_eq!(
+            (vec![100u128.into(), 0u128.into()], BigUint::one()),
+            (collateral_prices, denominator),
+        );
+    }
+
+    #[test]
+    fn normalize_should_allow_all_zero_values() {
+        let prices = [decimal_rational(0, 0), decimal_rational(0, 0)];
+        let (collateral_prices, denominator) = normalize(&prices, 1024);
+        assert_eq!(
+            (vec![0u128.into(), 0u128.into()], BigUint::one()),
             (collateral_prices, denominator),
         );
     }
