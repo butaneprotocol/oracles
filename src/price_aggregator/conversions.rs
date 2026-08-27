@@ -878,20 +878,29 @@ mod tests {
     fn value_in_usd_should_ignore_source_with_tvl_below_threshold() {
         let source_prices = vec![
             (
-                "price for SUNDAE in USD".into(),
+                "price for SUNDAE in ADA".into(),
                 PriceInfo {
                     token: "SUNDAE".into(),
-                    unit: "USD".into(),
+                    unit: "ADA".into(),
                     value: Decimal::new(100, 0),
-                    reliability: Decimal::new(100, 0),
+                    reliability: Decimal::new(1000, 0),
                 },
             ),
             (
-                "price for SUNDAE in USD".into(),
+                "price for SUNDAE in ADA".into(),
                 PriceInfo {
                     token: "SUNDAE".into(),
-                    unit: "USD".into(),
+                    unit: "ADA".into(),
                     value: Decimal::new(1000, 0),
+                    reliability: Decimal::new(1667, 0),
+                },
+            ),
+            (
+                "price for ADA in USD".into(),
+                PriceInfo {
+                    token: "ADA".into(),
+                    unit: "USD".into(),
+                    value: Decimal::new(6, 1),
                     reliability: Decimal::new(1000, 0),
                 },
             ),
@@ -915,7 +924,7 @@ mod tests {
 
         assert_eq!(
             converter.value_in_usd("SUNDAE"),
-            Some(decimal_rational(1000, 0))
+            Some(decimal_rational(600, 0))
         );
     }
 

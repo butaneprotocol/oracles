@@ -371,4 +371,27 @@ mod tests {
             ]
         );
     }
+
+    #[test]
+    fn should_parse_nft_with_disabled_asset() {
+        let fake_nft_hex = "d8799fd8799fd8799f9fd8799f4040ffd8799f581c016be5325fd988fea98ad422fcfd53e5352cacfced5c106a932a35a44342544effff9f0c00ff0a1a02625a009f9f3b000001952830e967190384ff9f00190384ffff9f192710191388ff193a98190fa01926de1913889f9f3b000001952830e9671901f4ffffffffff";
+        let fake_nft_bytes = hex::decode(fake_nft_hex).unwrap();
+        let fake_nft_datum: PlutusData =
+            minicbor::Decoder::new(&fake_nft_bytes).decode().unwrap();
+
+        let assets = extract_collateral_assets(fake_nft_datum).unwrap();
+        assert_eq!(
+            assets,
+            vec![
+                (asset_class("", ""), true),
+                (
+                    asset_class(
+                        "016be5325fd988fea98ad422fcfd53e5352cacfced5c106a932a35a4",
+                        "42544e"
+                    ),
+                    false
+                ),
+            ],
+        );
+    }
 }
