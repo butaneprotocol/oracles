@@ -396,6 +396,8 @@ pub struct CurrencyConfig {
     pub name: String,
     pub asset_id: Option<String>,
     pub digits: u32,
+    /// The minimum TVL, in whole USD, a source must report before its price for
+    /// this currency is considered.
     #[serde(default)]
     pub min_tvl: Decimal,
 }
