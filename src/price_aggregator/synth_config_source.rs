@@ -207,46 +207,49 @@ impl SyntheticConfigSource {
 
 // input is a MonoDatum from the butane Aiken definition
 fn extract_collateral_assets(datum: PlutusData) -> Result<Vec<(AssetClass, bool)>> {
-    // extract the ParamsWrapper
-    let [wrapper] = decode_struct(datum, 0)?;
-    // extract the LiveParams
-    let [params] = decode_struct(wrapper, 0)?;
-    // extract the collateral assets and weights from the LiveParams
-    let [collateral_assets, weights] = decode_struct(params, 0)?;
-
-    let assets: Vec<AssetClass> = AsPlutus::from_plutus(collateral_assets)?;
-    let weights: Vec<u64> = AsPlutus::from_plutus(weights)?;
-    if assets.len() != weights.len() {
+    let params = MonoDatum::from_plutus(datum)?.wrapper.live_params;
+    if params.tag != 121 {
         bail!(
-            "mismatched number of assets ({}) and weights ({})",
-            assets.len(),
-            weights.len()
+            "datum has unexpected variant (expected 121, got {})",
+            params.tag
         );
     }
-    let enabled = weights.iter().map(|w| *w > 0);
+    if params.fields.len() == 11 {
+        extract_v1_collateral_assets(params.fields.to_vec())
+    } else if params.fields.len() == 15 {
+        extract_v2_collateral_assets(params.fields.to_vec())
+    } else {
+        bail!("datum has unexpected field count ({})", params.fields.len())
+    }
+}
+
+fn extract_v1_collateral_assets(fields: Vec<PlutusData>) -> Result<Vec<(AssetClass, bool)>> {
+    let assets: Vec<AssetClass> = AsPlutus::from_plutus(fields[0].clone())?;
+    let proportions: Vec<u64> = AsPlutus::from_plutus(fields[5].clone())?;
+    if assets.len() != proportions.len() {
+        bail!(
+            "mismatched number of assets ({}) and proportions ({})",
+            assets.len(),
+            proportions.len(),
+        );
+    }
+    // in v1 this field can't be set to 0, so treat 1 as disabled
+    let enabled = proportions.iter().map(|p| *p > 1);
     Ok(assets.into_iter().zip(enabled).collect())
 }
 
-fn decode_struct<const N: usize>(datum: PlutusData, variant: u64) -> Result<[PlutusData; N]> {
-    let PlutusData::Constr(Constr { tag, fields, .. }) = datum else {
-        bail!("datum is not a struct");
-    };
-    if tag != variant + 121 {
+fn extract_v2_collateral_assets(fields: Vec<PlutusData>) -> Result<Vec<(AssetClass, bool)>> {
+    let assets: Vec<AssetClass> = AsPlutus::from_plutus(fields[0].clone())?;
+    let proportions: Vec<BasisPoints> = AsPlutus::from_plutus(fields[4].clone())?;
+    if assets.len() != proportions.len() {
         bail!(
-            "datum has unexpected variant (expected {}, got {})",
-            variant + 121,
-            tag
+            "mismatched number of assets ({}) and proportions ({})",
+            assets.len(),
+            proportions.len(),
         );
     }
-    fields
-        .to_vec()
-        .into_iter()
-        .take(N)
-        .collect::<Vec<_>>()
-        .try_into()
-        .map_err(|e: Vec<_>| {
-            anyhow::anyhow!("too few elements (expected at least {N}, got {})", e.len())
-        })
+    let enabled = proportions.iter().map(|p| p.points > 0);
+    Ok(assets.into_iter().zip(enabled).collect())
 }
 
 struct UpdateConfigError {
@@ -256,9 +259,25 @@ struct UpdateConfigError {
 }
 
 #[derive(AsPlutus, PartialEq, Eq, Debug)]
+struct MonoDatum {
+    wrapper: ParamsWrapper,
+}
+
+#[derive(AsPlutus, PartialEq, Eq, Debug)]
+struct ParamsWrapper {
+    // opaque, because we have to count the fields to differentiate v1 and v2
+    live_params: Constr<PlutusData>,
+}
+
+#[derive(AsPlutus, PartialEq, Eq, Debug)]
 struct AssetClass {
     policy_id: Vec<u8>,
     asset_name: Vec<u8>,
+}
+
+#[derive(AsPlutus, PartialEq, Eq, Debug)]
+struct BasisPoints {
+    points: u64,
 }
 
 #[derive(Clone)]
@@ -279,8 +298,8 @@ mod tests {
     }
 
     #[test]
-    fn should_parse_nft() {
-        let midas_nft_hex = "d8799fd8799fd8799f9fd8799f4040ffd8799f581c016be5325fd988fea98ad422fcfd53e5352cacfced5c106a932a35a44342544effd8799f581c279c909f348e533da5808898f87f9a14bb2c3dfbbacccd631d927a3f44534e454bffd8799f581c29d222ce763455e3d7a09a665ce554f00ac89d2e99a1a83d267170c6434d494effd8799f581c577f0b1342f8f8f4aed3388b80a8535812950c7a892495c0ecdf0f1e480014df10464c4454ffd8799f581c5d16cc1a177b5d9ba9cfa9793b07e60f1fb70fea1f8aef064415d11443494147ffd8799f581c8db269c3ec630e06ae29f74bc39edd1f87c819f1056206e879a1cd614c5368656e4d6963726f555344ffd8799f581c8fef2d34078659493ce161a6c7fba4b56afefa8535296a5743f695874441414441ffd8799f581c9a9693a9a37912a5097918f97918d15240c92ab729a0b7c4aa144d774653554e444145ffd8799f581c9abf0afd2f236a19f2842d502d0450cbcd9c79f123a9708f96fd9b9644454e4353ffd8799f581cda8c30857834c6ae7203935b89278c532b3995245295456f993e1d24424c51ffd8799f581cf66d78b4a3cb3d37afa0ec36461e51ecbde00f26c8f0a68f94b698804469455448ffff9f0c0f0f0f120f0c120f12120dff0a1a02625a009f9f3b000001952830e967190384ff9f00190384ffff9f192710191388191388191388190bb8191388191f400119138801191388190bb8ff193a98190fa01926de1913889f9f3b000001952830e9671901f4ffffffffff";
+    fn should_parse_v1_nft() {
+        let midas_nft_hex = "d8799fd8799fd8799f9fd8799f4040ffd8799f581c016be5325fd988fea98ad422fcfd53e5352cacfced5c106a932a35a44342544effd8799f581c279c909f348e533da5808898f87f9a14bb2c3dfbbacccd631d927a3f44534e454bffd8799f581c29d222ce763455e3d7a09a665ce554f00ac89d2e99a1a83d267170c6434d494effd8799f581c577f0b1342f8f8f4aed3388b80a8535812950c7a892495c0ecdf0f1e480014df10464c4454ffd8799f581c5d16cc1a177b5d9ba9cfa9793b07e60f1fb70fea1f8aef064415d11443494147ffd8799f581c8db269c3ec630e06ae29f74bc39edd1f87c819f1056206e879a1cd614c5368656e4d6963726f555344ffd8799f581c8fef2d34078659493ce161a6c7fba4b56afefa8535296a5743f695874441414441ffd8799f581c9a9693a9a37912a5097918f97918d15240c92ab729a0b7c4aa144d774653554e444145ffd8799f581c9abf0afd2f236a19f2842d502d0450cbcd9c79f123a9708f96fd9b9644454e4353ffd8799f581cda8c30857834c6ae7203935b89278c532b3995245295456f993e1d24424c51ffd8799f581cf66d78b4a3cb3d37afa0ec36461e51ecbde00f26c8f0a68f94b698804469455448ffff9f0c0f0f0f120f0c120f12120dff0a1a02625a009f9f3b000001952830e967190384ff9f00190384ffff9f192710191388191388191388190bb8191388191f40190bb8191388190bb8191388190bb8ff193a98190fa01926de1913889f9f3b000001952830e9671901f4ffffffffff";
         let midas_nft_bytes = hex::decode(midas_nft_hex).unwrap();
         let midas_nft_datum: PlutusData =
             minicbor::Decoder::new(&midas_nft_bytes).decode().unwrap();
@@ -372,8 +391,8 @@ mod tests {
     }
 
     #[test]
-    fn should_parse_nft_with_disabled_asset() {
-        let fake_nft_hex = "d8799fd8799fd8799f9fd8799f4040ffd8799f581c016be5325fd988fea98ad422fcfd53e5352cacfced5c106a932a35a44342544effff9f0c00ff0a1a02625a009f9f3b000001952830e967190384ff9f00190384ffff9f192710191388ff193a98190fa01926de1913889f9f3b000001952830e9671901f4ffffffffff";
+    fn should_parse_v1_nft_with_disabled_asset() {
+        let fake_nft_hex = "d8799fd8799fd8799f9fd8799f4040ffd8799f581c016be5325fd988fea98ad422fcfd53e5352cacfced5c106a932a35a44342544effff9f0c0fff0a1a02625a009f9f3b000001952830e967190384ff9f00190384ffff9f19271001ff193a98190fa01926de1913889f9f3b000001952830e9671901f4ffffffffff";
         let fake_nft_bytes = hex::decode(fake_nft_hex).unwrap();
         let fake_nft_datum: PlutusData = minicbor::Decoder::new(&fake_nft_bytes).decode().unwrap();
 
@@ -386,6 +405,121 @@ mod tests {
                     asset_class(
                         "016be5325fd988fea98ad422fcfd53e5352cacfced5c106a932a35a4",
                         "42544e"
+                    ),
+                    false
+                ),
+            ],
+        );
+    }
+
+    #[test]
+    fn should_parse_v2_nft() {
+        let midas_nft_hex = "d8799fd8799fd8799f9fd8799f4040ffd8799f581c39c520d0627aafa728f7e4dd10142b77c257813c36f57e2cb88f72a5480014df10464c4454ffd8799f581c39c520d0627aafa728f7e4dd10142b77c257813c36f57e2cb88f72a54441414441ffd8799f581c39c520d0627aafa728f7e4dd10142b77c257813c36f57e2cb88f72a54342544effd8799f581c39c520d0627aafa728f7e4dd10142b77c257813c36f57e2cb88f72a544454e4353ffd8799f581c39c520d0627aafa728f7e4dd10142b77c257813c36f57e2cb88f72a543494147ffd8799f581c39c520d0627aafa728f7e4dd10142b77c257813c36f57e2cb88f72a5424c51ffd8799f581c39c520d0627aafa728f7e4dd10142b77c257813c36f57e2cb88f72a5434d494effd8799f581c39c520d0627aafa728f7e4dd10142b77c257813c36f57e2cb88f72a544534e454bffd8799f581c39c520d0627aafa728f7e4dd10142b77c257813c36f57e2cb88f72a54653554e444145ffd8799f581c39c520d0627aafa728f7e4dd10142b77c257813c36f57e2cb88f72a54c5368656e4d6963726f555344ffd8799f581c39c520d0627aafa728f7e4dd10142b77c257813c36f57e2cb88f72a54469455448ffff9f0c12120f120f120f0f0f0c0dff0a1a02625a009fd8799f192710ffd8799f190bb8ffd8799f190bb8ffd8799f191388ffd8799f1903e8ffd8799f191388ffd8799f191388ffd8799f191388ffd8799f191388ffd8799f191388ffd8799f191f40ffd8799f190bb8ffffd8799f193a98ffd8799f190fa0ffd8799f1926deffd8799fd8799f191388ffff19ea60d8799f1901f4ffd8799f1905dcff9fd8799fd8799f4040ffd8799f0101ffffffd8799f01ffd8799f581cd3741b9582d28b2e90e20b8f2c28273f0afb1b555eed1f1847307d71ffffffff";
+        let midas_nft_bytes = hex::decode(midas_nft_hex).unwrap();
+        let midas_nft_datum: PlutusData =
+            minicbor::Decoder::new(&midas_nft_bytes).decode().unwrap();
+
+        let assets = extract_collateral_assets(midas_nft_datum).unwrap();
+        assert_eq!(
+            assets,
+            vec![
+                (asset_class("", ""), true),
+                (
+                    asset_class(
+                        "39c520d0627aafa728f7e4dd10142b77c257813c36f57e2cb88f72a5",
+                        "0014df10464c4454"
+                    ),
+                    true
+                ),
+                (
+                    asset_class(
+                        "39c520d0627aafa728f7e4dd10142b77c257813c36f57e2cb88f72a5",
+                        "41414441"
+                    ),
+                    true
+                ),
+                (
+                    asset_class(
+                        "39c520d0627aafa728f7e4dd10142b77c257813c36f57e2cb88f72a5",
+                        "42544e"
+                    ),
+                    true
+                ),
+                (
+                    asset_class(
+                        "39c520d0627aafa728f7e4dd10142b77c257813c36f57e2cb88f72a5",
+                        "454e4353"
+                    ),
+                    true
+                ),
+                (
+                    asset_class(
+                        "39c520d0627aafa728f7e4dd10142b77c257813c36f57e2cb88f72a5",
+                        "494147"
+                    ),
+                    true
+                ),
+                (
+                    asset_class(
+                        "39c520d0627aafa728f7e4dd10142b77c257813c36f57e2cb88f72a5",
+                        "4c51"
+                    ),
+                    true
+                ),
+                (
+                    asset_class(
+                        "39c520d0627aafa728f7e4dd10142b77c257813c36f57e2cb88f72a5",
+                        "4d494e"
+                    ),
+                    true
+                ),
+                (
+                    asset_class(
+                        "39c520d0627aafa728f7e4dd10142b77c257813c36f57e2cb88f72a5",
+                        "534e454b"
+                    ),
+                    true
+                ),
+                (
+                    asset_class(
+                        "39c520d0627aafa728f7e4dd10142b77c257813c36f57e2cb88f72a5",
+                        "53554e444145"
+                    ),
+                    true
+                ),
+                (
+                    asset_class(
+                        "39c520d0627aafa728f7e4dd10142b77c257813c36f57e2cb88f72a5",
+                        "5368656e4d6963726f555344"
+                    ),
+                    true
+                ),
+                (
+                    asset_class(
+                        "39c520d0627aafa728f7e4dd10142b77c257813c36f57e2cb88f72a5",
+                        "69455448"
+                    ),
+                    true
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn should_parse_v2_nft_with_disabled_asset() {
+        let fake_nft_hex = "d8799fd8799fd8799f9fd8799f4040ffd8799f581c39c520d0627aafa728f7e4dd10142b77c257813c36f57e2cb88f72a5480014df10464c4454ffff9f0c12ff0a1a02625a009fd8799f192710ffd8799f00ffffd8799f193a98ffd8799f190fa0ffd8799f1926deffd8799fd8799f191388ffff19ea60d8799f1901f4ffd8799f1905dcff9fd8799fd8799f4040ffd8799f0101ffffffd8799f01ffd8799f581cd3741b9582d28b2e90e20b8f2c28273f0afb1b555eed1f1847307d71ffffffff";
+        let fake_nft_bytes = hex::decode(fake_nft_hex).unwrap();
+        let fake_nft_datum: PlutusData = minicbor::Decoder::new(&fake_nft_bytes).decode().unwrap();
+
+        let assets = extract_collateral_assets(fake_nft_datum).unwrap();
+        assert_eq!(
+            assets,
+            vec![
+                (asset_class("", ""), true),
+                (
+                    asset_class(
+                        "39c520d0627aafa728f7e4dd10142b77c257813c36f57e2cb88f72a5",
+                        "0014df10464c4454"
                     ),
                     false
                 ),
