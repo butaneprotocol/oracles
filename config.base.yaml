@@ -28,8 +28,6 @@ synthetics:
         - BTN
         - SNEK
         - MIN
-        - LENFI
-        - ENCS
       nft: 00000000000410c2d9e01e8ec78ab1dc6bbc383fae76cbe2689beb02.705f55534462
   - name: MIDAS
     digits: 9
