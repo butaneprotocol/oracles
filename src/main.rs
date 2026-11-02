@@ -1,11 +1,11 @@
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
 use anyhow::Result;
 use clap::Parser;
 use oracles::{
     api::APIServer,
     config::{OracleConfig, load_config},
-    dkg,
+    dkg::Keygen,
     health::{HealthServer, HealthSink},
     instrumentation,
     network::Network,
@@ -18,28 +18,30 @@ use oracles::{
 use tokio::{
     sync::watch,
     task::{JoinError, JoinSet},
-    time::sleep,
 };
-use tracing::{info, info_span, warn};
+use tracing::{error, info, info_span, warn};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
-    #[clap(long, default_value_t = false)]
-    debug: bool,
     #[clap(short, long)]
     config_file: Vec<String>,
 }
 
-struct Node {
+struct OracleNode {
     api_server: APIServer,
-    health_server: HealthServer,
-    health_sink: HealthSink,
-    network: Network,
     raft: Raft,
     price_aggregator: PriceAggregator,
     signature_aggregator: SignatureAggregator,
     publisher: Publisher,
+}
+
+struct Node {
+    health_server: HealthServer,
+    health_sink: HealthSink,
+    network: Network,
+    oracle: Option<OracleNode>,
+    keygen: Option<Keygen>,
     config: Arc<OracleConfig>,
 }
 
@@ -50,7 +52,6 @@ impl Node {
             synthetics: vec![],
             generics: vec![],
         });
-        let (price_audit_sink, price_audit_source) = watch::channel(vec![]);
         let (raft_client, raft_source) = RaftClient::new();
 
         let (health_server, health_sink) = HealthServer::new(
@@ -63,46 +64,63 @@ impl Node {
         // Construct a peer-to-peer network that can connect to peers, and dispatch messages to the correct state machine
         let mut network = Network::new(&config.network, health_sink.clone());
 
-        let raft = Raft::new(
-            &config,
-            &mut network,
-            leader_sink,
-            price_source.clone(),
-            raft_source,
-        );
+        let oracle = if config.frost_address.is_some() {
+            let (price_audit_sink, price_audit_source) = watch::channel(vec![]);
 
-        let (signature_aggregator, payload_source) = if config.consensus {
-            SignatureAggregator::consensus(
+            let raft = Raft::new(
                 &config,
                 &mut network,
-                raft_client,
-                price_source,
-                leader_source,
-            )?
+                leader_sink,
+                price_source.clone(),
+                raft_source,
+            );
+
+            let (signature_aggregator, payload_source) = if config.consensus {
+                SignatureAggregator::consensus(
+                    &config,
+                    &mut network,
+                    raft_client,
+                    price_source,
+                    leader_source,
+                )?
+            } else {
+                SignatureAggregator::single(&config, raft_client, price_source, leader_source)?
+            };
+
+            let price_aggregator = PriceAggregator::new(
+                price_sink,
+                price_audit_sink,
+                payload_source.clone(),
+                config.clone(),
+            )?;
+
+            let api_server = APIServer::new(&config, payload_source.clone(), price_audit_source);
+
+            let publisher = Publisher::new(&config, payload_source)?;
+
+            Some(OracleNode {
+                api_server,
+                raft,
+                price_aggregator,
+                signature_aggregator,
+                publisher,
+            })
         } else {
-            SignatureAggregator::single(&config, raft_client, price_source, leader_source)?
+            None
         };
 
-        let price_aggregator = PriceAggregator::new(
-            price_sink,
-            price_audit_sink,
-            payload_source.clone(),
-            config.clone(),
-        )?;
-
-        let api_server = APIServer::new(&config, payload_source.clone(), price_audit_source);
-
-        let publisher = Publisher::new(&config, payload_source)?;
+        let keygen = if config.keygen.enabled {
+            Some(Keygen::new(&config, &mut network)?)
+        } else {
+            None
+        };
 
         Ok(Node {
-            api_server,
             health_server,
             health_sink,
             network,
-            raft,
-            price_aggregator,
-            signature_aggregator,
-            publisher,
+            oracle,
+            keygen,
             config,
         })
     }
@@ -116,33 +134,46 @@ impl Node {
             self.health_server.run(health_port).await;
         });
 
-        let api_port = self.config.api_port;
-        set.spawn(async move {
-            self.api_server.run(api_port).await;
-        });
+        if let Some(oracle) = self.oracle {
+            let api_port = self.config.api_port;
+            set.spawn(async move {
+                oracle.api_server.run(api_port).await;
+            });
 
-        // Spawn the abstract raft state machine, which internally uses network to maintain a Raft consensus
-        set.spawn(async move {
-            self.raft.handle_messages().await;
-        });
+            // Spawn the abstract raft state machine, which internally uses network to maintain a Raft consensus
+            set.spawn(async move {
+                oracle.raft.handle_messages().await;
+            });
+
+            let health = self.health_sink;
+            set.spawn(async move {
+                oracle.price_aggregator.run(&health).await;
+            });
+
+            let signature_aggregator = oracle.signature_aggregator;
+            set.spawn(async move {
+                signature_aggregator.run().await;
+            });
+
+            set.spawn(async move {
+                oracle.publisher.run().await;
+            });
+        }
+
+        if let Some(keygen) = self.keygen {
+            set.spawn(async move {
+                match keygen.run().await {
+                    Ok(()) => info!("DKG complete"),
+                    Err(err) => {
+                        error!("DKG failed: {err:#?}")
+                    }
+                };
+            });
+        }
 
         // Then spawn the peer to peer network, which will maintain a connection to each peer, and dispatch messages to the correct state machine
         set.spawn(async move {
             self.network.listen().await.unwrap();
-        });
-
-        let health = self.health_sink;
-        set.spawn(async move {
-            self.price_aggregator.run(&health).await;
-        });
-
-        let signature_aggregator = self.signature_aggregator;
-        set.spawn(async move {
-            signature_aggregator.run().await;
-        });
-
-        set.spawn(async move {
-            self.publisher.run().await;
         });
 
         // Then wait for all of them to complete (they won't)
@@ -151,42 +182,6 @@ impl Node {
         }
 
         Ok(())
-    }
-}
-
-async fn run<F>(node_factory: F) -> Result<()>
-where
-    F: Fn() -> Result<Node>,
-{
-    let node = node_factory()?;
-    node.start().await?;
-    Ok(())
-}
-
-async fn run_debug<F>(node_factory: F, restart_after: Duration) -> Result<()>
-where
-    F: Fn() -> Result<Node>,
-{
-    loop {
-        let mut set = JoinSet::new();
-
-        let node = node_factory()?;
-        set.spawn(async move {
-            // Runs forever
-            node.start().await.unwrap();
-        });
-
-        set.spawn_blocking(|| {
-            // runs until we get input
-            let mut line = String::new();
-            std::io::stdin().read_line(&mut line).unwrap();
-        });
-
-        set.join_next().await.unwrap()?;
-        set.abort_all();
-        info!("Node shutting down for {:?}", restart_after);
-        sleep(restart_after).await;
-        info!("Node restarting...");
     }
 }
 
@@ -199,8 +194,6 @@ async fn main() -> Result<()> {
     }
     let args = Args::parse();
 
-    let debug = args.debug;
-
     let config = Arc::new(load_config(&args.config_file)?);
 
     let _guard = instrumentation::init_tracing(&config.logs)?;
@@ -211,19 +204,8 @@ async fn main() -> Result<()> {
         }
     });
 
-    if config.keygen.enabled {
-        dkg::run(&config).await?;
-        return Ok(());
-    }
-
-    let node_factory = || Node::new(config.clone());
-
     // Start the node, which will spawn a bunch of threads and infinite loop
-    if debug {
-        let restart_after = config.timeout + Duration::from_secs(1);
-        run_debug(node_factory, restart_after).await?;
-    } else {
-        run(node_factory).await?;
-    }
+    let node = Node::new(config.clone())?;
+    node.start().await?;
     Ok(())
 }
