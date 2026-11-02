@@ -1,4 +1,4 @@
-use std::{collections::HashMap, net::SocketAddr, sync::Arc};
+use std::{collections::BTreeMap, net::SocketAddr, sync::Arc};
 
 use axum::{
     Json, Router,
@@ -45,6 +45,10 @@ enum HealthMessage {
         peer: NodeId,
         version: String,
     },
+    DkgStatus {
+        peer: NodeId,
+        status: String,
+    },
 }
 
 type HealthSource = mpsc::UnboundedReceiver<HealthMessage>;
@@ -55,6 +59,7 @@ struct HealthState {
     peers: Vec<Peer>,
     leader_source: Arc<watch::Receiver<RaftLeader>>,
     peer_versions: Arc<DashMap<NodeId, String>>,
+    peer_dkg_statuses: Arc<DashMap<NodeId, String>>,
     statuses: Arc<DashMap<Origin, HealthStatus>>,
     raft_client: Arc<RaftClient>,
 }
@@ -86,6 +91,13 @@ impl HealthSink {
             version: version.to_string(),
         };
         self.try_send(message, &format!("Could not track version for {}", peer));
+    }
+    pub fn update_dkg(&self, peer: &NodeId, status: String) {
+        let message = HealthMessage::DkgStatus {
+            peer: peer.clone(),
+            status,
+        };
+        self.try_send(message, &format!("Could not track DKG status for {}", peer));
     }
     fn try_send(&self, message: HealthMessage, error_desc: &str) {
         let Some(sink) = self.0.as_ref() else {
@@ -137,6 +149,7 @@ impl HealthServer {
                     leader_source: Arc::new(leader_source),
                     peers,
                     peer_versions: Arc::new(DashMap::new()),
+                    peer_dkg_statuses: Arc::new(DashMap::new()),
                     statuses,
                     raft_client: Arc::new(raft_client),
                 },
@@ -150,6 +163,7 @@ impl HealthServer {
 
         let mut source = self.source;
         let peer_versions = self.state.peer_versions.clone();
+        let peer_dkg_statuses = self.state.peer_dkg_statuses.clone();
         let statuses = self.state.statuses.clone();
         set.spawn(async move {
             while let Some(info) = source.recv().await {
@@ -159,6 +173,9 @@ impl HealthServer {
                     }
                     HealthMessage::PeerVersion { peer, version } => {
                         peer_versions.insert(peer, version);
+                    }
+                    HealthMessage::DkgStatus { peer, status } => {
+                        peer_dkg_statuses.insert(peer, status);
                     }
                 };
             }
@@ -224,11 +241,13 @@ struct ServerHealth {
     pub raft_leader: Option<String>,
     pub frost: Option<FrostStatus>,
     pub peers: Vec<PeerStatus>,
-    pub errors: HashMap<String, String>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub dkg: BTreeMap<String, String>,
+    pub errors: BTreeMap<String, String>,
 }
 
 async fn report_health(State(state): State<HealthState>) -> impl IntoResponse {
-    let mut errors = HashMap::new();
+    let mut errors = BTreeMap::new();
     for entry in state.statuses.iter() {
         let (origin, status) = entry.pair();
         if let HealthStatus::Unhealthy(reason) = status {
@@ -242,31 +261,37 @@ async fn report_health(State(state): State<HealthState>) -> impl IntoResponse {
         }
     }
 
-    let peers: Vec<PeerStatus> = state
-        .peers
-        .iter()
-        .map(|p| {
-            let connected = state
-                .statuses
-                .get(&Origin::Peer(p.id.clone()))
-                .is_some_and(|s| matches!(s.value(), HealthStatus::Healthy));
-            let status = if connected {
-                PeerConnectionStatus::Connected
-            } else if state.id.should_initiate_connection_to(&p.id) {
-                PeerConnectionStatus::TryingToConnect
-            } else {
-                PeerConnectionStatus::WaitingForIncomingConnection
-            };
-            let version = state.peer_versions.get(&p.id).map(|v| v.clone());
-            PeerStatus {
-                name: p.label.clone(),
-                id: p.id.clone(),
-                address: p.address.clone(),
-                version,
-                connection: status,
-            }
-        })
-        .collect();
+    let mut peers = vec![];
+    let mut dkg = BTreeMap::new();
+
+    for peer in &state.peers {
+        let connected = state
+            .statuses
+            .get(&Origin::Peer(peer.id.clone()))
+            .is_some_and(|s| matches!(s.value(), HealthStatus::Healthy));
+        let status = if connected {
+            PeerConnectionStatus::Connected
+        } else if state.id.should_initiate_connection_to(&peer.id) {
+            PeerConnectionStatus::TryingToConnect
+        } else {
+            PeerConnectionStatus::WaitingForIncomingConnection
+        };
+        let version = state.peer_versions.get(&peer.id).map(|v| v.clone());
+        peers.push(PeerStatus {
+            name: peer.label.clone(),
+            id: peer.id.clone(),
+            address: peer.address.clone(),
+            version,
+            connection: status,
+        });
+
+        if connected && let Some(status) = state.peer_dkg_statuses.get(&peer.id) {
+            dkg.insert(peer.label.clone(), status.clone());
+        }
+    }
+    if let Some(status) = state.peer_dkg_statuses.get(&state.id) {
+        dkg.insert("me".to_string(), status.clone());
+    }
 
     let raft_leader = match state.leader_source.borrow().clone() {
         RaftLeader::Myself => Some("me".into()),
@@ -280,6 +305,7 @@ async fn report_health(State(state): State<HealthState>) -> impl IntoResponse {
         raft_leader,
         frost: state.frost.clone(),
         peers,
+        dkg,
         errors,
     };
     let status = if health.healthy {

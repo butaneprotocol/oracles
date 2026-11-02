@@ -10,6 +10,7 @@ use tracing::info;
 
 use crate::{
     config::OracleConfig,
+    health::HealthSink,
     keys,
     network::{ChannelRole, Network, NetworkChannel, NodeId},
 };
@@ -21,10 +22,15 @@ pub struct Keygen {
     max_signers: u16,
     min_signers: u16,
     keys_dir: PathBuf,
+    health: HealthSink,
 }
 
 impl Keygen {
-    pub fn new(config: &OracleConfig, network: &mut Network) -> Result<Self> {
+    pub fn new(
+        config: &OracleConfig,
+        network: &mut Network,
+        health_sink: HealthSink,
+    ) -> Result<Self> {
         let id = network.id.clone();
         let channel = network.keygen_channel();
         let max_signers = config
@@ -45,6 +51,7 @@ impl Keygen {
             max_signers,
             min_signers,
             keys_dir,
+            health: health_sink,
         })
     }
 
@@ -55,6 +62,7 @@ impl Keygen {
             max_signers,
             min_signers,
             keys_dir,
+            health,
         } = self;
 
         info!(
@@ -63,7 +71,7 @@ impl Keygen {
         );
 
         let GeneratedKeys(private_key, public_key) =
-            logic::run(id, channel, max_signers, min_signers).await?;
+            logic::run(id, channel, max_signers, min_signers, health).await?;
         let address = keys::write_frost_keys(&keys_dir, private_key, public_key)?;
         info!("The new frost address is: {address}");
 

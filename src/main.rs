@@ -110,7 +110,7 @@ impl Node {
         };
 
         let keygen = if config.keygen.enabled {
-            Some(Keygen::new(&config, &mut network)?)
+            Some(Keygen::new(&config, &mut network, health_sink.clone())?)
         } else {
             None
         };

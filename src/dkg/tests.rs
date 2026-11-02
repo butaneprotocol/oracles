@@ -4,7 +4,10 @@ use anyhow::Result;
 use futures::{Future, FutureExt};
 use tokio::select;
 
-use crate::network::{NodeId, OutgoingMessage};
+use crate::{
+    health::HealthSink,
+    network::{NodeId, OutgoingMessage},
+};
 
 use super::{
     KeygenMessage,
@@ -24,7 +27,14 @@ struct Participant {
 impl Participant {
     pub fn new(network: &mut TestNetwork, max_signers: u16, min_signers: u16) -> Self {
         let (id, channel) = network.connect();
-        let task = logic::run(id.clone(), channel, max_signers, min_signers).boxed();
+        let task = logic::run(
+            id.clone(),
+            channel,
+            max_signers,
+            min_signers,
+            HealthSink::noop(),
+        )
+        .boxed();
         Self {
             id,
             max_signers,
@@ -90,7 +100,14 @@ impl Participant {
 
     pub async fn reconnect(&mut self, network: &mut TestNetwork) {
         let channel = network.reconnect(&self.id);
-        let task = logic::run(self.id.clone(), channel, self.max_signers, self.min_signers).boxed();
+        let task = logic::run(
+            self.id.clone(),
+            channel,
+            self.max_signers,
+            self.min_signers,
+            HealthSink::noop(),
+        )
+        .boxed();
         self.task = task;
     }
 
