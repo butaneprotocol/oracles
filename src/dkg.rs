@@ -5,7 +5,12 @@ mod tests;
 use logic::GeneratedKeys;
 pub use logic::KeygenMessage;
 
-use crate::{config::OracleConfig, health::HealthSink, keys, network::Network};
+use crate::{
+    config::OracleConfig,
+    health::HealthSink,
+    keys,
+    network::{ChannelRole, Network},
+};
 use anyhow::{Context, Result, anyhow};
 use tokio::{select, task::spawn_blocking};
 use tracing::info;
@@ -23,7 +28,13 @@ pub async fn run(config: &OracleConfig) -> Result<()> {
 
     let id = network.id.clone();
     let channel = network.keygen_channel();
-    let max_signers = config.network.peers.len() as u16 + 1;
+    let max_signers = config
+        .network
+        .peers
+        .iter()
+        .filter(|peer| peer.role.matches(ChannelRole::Dkg))
+        .count() as u16
+        + 1;
     let min_signers = config
         .keygen
         .min_signers

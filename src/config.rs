@@ -13,7 +13,10 @@ use rust_decimal::Decimal;
 use serde::Deserialize;
 use tracing::Level;
 
-use crate::{keys, network::NodeId};
+use crate::{
+    keys,
+    network::{ChannelRole, NodeId},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Asset {
@@ -339,11 +342,30 @@ pub struct KeygenConfig {
     pub min_signers: Option<u16>,
 }
 
+#[derive(Debug, Default, Deserialize, Clone)]
+pub enum PeerRole {
+    #[default]
+    Full,
+    Dkg,
+    Oracle,
+}
+impl PeerRole {
+    pub fn matches(&self, role: ChannelRole) -> bool {
+        match self {
+            Self::Full => true,
+            Self::Dkg => matches!(role, ChannelRole::Dkg),
+            Self::Oracle => matches!(role, ChannelRole::Oracle),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct RawPeerConfig {
     pub label: Option<String>,
     pub address: String,
     pub public_key: String,
+    #[serde(default)]
+    pub role: PeerRole,
 }
 
 #[derive(Debug, Clone)]
@@ -352,6 +374,7 @@ pub struct Peer {
     pub public_key: VerifyingKey,
     pub label: String,
     pub address: String,
+    pub role: PeerRole,
 }
 impl TryFrom<RawPeerConfig> for Peer {
     type Error = anyhow::Error;
@@ -368,6 +391,7 @@ impl TryFrom<RawPeerConfig> for Peer {
             public_key,
             label,
             address: raw.address,
+            role: raw.role,
         })
     }
 }

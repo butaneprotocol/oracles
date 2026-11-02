@@ -12,7 +12,7 @@ pub use channel::{NetworkChannel, NetworkReceiver, NetworkSender};
 use core::Core;
 use std::any::type_name;
 pub use test::TestNetwork;
-pub use types::{IncomingMessage, NodeId, OutgoingMessage};
+pub use types::{ChannelRole, IncomingMessage, NodeId, OutgoingMessage};
 
 mod channel;
 mod core;
@@ -30,7 +30,8 @@ mod derive_workaround {
     use minicbor::{Decode, Encode};
 
     use crate::{
-        dkg::KeygenMessage, raft::RaftMessage, signature_aggregator::signer::SignerMessage,
+        dkg::KeygenMessage, network::ChannelRole, raft::RaftMessage,
+        signature_aggregator::signer::SignerMessage,
     };
 
     #[derive(Decode, Encode, Clone, Debug)]
@@ -41,6 +42,16 @@ mod derive_workaround {
         Raft(#[n(0)] RaftMessage),
         #[n(2)]
         Signer(#[n(0)] SignerMessage),
+    }
+
+    impl Message {
+        pub fn role(&self) -> ChannelRole {
+            match self {
+                Self::Keygen(_) => ChannelRole::Dkg,
+                Self::Raft(_) => ChannelRole::Oracle,
+                Self::Signer(_) => ChannelRole::Oracle,
+            }
+        }
     }
 }
 pub use derive_workaround::Message;

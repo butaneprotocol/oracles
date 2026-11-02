@@ -12,7 +12,7 @@ use tracing::{debug, info, info_span};
 
 use crate::{
     config::OracleConfig,
-    network::{Network, NetworkChannel, NodeId},
+    network::{ChannelRole, Network, NetworkChannel, NodeId},
     price_feed::PriceData,
 };
 
@@ -47,7 +47,14 @@ impl Raft {
         command_source: mpsc::Receiver<RaftCommand>,
     ) -> Self {
         // quorum is set to a majority of expected nodes (which includes ourself!)
-        let quorum = config.network.peers.len().div_ceil(2) + 1;
+        let quorum = config
+            .network
+            .peers
+            .iter()
+            .filter(|peer| peer.role.matches(ChannelRole::Oracle))
+            .count()
+            .div_ceil(2)
+            + 1;
         let heartbeat_freq = config.heartbeat;
         let timeout_freq = config.timeout;
         // If everything is working well, we should produce 1 payload per synthetic,

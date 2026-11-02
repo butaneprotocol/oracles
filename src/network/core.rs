@@ -295,15 +295,29 @@ impl Core {
             let recipients = match &to {
                 Some(id) => {
                     // Sending to one node
-                    let Some(sender) = outgoing_message_txs.get(id) else {
+                    let Some(peer) = self.peers.get(id) else {
                         warn!("Tried sending message to unrecognized node {}", id);
+                        continue;
+                    };
+                    if !peer.role.matches(message.role()) {
+                        warn!("Tried sending message to node with wrong role {}", id);
+                    }
+                    let Some(sender) = outgoing_message_txs.get(id) else {
+                        warn!("Tried sending message to unconnected node {}", id);
                         continue;
                     };
                     vec![(id, sender)]
                 }
                 None => {
-                    // Broadcasting to all nodes
-                    outgoing_message_txs.iter().collect()
+                    // Broadcasting to all nodes with the right role
+                    outgoing_message_txs
+                        .iter()
+                        .filter(|(id, _)| {
+                            self.peers
+                                .get(id)
+                                .is_some_and(|peer| peer.role.matches(message.role()))
+                        })
+                        .collect()
                 }
             };
             for (id, sender) in recipients {
@@ -749,6 +763,9 @@ impl Core {
                             Ok(message) => message,
                             Err(e) => break format!("Failed to decrypt incoming message: {:#}", e),
                         };
+                        if !peer.role.matches(message.role()) {
+                            break format!("Unexpected {:?} message from peer", message.role());
+                        }
                         if let Err(e) = incoming_message_tx
                             .send((peer.id.clone(), message, context))
                             .await
@@ -806,6 +823,9 @@ impl Core {
     }
 
     async fn report_connected(&self, peer: &Peer) {
+        if !peer.role.matches(super::ChannelRole::Oracle) {
+            return;
+        }
         if let Err(e) = self
             .incoming_tx
             .send((
@@ -823,6 +843,9 @@ impl Core {
     }
 
     async fn report_disconnected(&self, peer: &Peer) {
+        if !peer.role.matches(super::ChannelRole::Oracle) {
+            return;
+        }
         if let Err(e) = self
             .incoming_tx
             .send((
