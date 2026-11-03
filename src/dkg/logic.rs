@@ -6,6 +6,7 @@ use std::{
 
 use crate::{
     cbor::{CborDkgRound1Package, CborDkgRound2Package},
+    health::HealthSink,
     network::{NetworkChannel, NetworkSender, NodeId},
 };
 use anyhow::{Result, anyhow};
@@ -142,6 +143,7 @@ pub async fn run(
     channel: NetworkChannel<KeygenMessage>,
     max_signers: u16,
     min_signers: u16,
+    health: HealthSink,
 ) -> Result<GeneratedKeys> {
     let peers_count = max_signers as usize - 1;
 
@@ -155,6 +157,7 @@ pub async fn run(
         let rng = thread_rng();
         part1(identifier, max_signers, min_signers, rng)?
     };
+    health.update_dkg(&id, "Round 1".to_string());
 
     let broadcast_state = Arc::new(RwLock::new(BroadcastState::new(
         sender.clone(),
@@ -212,6 +215,7 @@ pub async fn run(
                         continue;
                     }
                     debug!(%from, "Received new round 1 package");
+                    health.update_dkg(&from, "Round 1".to_string());
 
                     round1_hashes.insert(
                         from_id,
@@ -225,6 +229,7 @@ pub async fn run(
                             session_id,
                             "Round 1 complete! Beginning round 2, waiting for all peers to send round 2 packages"
                         );
+                        health.update_dkg(&id, format!("Round 2 (session {session_id})"));
 
                         round2_packages.clear();
 
@@ -265,6 +270,7 @@ pub async fn run(
                         continue;
                     }
                     debug!(%from, session_id, "Received new round 2 package");
+                    health.update_dkg(&from, format!("Round 2 (session {session_id})"));
 
                     round2_packages.insert(from_id, package);
                     if round2_packages.len() == peers_count {
@@ -276,6 +282,7 @@ pub async fn run(
                             session_id,
                             "Key generation complete! Waiting for all peers to confirm they have generated keys as well"
                         );
+                        health.update_dkg(&id, format!("Done (session {session_id})"));
 
                         generated_keys.replace(GeneratedKeys(key_package, public_key_package));
                         done_sets
@@ -291,6 +298,7 @@ pub async fn run(
                 }
                 KeygenMessage::Done(DoneMessage { session_id }) => {
                     debug!(%from, session_id, "Received new done message");
+                    health.update_dkg(&from, format!("Done (session {session_id})"));
                     done_sets.entry(session_id).or_default().insert(from);
                 }
             }

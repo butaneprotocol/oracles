@@ -2,52 +2,79 @@ mod logic;
 #[cfg(test)]
 mod tests;
 
+use std::path::PathBuf;
+
 use logic::GeneratedKeys;
 pub use logic::KeygenMessage;
-
-use crate::{config::OracleConfig, health::HealthSink, keys, network::Network};
-use anyhow::{Context, Result, anyhow};
-use tokio::{select, task::spawn_blocking};
 use tracing::info;
 
-pub async fn run(config: &OracleConfig) -> Result<()> {
-    let keys_dir = keys::get_keys_directory()?;
+use crate::{
+    config::OracleConfig,
+    health::HealthSink,
+    keys,
+    network::{ChannelRole, Network, NetworkChannel, NodeId},
+};
+use anyhow::{Result, anyhow};
 
-    // Log where the keys will be saved
-    info!(
-        "Running in DKG mode. Will generate frost keys into {}.",
-        keys_dir.display()
-    );
+pub struct Keygen {
+    id: NodeId,
+    channel: NetworkChannel<KeygenMessage>,
+    max_signers: u16,
+    min_signers: u16,
+    keys_dir: PathBuf,
+    health: HealthSink,
+}
 
-    let mut network = Network::new(&config.network, HealthSink::noop());
-
-    let id = network.id.clone();
-    let channel = network.keygen_channel();
-    let max_signers = config.network.peers.len() as u16 + 1;
-    let min_signers = config
-        .keygen
-        .min_signers
-        .ok_or_else(|| anyhow!("Must specify min_signers"))?;
-
-    select! {
-        result = network.listen() => {
-            result?;
-            return Err(anyhow!("Network shut down prematurely"));
-        }
-        result = logic::run(id, channel, max_signers, min_signers) => {
-            let GeneratedKeys(private_key, public_key) = result?;
-            let address = keys::write_frost_keys(&keys_dir, private_key, public_key).context("Could not save frost keys")?;
-            info!("The new frost address is: {}", address);
-
-            // Wait for keyboard input, so these are convenient to shut down while testing locally.
-            // On a real server, this just waits "forever".
-            spawn_blocking(|| {
-                info!("Press enter to shut down.");
-                std::io::stdin().read_line(&mut String::new()).unwrap();
-            })
-            .await?;
-        }
+impl Keygen {
+    pub fn new(
+        config: &OracleConfig,
+        network: &mut Network,
+        health_sink: HealthSink,
+    ) -> Result<Self> {
+        let id = network.id.clone();
+        let channel = network.keygen_channel();
+        let max_signers = config
+            .network
+            .peers
+            .iter()
+            .filter(|peer| peer.role.matches(ChannelRole::Dkg))
+            .count() as u16
+            + 1;
+        let min_signers = config
+            .keygen
+            .min_signers
+            .ok_or_else(|| anyhow!("Must specify min_signers"))?;
+        let keys_dir = keys::get_keys_directory()?;
+        Ok(Self {
+            id,
+            channel,
+            max_signers,
+            min_signers,
+            keys_dir,
+            health: health_sink,
+        })
     }
 
-    Ok(())
+    pub async fn run(self) -> Result<()> {
+        let Self {
+            id,
+            channel,
+            max_signers,
+            min_signers,
+            keys_dir,
+            health,
+        } = self;
+
+        info!(
+            "Running in DKG mode. Will generate frost keys into {}.",
+            keys_dir.display()
+        );
+
+        let GeneratedKeys(private_key, public_key) =
+            logic::run(id, channel, max_signers, min_signers, health).await?;
+        let address = keys::write_frost_keys(&keys_dir, private_key, public_key)?;
+        info!("The new frost address is: {address}");
+
+        Ok(())
+    }
 }

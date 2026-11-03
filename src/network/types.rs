@@ -35,3 +35,9 @@ pub struct IncomingMessage<T> {
     pub data: T,
     pub span: Span,
 }
+
+#[derive(Clone, Copy, Debug)]
+pub enum ChannelRole {
+    Dkg,
+    Oracle,
+}
