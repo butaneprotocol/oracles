@@ -1,5 +1,3 @@
 [advisories]
 informational_warnings = []
-ignore = [
-    "RUSTSEC-2026-0235", # rkyv vulnerability, but we don't actually use it
-]
+ignore = []
